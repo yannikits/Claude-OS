@@ -44,7 +44,7 @@ IF ERRORLEVEL 1 (
 :: ---- 3. Claude-Binary kopieren ----
 echo.
 echo [3/5] Claude-Binary kopieren...
-SET "CLAUDE_SRC=%USERPROFILE%\.local\bin\claude"
+SET "CLAUDE_SRC=%USERPROFILE%\.local\bin\claude.exe"
 SET "CLAUDE_DST=%PORTABLE_ROOT%\bin\claude.exe"
 IF EXIST "%CLAUDE_SRC%" (
     copy /Y "%CLAUDE_SRC%" "%CLAUDE_DST%"
@@ -75,7 +75,7 @@ SET "VAULT_DIR=%PORTABLE_ROOT%\vault"
 IF NOT EXIST "%VAULT_DIR%\.git" (
     git -C "%VAULT_DIR%" init
     echo.
-    SET /P VAULT_REMOTE=GitHub-URL des privaten Vault-Repos (leer = spaeter setzen):
+    SET /P VAULT_REMOTE=GitHub-URL des privaten Vault-Repos ^(leer = spaeter setzen^):
     IF NOT "!VAULT_REMOTE!"=="" (
         git -C "%VAULT_DIR%" remote add origin "!VAULT_REMOTE!"
         echo Remote gesetzt: !VAULT_REMOTE!
