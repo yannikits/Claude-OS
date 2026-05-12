@@ -45,7 +45,18 @@ if (Test-Path $claudeDir) {
         Write-Host "Junction bereits vorhanden." -ForegroundColor Green
     } else {
         Write-Host "Sichere .claude nach $backupDir ..."
-        Rename-Item $claudeDir $backupDir
+        try {
+            Rename-Item $claudeDir $backupDir -ErrorAction Stop
+        } catch {
+            Write-Host "Umbenennen fehlgeschlagen - versuche robocopy..." -ForegroundColor Yellow
+            robocopy $claudeDir $backupDir /E /COPYALL /NFL /NDL /NJH /NJS | Out-Null
+            Remove-Item $claudeDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $claudeDir) {
+                Write-Host ""
+                Write-Host "FEHLER: .claude ist gesperrt. Bitte Claude Code zuerst schliessen, dann start.bat neu starten." -ForegroundColor Red
+                exit 1
+            }
+        }
         cmd /c "mklink /J `"$claudeDir`" `"$configDir`"" | Out-Null
         $createdJunction = $true
         Write-Host "Junction erstellt." -ForegroundColor Green
