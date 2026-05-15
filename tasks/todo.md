@@ -11,14 +11,14 @@
 
 **Ziel:** Sauberer Ausgangspunkt; USB-Reste raus, Branch + Tracking-Struktur steht.
 
-- [ ] Branch `feature/claude-os-v1` aus `main` erstellen
-- [ ] USB-Sync-Scripts löschen: `sync-from-usb.bat`, `sync-to-usb.bat`
-- [ ] Legacy-Launcher in `legacy/` verschieben: `start.bat`, `start.ps1`, `setup.bat`, `sync-vault-pull.bat`, `sync-vault-push.bat`
-- [ ] GitHub-Issues: Epic + 1 Tracking-Issue pro Phase (oder lokale Issue-Liste falls kein GitHub-Sync gewünscht)
-- [ ] `tasks/todo.md` (diese Datei) committen
-- [ ] `tasks/lessons.md` initialisieren
+- [x] Branch `feature/claude-os-v1` aus `main` erstellen (2026-05-16)
+- [x] USB-Sync-Scripts löschen: `sync-from-usb.bat`, `sync-to-usb.bat` → Commit `a300592`
+- [x] Legacy-Launcher in `legacy/` verschieben: `start.bat`, `start.ps1`, `setup.bat`, `sync-vault-pull.bat`, `sync-vault-push.bat` → Commit `954ee9b`
+- [ ] GitHub-Issues: Epic + 1 Tracking-Issue pro Phase (oder lokale Issue-Liste falls kein GitHub-Sync gewünscht) — *pending User-Entscheidung*
+- [x] `tasks/todo.md` (diese Datei) committen → Commit `1466bd5`
+- [x] `tasks/lessons.md` initialisieren → Commit `1466bd5`
 
-**Test-Kriterium:** `git log --oneline` zeigt Cleanup-Commits; `git ls-files | grep -E "sync.*usb"` leer.
+**Test-Kriterium:** `git log --oneline` zeigt Cleanup-Commits; `git ls-files | grep -E "sync.*usb"` leer. **Status: erfüllt (3/3 Commits, sauberer Working-Tree).**
 
 ---
 
@@ -263,4 +263,18 @@ Vollständige Roadmap mit Begründung: [docs/future.md](../docs/future.md).
 
 ## Review-Sektion
 
-(wird nach Abschluss jeder Phase ergänzt)
+### Phase 0 — abgeschlossen 2026-05-16
+
+**Ausführungsdauer:** 1 Bash-Call, ~5 Sekunden.
+
+**Output:**
+- Branch `feature/claude-os-v1` aktiv
+- Commits:
+  - `a300592` chore: remove USB sync layer (2 Files gelöscht, 53 Lines weg)
+  - `954ee9b` chore: move legacy launchers to legacy/ (5 Files verschoben)
+  - `1466bd5` docs: add 14 ADRs and Phase 0 task tracking (18 neue Files, 1758 Lines)
+- Working-Tree clean
+
+**Offen:** GitHub-Issue-Anlage (Epic + 8 Phase-Tracker) wartet auf User-Entscheidung.
+
+**Nicht gepushed:** Branch lebt nur lokal. Push wenn User es freigibt.
