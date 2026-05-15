@@ -26,18 +26,18 @@
 
 **Ziel:** Lauffähiges TypeScript-Projekt mit `claude-os doctor` als ersten Smoke-Test.
 
-- [ ] `package.json` (Node ≥ 20, ESM, scripts: `build`, `test`, `check`, `format`, `dev`); Deps: `@sinclair/typebox`, `pino`, `pino-roll`, `pino-pretty` (dev), `commander@^12`, `chokidar@^5`, `simple-git`, `@napi-rs/keyring`, `husky`, `lint-staged`
-- [ ] `tsconfig.json` strict, Pfad-Aliase `@core/*`, `@domains/*`
-- [ ] **biome v2.3 (per ADR-0014)**: `biome.json` mit `recommended: true`, strict TS-Rules; `npm run check` und `npm run format` als Shortcuts
-- [ ] **husky + lint-staged**: Pre-Commit `biome check --apply` auf staged Files; non-bypassable ohne Begründungs-Commit
-- [ ] Jest-Setup mit Coverage-Threshold 70 %
-- [ ] `src/core/environment/root-resolver.ts` mit Env-Var- und Repo-Detect-Fallback
+- [x] `package.json` (Node ≥ 20, ESM, scripts; current-version Deps post npm view audit) → Commit `076acd5` + `9c3b432` (commander v14, pino v10, typebox v0.34, keyring v1.3 — alle latest)
+- [x] `tsconfig.json` strict, Pfad-Aliase (`baseUrl` entfernt für TS 7 compat, `types: ["node"]` für globals) → Commit `076acd5` + `9c3b432`
+- [x] **biome v2.3 (per ADR-0014)**: `biome.json` mit `recommended: true`, strict TS-Rules → Commit `2dafcea` (user-authored wegen config-protection-Hook)
+- [ ] **husky + lint-staged**: lint-staged-Config in package.json, husky-Init noch nicht ausgeführt (deferred zu Phase 1c)
+- [x] **Vitest** statt Jest (pivot wegen ESM-Pain, siehe `lessons.md` 2026-05-16 Eintrag); Coverage-Threshold 70 % in `vitest.config.ts` → Commit `9c3b432`
+- [x] `src/core/environment/root-resolver.ts` mit Env-Var- und Repo-Detect-Fallback + `types.ts` + `index.ts` → Commit `9c3b432`
 - [ ] `src/core/doctor/` — Checks: Mount, Node-Version, Git-Verfügbarkeit, `bin/claude.exe`-Existenz, Schreibrechte
 - [ ] `src/cli/index.ts` mit **commander v12 (per Researcher-Spike)**, Command `doctor` aktiv; globaler `--json`-Flag mit zentralem Renderer in `src/cli/presenters/`
 - [ ] `src/core/logging/` — **pino-Singleton (per ADR-0013)** mit Redaction-Path-Liste in `redact-paths.ts` (Pflicht-Code-Review-Gate); `pino-roll` für `%APPDATA%/claude-os/logs/`, `pino.destination(2)` für Tauri-Stderr-Mirror (ADR-0006)
 - [ ] Redaction-Test: künstliches Secret in Log-Object → Output enthält `[REDACTED]`, nicht das Secret
 - [ ] Shims: `claude-os.cmd` (Windows) + `claude-os` (POSIX)
-- [ ] Unit-Tests Root-Resolver (3 Szenarien: Env-Var gesetzt / Repo-Detect / beides fehlt)
+- [x] Unit-Tests Root-Resolver: 11 Tests + 9 detectCloudProvider-Tests = 20 grün → Commit `9c3b432`
 - [ ] Unit-Tests Doctor-Checks (gemockt)
 - [ ] `npm link` Smoke: `claude-os doctor` grün auf aktueller Maschine
 - [ ] README-Skelett (Deutsch, Bootstrap-Sektion)
@@ -275,6 +275,29 @@ Vollständige Roadmap mit Begründung: [docs/future.md](../docs/future.md).
   - `1466bd5` docs: add 14 ADRs and Phase 0 task tracking (18 neue Files, 1758 Lines)
 - Working-Tree clean
 
-**Offen:** GitHub-Issue-Anlage (Epic + 8 Phase-Tracker) wartet auf User-Entscheidung.
+**Offen:** GitHub-Issue-Anlage übersprungen (User-Entscheidung "lokale issues").
 
 **Nicht gepushed:** Branch lebt nur lokal. Push wenn User es freigibt.
+
+### Phase 1a — abgeschlossen 2026-05-16
+
+**Commits:**
+- `076acd5` Node-Bootstrap-Config (package.json + tsconfig.json + .editorconfig + .gitignore-Erweiterung)
+- `2dafcea` biome.json (User-authored wegen config-protection-Hook)
+- `42a50dd` Phase-0-Tracking-Update
+
+**Output:** Funktionierende npm-Konfiguration; 139 Packages installiert nach Version-Audit, 0 vulnerabilities.
+
+### Phase 1b — abgeschlossen 2026-05-16
+
+**Commit:** `9c3b432` — environment-Domain mit root-resolver + vitest-Setup.
+
+**Tech-Pivots:**
+- Jest → Vitest (ESM-Pain-Avoidance, dokumentiert in `lessons.md`)
+- Deprecated `baseUrl` aus tsconfig entfernt (TS 7 compat)
+- Major-Bumps auf aktuelle Versionen post `npm view`-Audit (commander v14, pino v10, typescript v6, @types/node v25, biome v2.4, vitest v4)
+
+**Verifikation:**
+- `npx tsc --noEmit` → exit 0
+- `npm test` → 20/20 grün (11 resolveRoot-Tests + 9 detectCloudProvider-Tests)
+- Coverage-Threshold 70% in vitest.config.ts gesetzt
