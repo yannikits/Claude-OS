@@ -1,31 +1,76 @@
 /**
  * `claude-os ai` — forwards all subsequent args to the Anthropic
- * `bin/claude{,.exe}` binary via the claude-bridge spawn-wrapper.
+ * `bin/claude{,.exe}` binary via the streaming claude-bridge spawn
+ * wrapper (Phase 3b/3c).
  *
- * Stub (Phase 3a). Full implementation lands in Phase 3c, where this
- * command becomes the user-facing entry-point for AI sessions and
- * propagates the child exit-code 1:1. The spawn-wrapper itself
- * (Phase 3b) handles streaming stdin/stdout without buffering — the
- * fix for the reproducible 120s buffer-cutoff regression
- * (Memory 569 / 577 / 578).
+ * Behavior:
+ *   - `--root` is honored from the global option layer
+ *   - All other args land in the child via `command.args` (we set
+ *     `allowUnknownOption(true)` so commander does not reject claude's
+ *     own flags) and are passed verbatim
+ *   - Child exit code is propagated 1:1; binary-not-found exits 127
  *
  * @module @cli/commands/ai
  */
 import type { Command } from 'commander';
+import { resolveRoot, RootNotFoundError } from '../../core/environment/index.js';
+import {
+  BinaryNotFoundError,
+  spawnClaudeBridge,
+} from '../../domains/claude-bridge/index.js';
+
+interface GlobalOpts {
+  readonly root?: string;
+}
+
+function exitCodeFor(exitCode: number | null, signal: NodeJS.Signals | null): number {
+  if (exitCode !== null) return exitCode;
+  if (signal === 'SIGINT') return 130;
+  if (signal === 'SIGTERM') return 143;
+  if (signal === 'SIGKILL') return 137;
+  return signal === null ? 0 : 1;
+}
 
 export function registerAiCommand(program: Command): void {
   program
     .command('ai')
     .description(
-      'Forward args to the Anthropic claude binary (Phase 3c). Stub — not yet implemented.',
+      'Forward args to the Anthropic claude binary; streams stdio without buffering.',
     )
     .allowUnknownOption(true)
     .helpOption(false)
-    .action(() => {
-      // biome-ignore lint/suspicious/noConsole: CLI stub output
-      console.log(
-        'claude-os ai: not yet implemented (Phase 3c). Will spawn bin/claude{,.exe} with streamed stdio.',
-      );
-      process.exit(0);
+    .argument('[claudeArgs...]', 'arguments to forward to the claude binary')
+    .action(async (claudeArgs: readonly string[], _opts: unknown, command: Command) => {
+      const globals = command.optsWithGlobals<GlobalOpts>();
+      // Mix positional and unknown-option args so flags like `-p hello`
+      // are forwarded as-is. commander stashes unknowns in command.args
+      // when allowUnknownOption is enabled.
+      const args = [...claudeArgs, ...command.args.slice(claudeArgs.length)];
+
+      let rootPath: string | undefined;
+      try {
+        const root = resolveRoot(
+          globals.root === undefined ? {} : { explicit: globals.root },
+        );
+        rootPath = root.path;
+      } catch (err) {
+        if (!(err instanceof RootNotFoundError)) throw err;
+        // No root — bridge will fall back to $PATH for the binary.
+      }
+
+      try {
+        const result = await spawnClaudeBridge({
+          args,
+          ...(rootPath === undefined ? {} : { rootPath }),
+        });
+        process.exit(exitCodeFor(result.exitCode, result.signal));
+      } catch (err) {
+        if (err instanceof BinaryNotFoundError) {
+          // biome-ignore lint/suspicious/noConsole: user-facing error
+          console.error(`claude-os ai: ${err.message}`);
+          process.exit(127); // POSIX "command not found"
+        }
+        throw err;
+      }
     });
 }
