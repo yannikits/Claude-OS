@@ -10,6 +10,13 @@
  */
 import { Command } from 'commander';
 import { registerDoctorCommand } from './commands/doctor.js';
+import { registerUpdateCommand } from './commands/update.js';
+import { registerVaultCommand } from './commands/vault.js';
+import { registerCatalogCommand } from './commands/catalog.js';
+import { registerSecretsCommand } from './commands/secrets.js';
+import { registerAgentCommand } from './commands/agent.js';
+import { registerAuthCommand } from './commands/auth.js';
+import { registerAiCommand } from './commands/ai.js';
 
 const program = new Command();
 
@@ -27,6 +34,13 @@ program
   .option('-v, --verbose', 'Verbose logging');
 
 registerDoctorCommand(program);
+registerUpdateCommand(program);
+registerVaultCommand(program);
+registerCatalogCommand(program);
+registerSecretsCommand(program);
+registerAgentCommand(program);
+registerAuthCommand(program);
+registerAiCommand(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   // biome-ignore lint/suspicious/noConsole: top-level error reporter goes to stderr
