@@ -36,7 +36,7 @@
 - [x] `src/cli/index.ts` mit **commander v14**, Command `doctor` aktiv; globaler `--json`-Flag mit zentralem Renderer in `src/cli/presenters/doctor.ts` (ASCII-Marker für cmd.exe-Compat) → Commit `5a3b6ab`
 - [x] `src/core/logging/` — pino-Factory mit Redaction-Path-Liste in `redact-paths.ts` (Pflicht-Code-Review-Gate); pino-roll + Stderr-Mirror deferred zu Phase 6 (per ADR-0013 §3 Production-Transport) → Commit `983c805`
 - [x] Redaction-Tests: 15 Tests, Pflicht-`[REDACTED]`-Coverage für ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_*, GITHUB_TOKEN, *.password, *.token, credentials.* → Commit `983c805`
-- [ ] Shims: `claude-os.cmd` (Windows) + `claude-os` (POSIX)
+- [x] Shims: `claude-os.cmd` (Windows) + `claude-os` (POSIX, +x bit gesetzt via git index) am Repo-Root — 2026-05-17. Smoke: `./claude-os doctor --json` retourniert valid JSON über den Shim.
 - [x] Unit-Tests Root-Resolver: 11 Tests + 9 detectCloudProvider-Tests = 20 grün → Commit `9c3b432`
 - [x] Unit-Tests Doctor-Checks: 11 tests in checks.test.ts + 6 tests in runner.test.ts → 36 total (env=20, doctor=16), alle grün → Commit `5a3b6ab`
 - [ ] `npm link` Smoke: `claude-os doctor` grün auf aktueller Maschine
