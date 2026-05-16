@@ -1,0 +1,236 @@
+/**
+ * GitService — central simple-git abstraction per ADR-0008.
+ *
+ * All domain code MUST go through GitService; importing `simple-git`
+ * directly outside this module is forbidden. This lets us drop in a
+ * different backend later (e.g. Rust libgit2 sidecar per ADR-0008 §32)
+ * without touching domain code.
+ *
+ * Error policy: simple-git's `GitError` is converted to the typed
+ * hierarchy declared in `./types.ts`. Callers pattern-match on the
+ * specific error subclass; raw stderr is never re-thrown.
+ *
+ * @module @core/git/git-service
+ */
+import { simpleGit, type SimpleGit, type SimpleGitOptions } from 'simple-git';
+import {
+  GitError,
+  GitLockfileError,
+  GitMergeConflictError,
+  GitNotInstalledError,
+  type CommitResult,
+  type GitConfigScope,
+  type GitStatusSummary,
+  type PushResult,
+} from './types.js';
+
+interface GitServiceOpts {
+  /** Inject a SimpleGit factory (primarily for tests). */
+  readonly simpleGitFn?: typeof simpleGit;
+  /** Suppress timeout-related retries. Default: no timeout option set. */
+  readonly options?: Partial<SimpleGitOptions>;
+}
+
+function mapError(err: unknown, hint?: string): GitError {
+  if (err instanceof GitError) return err;
+  const raw = err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+
+  // `spawn ... ENOENT` from Node's child_process means the binary itself
+  // is missing — when simple-git emits this it means our git binary cannot
+  // be located, regardless of how it's named (PATH, customBinary, etc.).
+  if (
+    lower.includes('git: command not found') ||
+    lower.includes('git was not found') ||
+    /spawn .+ enoent/.test(lower)
+  ) {
+    return new GitNotInstalledError(
+      `System git is not available: ${raw}${hint === undefined ? '' : ` (${hint})`}`,
+    );
+  }
+
+  const lockMatch = /([^\s]*index\.lock|HEAD\.lock)/i.exec(raw);
+  if (
+    lower.includes('index.lock') ||
+    lower.includes('head.lock') ||
+    lower.includes('another git process')
+  ) {
+    return new GitLockfileError(`Git lockfile blocks operation: ${raw}`, lockMatch?.[1] ?? '');
+  }
+
+  if (
+    lower.includes('conflict') ||
+    lower.includes('automatic merge failed') ||
+    lower.includes('merge conflict')
+  ) {
+    return new GitMergeConflictError(`Merge conflict: ${raw}`, []);
+  }
+
+  return new GitError(raw);
+}
+
+const CONFLICTED_PORCELAIN = new Set([
+  'UU', 'AA', 'DD', 'UA', 'AU', 'DU', 'UD',
+]);
+
+function parsePorcelainLine(
+  line: string,
+  summary: {
+    staged: string[];
+    modified: string[];
+    untracked: string[];
+    conflicted: string[];
+    deleted: string[];
+  },
+): void {
+  if (line.length < 3) return;
+  const idx = line[0] ?? ' ';
+  const wt = line[1] ?? ' ';
+  const path = line.slice(3).trim();
+  if (path.length === 0) return;
+
+  const xy = `${idx}${wt}`;
+  if (CONFLICTED_PORCELAIN.has(xy)) {
+    summary.conflicted.push(path);
+    return;
+  }
+  if (idx === '?' && wt === '?') {
+    summary.untracked.push(path);
+    return;
+  }
+  if (idx !== ' ' && idx !== '?') summary.staged.push(path);
+  if (wt === 'M') summary.modified.push(path);
+  if (wt === 'D' || idx === 'D') summary.deleted.push(path);
+}
+
+export class GitService {
+  readonly workTree: string;
+  private readonly git: SimpleGit;
+
+  constructor(workTree: string, opts: GitServiceOpts = {}) {
+    this.workTree = workTree;
+    const factory = opts.simpleGitFn ?? simpleGit;
+    this.git = factory(workTree, opts.options);
+  }
+
+  async version(): Promise<string> {
+    try {
+      const v = await this.git.version();
+      return `git ${v.major}.${v.minor}.${v.patch}`;
+    } catch (err) {
+      throw mapError(err, 'is `git` installed and on PATH?');
+    }
+  }
+
+  async getCurrentBranch(): Promise<string> {
+    try {
+      const branch = await this.git.revparse(['--abbrev-ref', 'HEAD']);
+      return branch.trim();
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  async status(): Promise<GitStatusSummary> {
+    let raw: string;
+    try {
+      raw = await this.git.raw(['status', '--porcelain=v1']);
+    } catch (err) {
+      throw mapError(err);
+    }
+    const summary = {
+      staged: [] as string[],
+      modified: [] as string[],
+      untracked: [] as string[],
+      conflicted: [] as string[],
+      deleted: [] as string[],
+    };
+    for (const line of raw.split(/\r?\n/)) {
+      if (line.length === 0) continue;
+      parsePorcelainLine(line, summary);
+    }
+    return {
+      clean:
+        summary.staged.length === 0 &&
+        summary.modified.length === 0 &&
+        summary.untracked.length === 0 &&
+        summary.conflicted.length === 0 &&
+        summary.deleted.length === 0,
+      ...summary,
+    };
+  }
+
+  async addAll(): Promise<void> {
+    try {
+      await this.git.add('.');
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  async commit(message: string): Promise<CommitResult> {
+    try {
+      const result = await this.git.commit(message);
+      const branch = await this.getCurrentBranch();
+      return { sha: result.commit, branch, message };
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  async push(remote = 'origin', branch?: string): Promise<PushResult> {
+    const target = branch ?? (await this.getCurrentBranch());
+    try {
+      await this.git.push(remote, target);
+      return { pushed: true, remote, branch: target };
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  async pull(remote = 'origin', branch?: string): Promise<void> {
+    const target = branch ?? (await this.getCurrentBranch());
+    try {
+      await this.git.pull(remote, target);
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  async setConfig(key: string, value: string, scope: GitConfigScope = 'local'): Promise<void> {
+    try {
+      const scopeFlag = scope === 'local' ? [] : [`--${scope}`];
+      await this.git.raw(['config', ...scopeFlag, key, value]);
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  async getConfig(key: string, scope: GitConfigScope = 'local'): Promise<string | null> {
+    try {
+      const scopeFlag = scope === 'local' ? [] : [`--${scope}`];
+      const value = await this.git.raw(['config', ...scopeFlag, '--get', key]);
+      const trimmed = value.trim();
+      return trimmed.length === 0 ? null : trimmed;
+    } catch (err) {
+      // simple-git returns non-zero exit for "key not found" — treat as null.
+      if (err instanceof Error && /exit code 1/i.test(err.message)) return null;
+      throw mapError(err);
+    }
+  }
+
+  async init(args: readonly string[] = []): Promise<void> {
+    try {
+      await this.git.init([...args]);
+    } catch (err) {
+      throw mapError(err);
+    }
+  }
+
+  /** Direct simple-git escape hatch (avoid in new code — prefer typed methods). */
+  raw(args: readonly string[]): Promise<string> {
+    return this.git.raw([...args]).catch((err) => {
+      throw mapError(err);
+    });
+  }
+}

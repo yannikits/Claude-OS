@@ -10,5 +10,6 @@ export {
   checkClaudeBinary,
   checkMountReachable,
   checkWritePermission,
+  checkWindowsLongPaths,
 } from './checks.js';
 export type { CheckResult, DoctorReport, CheckSeverity, CheckFn } from './types.js';

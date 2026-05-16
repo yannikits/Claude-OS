@@ -11,6 +11,7 @@ import {
   checkClaudeBinary,
   checkMountReachable,
   checkWritePermission,
+  checkWindowsLongPaths,
 } from './checks.js';
 
 function summarize(checks: readonly CheckResult[], totalDurationMs: number): DoctorReport {
@@ -51,6 +52,7 @@ export async function runDoctor(
       checkGitAvailable(),
       checkClaudeBinary(root.path),
       checkWritePermission(root.path),
+      checkWindowsLongPaths(),
     ]);
     return summarize(checks, Date.now() - startedAt);
   }
@@ -64,6 +66,10 @@ export async function runDoctor(
     hint: 'Set $CLAUDE_OS_ROOT or run claude-os from within a claude-os repo',
     durationMs: 0,
   };
-  const independent = await Promise.all([checkNodeVersion(), checkGitAvailable()]);
+  const independent = await Promise.all([
+    checkNodeVersion(),
+    checkGitAvailable(),
+    checkWindowsLongPaths(),
+  ]);
   return summarize([rootResolutionFail, ...independent], Date.now() - startedAt);
 }
