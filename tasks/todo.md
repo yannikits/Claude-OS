@@ -47,10 +47,12 @@
 
 **Test-Kriterium:** `npm test` + `npm run lint` grün; `claude-os doctor` grüner Status.
 
-### Phase 1.5 — Git-Metadaten-Migration (2 h, eingebettet)
+### Phase 1.5 / Phase 1g — Git-Metadaten-Migration (abgeschlossen 2026-05-16)
 
-- [ ] `claude-os doctor --migrate-git-metadata`: verschiebt `vault/.git/` nach `%APPDATA%/claude-os/git-metadata/vault.git/` via `git init --separate-git-dir`
-- [ ] Idempotenz-Test: zweiter Aufruf ist No-Op
+- [x] `claude-os doctor --migrate-git-metadata`: verschiebt `vault/.git/` nach `%APPDATA%/claude-os/git-metadata/vault.git/` via `git init --separate-git-dir` (Standalone-Modus — skippt regulärer Check-Suite). Implementiert in `src/core/git-metadata/migrator.ts` mit 5 States (`not-needed`, `no-git-dir`, `already-migrated`, `migrated`, `error`).
+- [x] Idempotenz-Test: zweiter Aufruf erkennt gitfile + canonical path und retournt `already-migrated` ohne FS-Mutation.
+- [x] Neue paths-Domain `src/core/paths/`: plattform-bewusste per-machine Pfade (win32 `%APPDATA%/claude-os/`, POSIX `${XDG_CONFIG_HOME:-~/.config}/claude-os/`) mit `$CLAUDE_OS_DATA_DIR`-Override für Tests; expose `gitMetadataDir`, `dataDir`, `logsDir` + `externalGitDirFor(repoName)`.
+- [x] Tests: 13 paths-Tests + 8 migrator-Tests (real git init via simple-git, Idempotenz-Roundtrip, Gitfile-Pointing-Elsewhere-Error, Clobber-Prevention, custom workTreeName).
 
 ---
 
@@ -343,3 +345,24 @@ Vollständige Roadmap mit Begründung: [docs/future.md](../docs/future.md).
 - `npm run build` → dist/ populated
 - Real Smoke-Test in claude-portable: 4 OK + 1 WARN (claude-binary fehlt erwartungsgemäß), Overall WARN, exit 0
 - `claude-os doctor --json` produces valid JSON
+
+### Phase 1g — abgeschlossen 2026-05-16
+
+**Output:** `--migrate-git-metadata` Standalone-Flag am `doctor`-Command. Move-Logic via `git init --separate-git-dir`. Neue paths-Domain als Foundation für Phase 2/5/6.
+
+**Files (7 neu + 2 Edits):**
+- `src/core/paths/{types,machine-paths,index}.ts` — plattform-bewusste per-machine Pfade
+- `src/core/git-metadata/{types,migrator,index}.ts` — idempotenter Migrator
+- `src/cli/presenters/migration.ts` — Text + JSON Output
+- `src/cli/commands/doctor.ts` — `--migrate-git-metadata` Flag wired
+- Tests: `tests/core/paths/machine-paths.test.ts`, `tests/core/git-metadata/migrator.test.ts`
+
+**Lessons:**
+- Node's `fs.realpathSync` resolves Symlinks aber NICHT Windows-8.3-Short-Names. Für `REAPER~1` → `reapertakashi` braucht es `fs.realpathSync.native` (OS-Implementation, Windows-spezifisch funktional). Geloggt in `lessons.md`.
+- `path.resolve`/`path.join` sind runtime-platform-fest. Für Cross-Platform-Tests einer plattform-bewussten Module muss man explizit `path.posix.*` / `path.win32.*` dispatchen — sonst kollabiert die POSIX-Branch auf Windows-Runnern zu `C:\home\test\...`.
+
+**Verifikation:**
+- `npx tsc --noEmit` → exit 0
+- `npm test` → 88/88 grün (+21 neue Tests: 13 paths + 8 migrator)
+- `npm run build` → dist/ populated
+- Real Smoke: `node dist/cli/index.js doctor --migrate-git-metadata --json` retourniert `no-git-dir` korrekt (kein vault/ im claude-portable repo), externalGitDir resolved nach `%APPDATA%\claude-os\git-metadata\vault.git`

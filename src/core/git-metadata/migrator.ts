@@ -8,7 +8,14 @@
  *
  * @module @core/git-metadata/migrator
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { externalGitDirFor } from '../paths/index.js';
@@ -30,6 +37,20 @@ interface MigrateOpts {
 }
 
 const GITFILE_LINE = /^gitdir:\s*(.+?)\s*$/m;
+
+/**
+ * Normalises a path for equality comparison. Uses the platform-native
+ * realpath which on Windows expands 8.3 short-name forms (e.g.
+ * `REAPER~1` → `reapertakashi`) and on POSIX resolves symlinks.
+ * Falls back to a plain `resolve()` when the path does not exist.
+ */
+function canonical(p: string): string {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return resolve(p);
+  }
+}
 
 function buildResult(
   state: MigrationState,
@@ -146,7 +167,7 @@ export async function migrateGitMetadata(opts: MigrateOpts): Promise<MigrationRe
         { error: 'Malformed gitfile — manual repair required.' },
       );
     }
-    if (resolve(pointsAt) === resolve(externalGitDir)) {
+    if (canonical(pointsAt) === canonical(externalGitDir)) {
       return buildResult(
         'already-migrated',
         workTree,
@@ -225,7 +246,7 @@ export async function migrateGitMetadata(opts: MigrateOpts): Promise<MigrationRe
 
   // Post-condition verification.
   const verifyTarget = readGitfileTarget(dotGit, workTree);
-  if (verifyTarget === null || resolve(verifyTarget) !== resolve(externalGitDir)) {
+  if (verifyTarget === null || canonical(verifyTarget) !== canonical(externalGitDir)) {
     return buildResult(
       'error',
       workTree,

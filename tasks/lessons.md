@@ -100,3 +100,23 @@ Format pro Eintrag:
 **Lektion:** Für greenfield ESM+TypeScript-Projekte in 2026 ist Vitest die Default-Wahl, nicht Jest. Jest+ESM ist seit Jahren als "experimental" markiert und das Setup-Overhead ist real. Vitest-Migration ist trivial (gleiche API), Vitest-First-Setup ist trivial (10 Zeilen `vitest.config.ts`).
 
 **Anwendung:** Wenn ein Plan eine Library-Default-Wahl trifft die später als suboptimal erkannt wird (hier: Jest), während des Implementings KORREKT entscheiden statt der Plan-Zementierung zu folgen. Plan-Updates dokumentieren (lessons.md + Commit-Begründung), nicht stillschweigend ändern.
+
+---
+
+## 2026-05-16 — Windows 8.3-Short-Names brauchen `realpathSync.native`
+
+**Situation:** Migrator-Tests scheiterten an Post-Migration-Verifikation: `os.tmpdir()` retourniert `C:\Users\REAPER~1\AppData\Local\Temp` (8.3 short form), während Git in das gitfile die Long-Form `C:\Users\reapertakashi\AppData\Local\Temp` schreibt. Plain `fs.realpathSync` resolved Symlinks, expandiert aber NICHT 8.3-Short-Names — beide Pfade kamen unverändert raus, Vergleich schlug fehl.
+
+**Lektion:** `fs.realpathSync(p)` ≠ `fs.realpathSync.native(p)` auf Windows. Die `.native`-Variante nutzt die OS-eigene Implementation (`GetFinalPathNameByHandle`) und expandiert sowohl Symlinks/Junctions als auch 8.3-Short-Names. Die JS-Variante baut den Pfad selbst über `lstat`-Walks zusammen und fasst Short-Names nicht an.
+
+**Anwendung:** Für jeden Pfad-Vergleich der gegen User-Home/Temp-Verzeichnisse oder andere OS-generierte Pfade läuft, `realpathSync.native` benutzen (mit `try/catch` als Fallback wenn Pfad noch nicht existiert). Insbesondere relevant für: temp-dir-basierte Tests auf Windows, Migrations-Verifikation, Pfad-Equality-Checks zwischen Config-Values und FS-State.
+
+---
+
+## 2026-05-16 — Plattform-bewusste Module brauchen `path.posix`/`path.win32`, nicht runtime `path`
+
+**Situation:** `src/core/paths/machine-paths.ts` akzeptiert `platform: NodeJS.Platform` als Argument und sollte plattform-spezifisch resolven. Initial mit `import { join, resolve } from 'node:path'` geschrieben. Tests die `platform: 'linux'` mit POSIX-Pfad `/home/test/.config/claude-os` injizierten scheiterten auf Windows-Runner mit Output `C:\home\test\.config\claude-os` — `path.resolve` ist zur Runtime an die Host-Platform gebunden, nicht an das Funktions-Argument.
+
+**Lektion:** Wenn ein Modul plattform-bewusste Pfad-Operationen anbietet, MUSS es zwischen `path.posix.*` und `path.win32.*` explizit dispatchen, basierend auf dem `platform`-Parameter — NICHT den runtime-default `path.*` benutzen. Sonst kollabiert die Funktion zur Host-Plattform, Tests sind nicht cross-platform portierbar, und CI-Matrices liefern False-Negatives.
+
+**Anwendung:** Jede plattform-parametrische Pfad-Funktion: helper `pathStyle(platform) → platform === 'win32' ? win32 : posix` und alle internen `join/resolve`-Calls durch den Helper schicken. Gilt analog auch für Module die Tauri/Electron-Sidecar-Pfade resolven (Windows-Build aus macOS-Dev und vice versa).
