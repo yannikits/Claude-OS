@@ -1,0 +1,8 @@
+# claude-os root marker
+#
+# This file marks the directory as a claude-os installation root,
+# enabling repo-detect resolution by `claude-os doctor` and the
+# environment domain (see src/core/environment/root-resolver.ts).
+#
+# See ADR-0002 for the cloud-mount data placement model.
+# Generated as part of Phase 1c.
