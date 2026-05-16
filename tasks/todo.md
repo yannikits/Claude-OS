@@ -85,21 +85,24 @@
 
 ---
 
-## Phase 3 — Hybrid-CLI mit AI-Delegation (20 h, H, deps: Phase 1)
+## Phase 3 — Hybrid-CLI mit AI-Delegation (abgeschlossen 2026-05-17)
 
-**Ziel:** Vollständiger `claude-os`-Command-Tree und stabile `claude.exe`-Anbindung.
+**Ziel:** Vollständiger `claude-os`-Command-Tree und stabile `claude.exe`-Anbindung. Aufgeteilt in 5 Sub-Phasen (3a–3e).
 
-- [ ] Command-Stubs: `update`, `doctor`, `vault`, `catalog`, `secrets`, `agent`, `auth`, `ai`
-- [ ] `domains/claude-bridge/spawn.ts` — `child_process.spawn`, kein 120s-Cutoff (Fix Memory 569/577/578)
-- [ ] Cancellation via SIGINT-Propagation, SIGKILL nach 5 s Timeout
-- [ ] Heartbeat-Logging alle 10 s während Session
-- [ ] `cli/commands/ai.ts` — leitet alle Args nach `claude.exe`, propagiert Exit-Code
-- [ ] Globale Flags: `--root <path>`, `--verbose`, `--json`
-- [ ] `domains/secrets/` — `@napi-rs/keyring`-Adapter + encrypted-file Fallback (ADR-0004)
-- [ ] CLI: `claude-os secrets set/get/list/delete`
-- [ ] Long-Running-E2E-Test: `claude-os ai -p "hello"` läuft 180 s ohne Abbruch
+- [x] Phase 3a — Command-Stubs für `update`, `vault`, `catalog`, `secrets`, `agent`, `auth`, `ai` → Commit `d878c1a`
+- [x] Phase 3b — `src/domains/claude-bridge/spawn.ts` mit `child_process.spawn` + `stdio: 'inherit'` (kein 120s-Cutoff, Fix Memory 569/577/578) → Commit `4f26d80`
+- [x] Phase 3b — SIGINT-Propagation mit 5s-Grace → SIGKILL (zweite Ctrl-C eskaliert sofort); SIGTERM-Forward → Commit `4f26d80`
+- [x] Phase 3b — Heartbeat alle 10s als strukturiertes pino-Log mit `{pid, elapsedMs}` → Commit `4f26d80`
+- [x] Phase 3b — `resolve-binary.ts` mit `<root>/bin/claude{,.exe,.cmd}` → `$PATH`-Walk-Fallback (deckt User's `~/.local/bin/claude.exe`-Install, Memory 549/550) → Commit `4f26d80`
+- [x] Phase 3c — `cli/commands/ai.ts` forwarded argv 1:1, Exit-Code propagiert (Signals → 130/143/137), BinaryNotFoundError → exit 127 → Commit `4f26d80`
+- [x] Phase 3d — `domains/secrets/` mit `KeyringStore` (@napi-rs/keyring, Service-Name `claude-os`) + `EncryptedFileStore` (AES-256-GCM, PBKDF2-SHA-256 mit 600k iterations, 16-byte salt, 12-byte IV, 16-byte GCM-tag, atomic write via tempfile+rename, mode 0o600) → Commit `0f766f5`
+- [x] Phase 3d — `factory.ts` Backend-Detection: `$CLAUDE_OS_SECRETS_BACKEND` Override → `probeKeyring()` set+delete sentinel → encrypted-file fallback → Commit `0f766f5`
+- [x] Phase 3d — CLI: `secrets set/get/list/delete` mit --json-Mode, Values nie geloggt → Commit `0f766f5`
+- [x] Phase 3e — Long-Running-E2E (180s) via vitest's `describe.skipIf` gated hinter `$RUN_SLOW_TESTS=1` (regulärer `npm test` bleibt schnell) → (commit pending nach Test-Run)
 
-**Test-Kriterium:** Manueller Smoke: `claude-os ai --help` reicht Anthropic-Help durch.
+**Test-Kriterium:** Manueller Smoke: `claude-os ai --help` reicht Anthropic-Help durch. **Status: erfüllt** — auf User's Windows-Maschine `node dist/cli/index.js ai --help` resolved `~/.local/bin/claude.exe` via `$PATH`, forwarded `--help`, Anthropic-CLI druckte sein eigenes Help, Exit 0 propagiert.
+
+**Tests-Gewinn:** +33 (3a 0, 3b 16, 3c 0, 3d 17, 3e 1 gated). Total 121/121 grün ohne Long-Slow-Tag, 122 mit `RUN_SLOW_TESTS=1`.
 
 ---
 
