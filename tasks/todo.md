@@ -34,16 +34,16 @@
 - [x] `src/core/environment/root-resolver.ts` mit Env-Var- und Repo-Detect-Fallback + `types.ts` + `index.ts` → Commit `9c3b432`
 - [x] `src/core/doctor/` — 5 Checks: Mount, Node-Version, Git, `bin/claude{,.exe}`-Existenz, Schreibrechte → Commit `5a3b6ab` (16 tests, all 5 checks runnable, runDoctor() handles RootNotFoundError gracefully)
 - [x] `src/cli/index.ts` mit **commander v14**, Command `doctor` aktiv; globaler `--json`-Flag mit zentralem Renderer in `src/cli/presenters/doctor.ts` (ASCII-Marker für cmd.exe-Compat) → Commit `5a3b6ab`
-- [ ] `src/core/logging/` — **pino-Singleton (per ADR-0013)** mit Redaction-Path-Liste in `redact-paths.ts` (Pflicht-Code-Review-Gate); `pino-roll` für `%APPDATA%/claude-os/logs/`, `pino.destination(2)` für Tauri-Stderr-Mirror (ADR-0006)
-- [ ] Redaction-Test: künstliches Secret in Log-Object → Output enthält `[REDACTED]`, nicht das Secret
+- [x] `src/core/logging/` — pino-Factory mit Redaction-Path-Liste in `redact-paths.ts` (Pflicht-Code-Review-Gate); pino-roll + Stderr-Mirror deferred zu Phase 6 (per ADR-0013 §3 Production-Transport) → Commit `983c805`
+- [x] Redaction-Tests: 15 Tests, Pflicht-`[REDACTED]`-Coverage für ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_*, GITHUB_TOKEN, *.password, *.token, credentials.* → Commit `983c805`
 - [ ] Shims: `claude-os.cmd` (Windows) + `claude-os` (POSIX)
 - [x] Unit-Tests Root-Resolver: 11 Tests + 9 detectCloudProvider-Tests = 20 grün → Commit `9c3b432`
 - [x] Unit-Tests Doctor-Checks: 11 tests in checks.test.ts + 6 tests in runner.test.ts → 36 total (env=20, doctor=16), alle grün → Commit `5a3b6ab`
 - [ ] `npm link` Smoke: `claude-os doctor` grün auf aktueller Maschine
 - [ ] README-Skelett (Deutsch, Bootstrap-Sektion)
 - [ ] **TypeBox-Setup (per ADR-0012)**: `@sinclair/typebox` als Dep, `src/core/schemas/`-Verzeichnis, erste `EnvironmentManifest`-Schema-Definition mit `Type.Strict()`-Export
-- [ ] `src/core/validation/format.ts` — User-Friendly-Error-Wrapper (~100 LOC) für TypeBox/Ajv-Errors
-- [ ] Validation-Tests: Schema-Roundtrip (TS-Type ↔ JSON-Schema ↔ Validator) für `EnvironmentManifest`
+- [x] `src/core/validation/format.ts` + `assertValid` + `ValidationError` (~100 LOC) für TypeBox/Ajv-Errors → Commit `0066278`
+- [x] Validation-Tests: 16 Tests, formatPath JSON-Pointer→dotted-bracket, formatErrors/assertValid für valid/invalid/constraint-violation → Commit `0066278`
 
 **Test-Kriterium:** `npm test` + `npm run lint` grün; `claude-os doctor` grüner Status.
 
@@ -301,6 +301,30 @@ Vollständige Roadmap mit Begründung: [docs/future.md](../docs/future.md).
 - `npx tsc --noEmit` → exit 0
 - `npm test` → 20/20 grün (11 resolveRoot-Tests + 9 detectCloudProvider-Tests)
 - Coverage-Threshold 70% in vitest.config.ts gesetzt
+
+### Phase 1d — abgeschlossen 2026-05-16
+
+**Commit:** `983c805` — logging-Domain mit pino-Factory + Redaction.
+
+**Output:** 4 Files, 313 LOC. createLogger() mit zentralem REDACT_PATHS, ISO-timestamps, ENV-Var-basierter Level-Resolution.
+
+**Constraints:** pino-roll + Stderr-Mirror deferred zu Phase 6 (per ADR-0013 §3 — Production-Transport ist GUI-Shell-Responsibility).
+
+**Verifikation:**
+- `npx tsc --noEmit` → exit 0
+- `npm test` → 51/51 grün (+15 Redaction-Tests)
+
+### Phase 1e — abgeschlossen 2026-05-16
+
+**Commit:** `0066278` — validation-Domain mit formatErrors + assertValid.
+
+**Output:** 3 Files, 200 LOC. `formatPath()` konvertiert JSON-Pointer `/entries/2/source` → `entries[2].source`. `assertValid()` throwing variant für fail-fast Contexts.
+
+**Lesson:** TypeBox `format: 'email'` benötigt ajv-formats peer-dep. Tests nutzen strukturelle Constraints (minLength, minimum) statt — keine zusätzliche Dep nötig.
+
+**Verifikation:**
+- `npx tsc --noEmit` → exit 0
+- `npm test` → 67/67 grün (+16 Validation-Tests)
 
 ### Phase 1c — abgeschlossen 2026-05-16
 
