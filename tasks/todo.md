@@ -32,13 +32,13 @@
 - [ ] **husky + lint-staged**: lint-staged-Config in package.json, husky-Init noch nicht ausgeführt (deferred zu Phase 1c)
 - [x] **Vitest** statt Jest (pivot wegen ESM-Pain, siehe `lessons.md` 2026-05-16 Eintrag); Coverage-Threshold 70 % in `vitest.config.ts` → Commit `9c3b432`
 - [x] `src/core/environment/root-resolver.ts` mit Env-Var- und Repo-Detect-Fallback + `types.ts` + `index.ts` → Commit `9c3b432`
-- [ ] `src/core/doctor/` — Checks: Mount, Node-Version, Git-Verfügbarkeit, `bin/claude.exe`-Existenz, Schreibrechte
-- [ ] `src/cli/index.ts` mit **commander v12 (per Researcher-Spike)**, Command `doctor` aktiv; globaler `--json`-Flag mit zentralem Renderer in `src/cli/presenters/`
+- [x] `src/core/doctor/` — 5 Checks: Mount, Node-Version, Git, `bin/claude{,.exe}`-Existenz, Schreibrechte → Commit `5a3b6ab` (16 tests, all 5 checks runnable, runDoctor() handles RootNotFoundError gracefully)
+- [x] `src/cli/index.ts` mit **commander v14**, Command `doctor` aktiv; globaler `--json`-Flag mit zentralem Renderer in `src/cli/presenters/doctor.ts` (ASCII-Marker für cmd.exe-Compat) → Commit `5a3b6ab`
 - [ ] `src/core/logging/` — **pino-Singleton (per ADR-0013)** mit Redaction-Path-Liste in `redact-paths.ts` (Pflicht-Code-Review-Gate); `pino-roll` für `%APPDATA%/claude-os/logs/`, `pino.destination(2)` für Tauri-Stderr-Mirror (ADR-0006)
 - [ ] Redaction-Test: künstliches Secret in Log-Object → Output enthält `[REDACTED]`, nicht das Secret
 - [ ] Shims: `claude-os.cmd` (Windows) + `claude-os` (POSIX)
 - [x] Unit-Tests Root-Resolver: 11 Tests + 9 detectCloudProvider-Tests = 20 grün → Commit `9c3b432`
-- [ ] Unit-Tests Doctor-Checks (gemockt)
+- [x] Unit-Tests Doctor-Checks: 11 tests in checks.test.ts + 6 tests in runner.test.ts → 36 total (env=20, doctor=16), alle grün → Commit `5a3b6ab`
 - [ ] `npm link` Smoke: `claude-os doctor` grün auf aktueller Maschine
 - [ ] README-Skelett (Deutsch, Bootstrap-Sektion)
 - [ ] **TypeBox-Setup (per ADR-0012)**: `@sinclair/typebox` als Dep, `src/core/schemas/`-Verzeichnis, erste `EnvironmentManifest`-Schema-Definition mit `Type.Strict()`-Export
@@ -301,3 +301,21 @@ Vollständige Roadmap mit Begründung: [docs/future.md](../docs/future.md).
 - `npx tsc --noEmit` → exit 0
 - `npm test` → 20/20 grün (11 resolveRoot-Tests + 9 detectCloudProvider-Tests)
 - Coverage-Threshold 70% in vitest.config.ts gesetzt
+
+### Phase 1c — abgeschlossen 2026-05-16
+
+**Commit:** `5a3b6ab` — doctor-Domain + CLI commander-Skelett mit `claude-os doctor` end-to-end runnable.
+
+**Output:** Erstes echtes Subcommand des Projekts. 10 neue Files, 559 LOC.
+
+**Erkenntnisse:**
+- Architektur-Recon zu Session-Start hatte `bin/claude.exe` im claude-portable-Repo angenommen — Memory-ID 549/550 zeigt aber dass User's `claude` unter `~/.local/bin/claude` liegt. Fix: `.claude-os-root`-Marker-File explizit erstellt (war ohnehin der vorgesehene Mechanismus per ADR-0002).
+- runDoctor() handlet RootNotFoundError graceful: produziert `root-resolution`-Check-Fail + läuft trotzdem die root-unabhängigen Checks (node-version, git-available).
+- ASCII-Marker `[OK]`/`[WARN]`/`[FAIL]` statt Unicode-Symbole für cmd.exe-Render-Kompatibilität.
+
+**Verifikation:**
+- `npx tsc --noEmit` → exit 0
+- `npm test` → 36/36 grün (16 neue doctor-Tests)
+- `npm run build` → dist/ populated
+- Real Smoke-Test in claude-portable: 4 OK + 1 WARN (claude-binary fehlt erwartungsgemäß), Overall WARN, exit 0
+- `claude-os doctor --json` produces valid JSON
