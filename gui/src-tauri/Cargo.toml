@@ -1,6 +1,6 @@
 [package]
 name = "claude-os-shell"
-version = "0.1.0-alpha.5"
+version = "1.0.0"
 description = "Tauri desktop shell for claude-os"
 authors = ["claude-os contributors"]
 edition = "2021"
