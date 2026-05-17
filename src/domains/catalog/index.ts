@@ -34,6 +34,17 @@ export {
   VersionConflictError,
 } from './capability-resolver.js';
 export {
+  CATALOG_FILENAME,
+  CATALOG_LOCK_FILENAME,
+  catalogPathsFor,
+  EMPTY_CATALOG,
+  InvalidCatalogError,
+  readCatalog,
+  readCatalogLock,
+  writeCatalog,
+  writeCatalogLock,
+} from './catalog-store.js';
+export {
   fileLoader,
   type MarketplaceEntry,
   type MarketplacePlugin,
@@ -41,6 +52,22 @@ export {
   MarketplaceRegistryError,
   type MarketplaceRegistryFile,
 } from './marketplace-registry.js';
+export {
+  type CatalogConfig,
+  CatalogConfigJsonSchema,
+  CatalogConfigSchema,
+  type CatalogEntry,
+  CatalogEntryKindSchema,
+  CatalogEntrySchema,
+  type CatalogLock,
+  type CatalogLockBinding,
+  CatalogLockBindingSchema,
+  type CatalogLockEntry,
+  CatalogLockEntrySchema,
+  CatalogLockJsonSchema,
+  CatalogLockSchema,
+  CatalogScopeSchema,
+} from './schema.js';
 export {
   existsInAnyScope,
   mergeScopes,

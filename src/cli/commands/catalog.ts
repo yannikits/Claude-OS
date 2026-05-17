@@ -18,10 +18,15 @@ import { RootNotFoundError, resolveRoot } from '../../core/environment/index.js'
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import {
   type Catalog,
+  type CatalogEntry,
+  catalogPathsFor,
   githubTarballUrl,
+  InvalidCatalogError,
   installFromTarball,
   type PluginManifest,
   parseSource,
+  readCatalog,
+  readCatalogLock,
   resolveCapabilities,
   SourceParseError,
   TarballInstallError,
@@ -156,6 +161,59 @@ function actResolve(globals: GlobalOpts, manifestPath: string): void {
   process.exit(1);
 }
 
+function actList(globals: GlobalOpts): void {
+  let root: ReturnType<typeof resolveRoot>;
+  try {
+    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
+  } catch (err) {
+    if (err instanceof RootNotFoundError) {
+      printErr(`catalog list: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  const paths = catalogPathsFor(root.path);
+  let entries: readonly CatalogEntry[];
+  let lockResolvedAt: string | null;
+  try {
+    entries = readCatalog(paths.catalogPath).entries;
+    lockResolvedAt = readCatalogLock(paths.lockPath)?.resolvedAt ?? null;
+  } catch (err) {
+    if (err instanceof InvalidCatalogError) {
+      printErr(`catalog list: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  if (globals.json === true) {
+    printJson({
+      catalogPath: paths.catalogPath,
+      lockPath: paths.lockPath,
+      lockResolvedAt,
+      entries,
+    });
+    return;
+  }
+  if (entries.length === 0) {
+    printLine(`(no catalog entries at ${paths.catalogPath})`);
+    if (lockResolvedAt !== null) {
+      printLine(`lock present, resolved ${lockResolvedAt}`);
+    }
+    return;
+  }
+  for (const e of entries) {
+    const flag = e.enabled ? '[on] ' : '[off]';
+    printLine(`${flag} ${e.kind.padEnd(7)} ${e.scope.padEnd(7)} ${e.id}  <-  ${e.source}`);
+  }
+  printLine('');
+  printLine(`${entries.length} entries from ${paths.catalogPath}`);
+  if (lockResolvedAt !== null) {
+    printLine(`lock resolved ${lockResolvedAt}`);
+  } else {
+    printLine('no catalog.lock.json yet (run `catalog lock` once it lands).');
+  }
+}
+
 function notInMvp(globals: GlobalOpts, action: string): void {
   const hint =
     `catalog ${action}: not in v1 MVP. The catalog.json + catalog.lock.json ` +
@@ -189,7 +247,14 @@ export function registerCatalogCommand(program: Command): void {
       actResolve(globals, manifestPath);
     });
 
-  for (const sub of ['list', 'uninstall', 'enable', 'disable', 'update', 'lock', 'sync']) {
+  catalog
+    .command('list')
+    .description('List catalog.json entries (with catalog.lock.json status)')
+    .action((_opts: unknown, command: Command) => {
+      actList(command.optsWithGlobals<GlobalOpts>());
+    });
+
+  for (const sub of ['uninstall', 'enable', 'disable', 'update', 'lock', 'sync']) {
     catalog
       .command(sub)
       .description(`${sub} — staged for catalog.json lifecycle (Phase 6 sidecar)`)
