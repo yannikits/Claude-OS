@@ -174,11 +174,12 @@ Voraussetzung: Rust-Toolchain via [rustup](https://rustup.rs/) + plattformspezif
 
 ## Weitere Docs
 
+- **[`docs/setup-guide.md`](docs/setup-guide.md) — Detaillierte Schritt-für-Schritt Setup-Anleitung (Szenario A: App, B: + CLI, C: + Dev) inkl. Troubleshooting**
 - [`docs/cloud-providers.md`](docs/cloud-providers.md) — Setup für OneDrive, Drive, Dropbox, Nextcloud, rclone, abraunegg/onedrive
 - [`docs/migration-from-portable.md`](docs/migration-from-portable.md) — 7-Schritte-Migration von claude-portable v0.x (USB) zu claude-os v1
 - [`docs/macos-gatekeeper.md`](docs/macos-gatekeeper.md) — unsignierte DMG auf macOS öffnen
 - [`gui/README.md`](gui/README.md) — Tauri-Shell + Sidecar build
-- [`tasks/todo.md`](tasks/todo.md) — Phase-Tracker, Reviews, Deferrals
+- [`tasks/todo.md`](tasks/todo.md) — Phase-Tracker, Reviews, Deferrals, v1.x Roadmap
 - [`tasks/lessons.md`](tasks/lessons.md) — cross-session pattern-Sammlung
 - [`docs/architecture/adr/`](docs/architecture/adr/) — 14 ADRs (siehe unten)
 
