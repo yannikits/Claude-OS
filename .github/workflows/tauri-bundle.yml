@@ -1,0 +1,103 @@
+name: tauri-bundle
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: bundle ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            os: ubuntu-22.04
+            tauri_args: ""
+          - label: windows-x86_64
+            os: windows-latest
+            tauri_args: ""
+          - label: macos-universal
+            os: macos-latest
+            tauri_args: --target universal-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            gui/package-lock.json
+
+      - name: install linux deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            xdotool
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: add macos rust targets
+        if: matrix.os == 'macos-latest'
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gui/src-tauri -> target
+
+      - name: install (root)
+        run: npm ci
+
+      - name: install (gui)
+        working-directory: gui
+        run: npm ci
+
+      - name: build cli (sidecar source)
+        run: npm run build
+
+      - name: build sidecar binary ($TARGET_TRIPLE)
+        run: npm run sidecar:build
+
+      - name: tauri build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: gui
+          tagName: ${{ github.ref_name }}
+          releaseName: "claude-os ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: true
+          args: ${{ matrix.tauri_args }}
+
+      - name: upload bundle artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-os-${{ matrix.label }}
+          path: |
+            gui/src-tauri/target/release/bundle/**/*.msi
+            gui/src-tauri/target/release/bundle/**/*.dmg
+            gui/src-tauri/target/release/bundle/**/*.AppImage
+            gui/src-tauri/target/**/release/bundle/**/*.msi
+            gui/src-tauri/target/**/release/bundle/**/*.dmg
+            gui/src-tauri/target/**/release/bundle/**/*.AppImage
+          if-no-files-found: warn

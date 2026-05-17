@@ -1,0 +1,89 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    name: cli ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: install
+        run: npm ci
+      - name: biome ci
+        run: npx biome ci .
+      - name: typecheck
+        run: npx tsc --noEmit
+      - name: vitest
+        run: npx vitest run --coverage
+
+  rust-shell:
+    name: cargo check (gui/src-tauri)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            xdotool
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gui/src-tauri -> target
+      - name: cargo check
+        working-directory: gui/src-tauri
+        run: cargo check --all-targets
+      - name: cargo test
+        working-directory: gui/src-tauri
+        run: cargo test
+      - name: cargo clippy
+        working-directory: gui/src-tauri
+        run: cargo clippy -- -D warnings
+
+  gui-typecheck:
+    name: gui typecheck
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            gui/package-lock.json
+      - name: install (root)
+        run: npm ci
+      - name: install (gui)
+        working-directory: gui
+        run: npm ci
+      - name: gui typecheck
+        working-directory: gui
+        run: npx tsc -b
