@@ -41,6 +41,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
       - name: install linux deps
         run: |
           sudo apt-get update
@@ -57,6 +61,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: gui/src-tauri -> target
+      - name: install + build cli (sidecar source)
+        run: |
+          npm ci
+          npm run build
+      - name: build sidecar binary ($TARGET_TRIPLE)
+        run: npm run sidecar:build
       - name: cargo check
         working-directory: gui/src-tauri
         run: cargo check --all-targets

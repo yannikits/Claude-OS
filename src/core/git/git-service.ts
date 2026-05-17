@@ -114,6 +114,11 @@ export class GitService {
   async version(): Promise<string> {
     try {
       const v = await this.git.version();
+      if (v.major === 0 && v.minor === 0 && v.patch === 0) {
+        throw new GitNotInstalledError(
+          'System git is not available: simple-git returned version 0.0.0 (binary not found or unparseable)',
+        );
+      }
       return `git ${v.major}.${v.minor}.${v.patch}`;
     } catch (err) {
       throw mapError(err, 'is `git` installed and on PATH?');

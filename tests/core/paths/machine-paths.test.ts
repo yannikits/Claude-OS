@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { win32 } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   externalGitDirFor,
@@ -16,9 +16,9 @@ describe('resolveMachinePaths', () => {
     expect(paths.dataRoot.toLowerCase()).toBe(
       'C:\\Users\\test\\AppData\\Roaming\\claude-os'.toLowerCase(),
     );
-    expect(paths.gitMetadataDir).toBe(join(paths.dataRoot, 'git-metadata'));
-    expect(paths.dataDir).toBe(join(paths.dataRoot, 'data'));
-    expect(paths.logsDir).toBe(join(paths.dataRoot, 'logs'));
+    expect(paths.gitMetadataDir).toBe(win32.join(paths.dataRoot, 'git-metadata'));
+    expect(paths.dataDir).toBe(win32.join(paths.dataRoot, 'data'));
+    expect(paths.logsDir).toBe(win32.join(paths.dataRoot, 'logs'));
   });
 
   it('falls back to ~/AppData/Roaming on win32 when $APPDATA empty', () => {
