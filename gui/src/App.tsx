@@ -6,6 +6,7 @@ import {
   onInboxChanged,
   onOutboxChanged,
   onSidecarFailed,
+  ping,
   type SidecarFailedPayload,
   type WatcherChangeEvent,
 } from './lib/rpc';
@@ -85,9 +86,34 @@ export function App() {
   const [lastOutbox, setLastOutbox] = useState<WatcherChangeEvent | null>(null);
   const [lastDrop, setLastDrop] = useState<{ count: number; ts: number } | null>(null);
 
+  // Poll ping() until sidecar is ready (supervisor spawns the sidecar in
+  // setup() but it takes ~1-2s; fixed 500ms grace was a race that left
+  // Dashboard mounted before any RPC could succeed). Hard cap at 15s so
+  // the SidecarFailedBanner still gets a chance to render if 3-strikes
+  // gives up.
   useEffect(() => {
-    const t = setTimeout(() => setShowLoading(false), 500);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const start = Date.now();
+    const MAX_WAIT_MS = 15_000;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        await ping();
+        setShowLoading(false);
+      } catch {
+        if (Date.now() - start > MAX_WAIT_MS) {
+          setShowLoading(false);
+          return;
+        }
+        timer = setTimeout(tick, 250);
+      }
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
