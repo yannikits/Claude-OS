@@ -46,3 +46,6 @@ Thumbs.db
 # Sidecar runtime dirs (created when claude-os runs against the repo root in dev)
 inbox/
 outbox/
+
+# Claude Code per-machine local settings (convention: *.local.json is never committed)
+.claude/settings.local.json
