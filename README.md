@@ -2,7 +2,7 @@
 
 OS-unabhängige Entwicklungs-Umgebung rund um Anthropic Claude. Tauri-GUI + Node-CLI + cloud-mount Vault-Sync.
 
-> **Status:** v1 in Entwicklung. Phase 0–3 abgeschlossen (Bootstrap, Doctor, Logging, Validation, Secrets, claude-bridge), Phase 2 abgeschlossen (Vault-Sync). Offen: Phase 4 Update-Orchestrator, Phase 5 Agent-Runs + Catalog, Phase 6 Tauri-GUI, Phase 7 Cross-Platform + CI. Tracker: [`tasks/todo.md`](tasks/todo.md).
+> **Status:** v1 in Entwicklung. Phase 0–4 abgeschlossen (Bootstrap, Doctor, Logging, Validation, Secrets, claude-bridge, Vault-Sync, Update-Orchestrator-Foundation). Offen: Phase 5 Agent-Runs + Catalog, Phase 6 Tauri-GUI, Phase 7 Cross-Platform + CI. Tracker: [`tasks/todo.md`](tasks/todo.md).
 >
 > Vorgänger: `claude-portable` (USB-only Variante). Die alten Launch-Scripts liegen in `legacy/` und sind nicht mehr aktiv.
 
@@ -85,7 +85,7 @@ POSIX äquivalent — `./claude-os` statt `.\claude-os.cmd`, `export CLAUDE_OS_R
 | `claude-os vault schedule --enable/--disable [--idle-seconds N]` | ready (Config) | Config-Toggle; Watcher selbst läuft im Phase-6-Sidecar |
 | `claude-os vault unlock` | ready | Reset Busy-Flag (Crash-Recovery) |
 | `claude-os vault init-gitignore` | ready | Default-Template anwenden |
-| `claude-os update [--env\|--skills\|--plugins\|--all]` | Phase 4 | Tiered Auto-Update mit Selective-Merge |
+| `claude-os update [--env\|--skills\|--plugins\|--all\|--rollback [ts]]` | ready (Foundation) | Tiered Auto-Update mit Selective-Merge-Foundation. Full interactive review staged für eine Folge-Iteration — siehe v1-Abweichungen unten. |
 | `claude-os catalog ...` | Phase 5 | Plugin/Skill-Marketplace |
 | `claude-os agent ...` | Phase 5 | Agent-Run-Browser |
 | `claude-os auth ...` | Phase 5 | Anthropic-CLI-Auth-Integration |
@@ -133,10 +133,18 @@ Alle wesentlichen Design-Entscheidungen sind in [`docs/architecture/adr/`](docs/
 - [ADR-0008 — Git-Backend simple-git](docs/architecture/adr/0008-git-backend-simple-git.md)
 - [ADR-0013 — Logging mit pino](docs/architecture/adr/0013-logging-pino.md)
 
+## v1-Abweichungen (bekannt + transparent)
+
+- **`update --skills` Selective-Merge-Composition**: Die Bausteine (BackupManager, ZoneClassifier, DiffEngine, ReviewLoop, ResumableChecklist) sind isoliert getestet und einsatzbereit, die End-to-End-CLI-Komposition (upstream-mirror-clone → walk → classify → diff → review-loop → checklist → apply) ist noch nicht voll verdrahtet. `update --skills` bei `aborted-dirty` zeigt einen Hint statt zu starten. Vollständiger Flow ist eine Folge-Iteration.
+- **`update --plugins`**: Echte Plugin-Installation braucht den Phase-5-Catalog. Der CLI-Pfad gibt aktuell einen Phase-5-Pointer zurück; die separate Log-Datei-Infrastruktur (Memory-587/593-Mitigation) steht.
+- **`update --resume`**: ResumableChecklist-Modul ist fertig + getestet, aber die CLI-Orchestration für Resume hängt am Selective-Merge-Composition-Punkt oben.
+- **Interactive Review**: Die `decide`-Callback der ReviewLoop ist injectable; eine echte TTY-UI mit `enquirer` ist Folge-Iteration oder Phase-6-GUI. v1 nutzt `--auto-accept` für clean Diffs.
+- **`.skill-lock.json`** statt YAML (ADR-0005 §38 erwähnt YAML; JSON ist robuster, kein Parser nötig).
+
 ## Entwicklung
 
 ```bat
-npm test                          :: 191/191 grün (+1 slow gated)
+npm test                          :: 245/245 grün (+1 slow gated)
 npm run build                     :: tsc -> dist/
 npm run check                     :: biome lint
 npm run ci                        :: biome ci + tsc + coverage

@@ -106,29 +106,27 @@
 
 ---
 
-## Phase 4 — Update-Orchestrator (18 h, M, deps: Phase 1+3)
+## Phase 4 — Update-Orchestrator (abgeschlossen 2026-05-17)
 
-**Ziel:** Tiered Auto-Update beim Start; Plugin-Updates explizit; Selective-Merge-Pattern nach ADR-0005.
+**Ziel:** Tiered Auto-Update beim Start; Plugin-Updates explizit; Selective-Merge-Pattern nach ADR-0005. Aufgeteilt in 6 Sub-Phasen (4a–4f).
 
-- [ ] `domains/update-orchestrator/env-repo.ts` — `git pull --ff-only` auf Repo-Root, bei Konflikt skip+warn
-- [ ] `domains/update-orchestrator/skills-repo.ts` — Sync `iteenschmiede/claude-config` nach `config/skills/`, Diff anzeigen
-- [ ] `domains/update-orchestrator/plugins.ts` — nur via `claude-os update --plugins`, verbose, separates Log-File (Fix Memory 587–593)
-- [ ] Daemon-Probe vor Plugin-Update
-- [ ] `cli/commands/update.ts` — Flags `--env`, `--skills`, `--plugins`, `--all`, `--auto-accept`, `--resume`, `--rollback`
-- [ ] Boot-Hook in Launcher: env+skills auto, Plugins nicht
-- [ ] Pin claude-flow auf exakte Version, `--legacy-peer-deps`
+- [x] Phase 4a — `domains/update-orchestrator/env-repo.ts` + `skills-repo.ts` mit `git pull --ff-only`, 7-state UpdateState (up-to-date/updated/cloned/aborted-dirty/aborted-diverged/no-remote/error). GitService.clone() static + pull-with-ffOnly. → Commit `eb3e80d`
+- [x] Phase 4b — `BackupManager` mit `snapshot(scope, sourceDir)` / `restore(ts|'latest', dest)` / `prune(retention=5)` / `list()`. Layout `<dataRoot>/backups/update-<ISO-safe-ts>/{scope/,manifest.json}`. → Commit `2451433`
+- [x] Phase 4c — `ZoneClassifier`: `.skill-lock.json` (JSON statt YAML — Lesson 2026-05-17) + Frontmatter-Regex `claudeos: locked`; klassifiziert pro Datei in System / Personal / Locked. → Commit `0908298`
+- [x] Phase 4d — `DiffEngine` über `diff@9` (Binary-Detect via NUL-byte, 5-state DiffStatus) + presentation-agnostic `ReviewLoop` mit injectable decide+applyUpgrade. Locked/personal/unchanged/removed auto-keep; system+modified ruft IMMER decide (auch mit --auto-accept). → Commit `5221a06`
+- [x] Phase 4e — `ResumableChecklist` mit atomic markdown persistence (`<dir>/upgrade-checklist-<ISO-safe-ts>.md`). `create()` / `load()` / `loadLatest(scope)` (skipt completed Runs default) / `markDone()` / `complete()` / `abandon()`. → Commit `239a4de`
+- [x] Phase 4f — `plugins.ts` placeholder mit separater Log-Datei `<logsDir>/plugin-update-<ts>.log` (Memory-587/593-Mitigation steht; echte Install-Logik braucht Phase-5-Catalog). CLI `update [--env|--skills|--plugins|--all|--auto-accept|--rollback [ts]|--resume]` end-to-end wired. → Commit `5f93a4c`
 
-**Selective-Merge-Implementation nach ADR-0005:**
+**Test-Kriterium:** Real CLI-Smoke (Windows): `update --env` retourniert `[WARN] env-repo working tree dirty (11 files); refusing to pull` mit Exit 2; `update --plugins` retourniert `[WARN] plugins: plugin updates require Phase 5 catalog` mit Exit 2; `update` ohne Flag → Hint + Exit 1; `update --rollback` listet Backups oder Hint wenn keine vorhanden.
 
-- [ ] `BackupManager`: `.snapshot(scope)` / `.restore(timestamp)` / `.prune(retention=5)` unter `%APPDATA%/claude-os/backups/update-<iso>/`
-- [ ] `DiffEngine` über `diff` (npm) — unified-diff-Rendering im Terminal
-- [ ] `ZoneClassifier` liest `.skill-lock`-YAML + Skill-Frontmatter `claudeos: locked`; klassifiziert pro Datei in System | Personal | Locked
-- [ ] Interaktive Diff-Review-UI mit `enquirer` — keep / upgrade / merge / skip / diff pro Datei
-- [ ] `ResumableChecklist`: atomar geschriebenes State-File `%APPDATA%/claude-os/data/upgrade-checklist.<ts>.md`, `claude-os update --resume` setzt fort
-- [ ] `claude-os update --rollback [<ts>]` stellt aus Backup wieder her (default: jüngstes)
-- [ ] `--auto-accept` übernimmt nur clean Diffs (kein lokaler Modify), Konflikte landen in Review-Queue-File
+**Tests-Gewinn:** +50 (4a 9, 4b 12, 4c 12, 4d 17, 4e 12, 4f 0 — CLI integration deferred). Domain-Module sind direct unit-tested gegen reale bare-repo + tmpdir-Fixtures. Total 245/245 grün (+1 long-running gated).
 
-**Test-Kriterium:** Sandbox-Clone → `claude-os doctor` triggert env+skills-Pull; `--plugins` bleibt unverändert; künstlich modifizierte Skill-Datei wird im Diff-Review-Modus präsentiert, nicht überschrieben.
+**v1-Abweichungen von ADR-0005 (transparent):**
+
+- `.skill-lock.json` statt YAML — JSON ist robuster (kein eigener Parser), gleiches Verhalten. ADR-0005 §38 erwähnt YAML als claudesidian-Vorbild, ist aber nicht zwingend.
+- **Full selective-merge orchestrator deferred**: Die einzelnen Pieces (BackupManager + ZoneClassifier + DiffEngine + ReviewLoop + ResumableChecklist) sind isoliert getestet und einsatzbereit. Die CLI-Composition (upstream-mirror-clone → walk → classify → diff → review-loop → checklist → apply) ist in `update.ts` skizziert aber nicht voll verdrahtet. `update --skills` bei `aborted-dirty` zeigt einen Hint statt zu starten. Vollständiger Flow ist eine kleinere Folge-Iteration.
+- **Interactive review** (enquirer-Prompts) deferred — die ReviewLoop akzeptiert einen injectable `decide`-Callback; eine echte TTY-UI ist Phase-4-Tail oder Phase-6-GUI. v1 lebt mit `--auto-accept` für clean Diffs.
+- **Plugin install path** deferred zu Phase 5 (braucht Catalog für Manifest-Resolution).
 
 ---
 

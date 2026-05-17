@@ -120,3 +120,39 @@ Format pro Eintrag:
 **Lektion:** Wenn ein Modul plattform-bewusste Pfad-Operationen anbietet, MUSS es zwischen `path.posix.*` und `path.win32.*` explizit dispatchen, basierend auf dem `platform`-Parameter — NICHT den runtime-default `path.*` benutzen. Sonst kollabiert die Funktion zur Host-Plattform, Tests sind nicht cross-platform portierbar, und CI-Matrices liefern False-Negatives.
 
 **Anwendung:** Jede plattform-parametrische Pfad-Funktion: helper `pathStyle(platform) → platform === 'win32' ? win32 : posix` und alle internen `join/resolve`-Calls durch den Helper schicken. Gilt analog auch für Module die Tauri/Electron-Sidecar-Pfade resolven (Windows-Build aus macOS-Dev und vice versa).
+
+---
+
+## 2026-05-17 — `diff@9` createPatch hat eigenen Header (kein vanilla unified-diff)
+
+**Situation:** Test assertete `unifiedDiff` matched `^---` am Anfang. Failed weil `createPatch()` in diff v9 zuerst `Index: <filename>\n===\n` ausgibt, bevor `---`/`+++` kommen. Hatte vanilla `diff -u`-Output erwartet, der direkt mit `---` beginnt.
+
+**Lektion:** Bei npm-Paketen die "well-known" Formate ausgeben (unified-diff, JSON-patch, RFC-2822, etc.) NIE auf Format-Position regexen ohne das Output-Format des konkreten Pakets zu verifizieren. Auch wenn der Standard sauber spezifiziert ist, fügen Packages oft eigene Header/Trailer hinzu für ihre Use-Cases.
+
+**Anwendung:** Test-Regexen mit `m`-flag (multiline) gegen Anywhere-Match (`/^---/m`), nicht Strict-Start (`/^---/`). Oder besser: präzise Sentinels matchen die zum konkreten Package gehören (`Index:`, `===`), wenn die im Format expliziert sind.
+
+---
+
+## 2026-05-17 — Readonly-Types blocken `Partial<T>` Mutation; nutze Mapped-Type-Modifier
+
+**Situation:** `src/cli/commands/vault.ts` baute einen `Partial<VaultConfig>`-Patch inkrementell auf (`if (opts.enable) patch.scheduleEnabled = true`). Typecheck schlug fehl: "Cannot assign to 'scheduleEnabled' because it is a read-only property" — `VaultConfig`'s Props sind `readonly`, und `Partial<T>` erbt `readonly`.
+
+**Lektion:** `Partial<T>` macht alle Props optional aber bewahrt `readonly`. Wenn man einen Patch-Builder braucht, muss man `readonly` explizit entfernen: `{ -readonly [K in keyof T]?: T[K] }`. Sonst ist die Variable optisch mutable (durch `?`) aber TypeScript blockt jede Zuweisung.
+
+**Anwendung:** Pattern für inkrementell-aufgebaute Patches:
+```typescript
+const patch: { -readonly [K in keyof Config]?: Config[K] } = {};
+patch.foo = ...;
+return updateConfig(path, patch);
+```
+Gilt analog für jedes Domain-Modell mit readonly-Props. Phase-2f und Phase-3d hatten beide diesen Bedarf.
+
+---
+
+## 2026-05-17 — Bash-Pipe killt Exit-Code via PIPESTATUS, nicht `$?`
+
+**Situation:** Smoke-Test mit `node dist/cli/index.js update --env 2>&1 | head -10 ; echo "exit=$?"` zeigte `exit=0` obwohl Node mit Code 2 exited. `process.exit(2)` lief korrekt, aber `$?` capturet den Exit-Code des LETZTEN Pipe-Glieds (`head -10` = 0), nicht des ersten.
+
+**Lektion:** Bei Exit-Code-Tests von CLI-Tools NIE durch eine Pipe filtern und dann `$?` lesen. Bash setzt `$?` auf das Pipe-Tail. Entweder Pipe entfernen und Output via `>/dev/null` weglenken (`cmd >/dev/null 2>&1 ; echo $?`), oder `${PIPESTATUS[0]}` (bash-specific) für den ersten Glied-Exit nutzen.
+
+**Anwendung:** CLI-Exit-Code-Tests in Smoke-Sequenzen: separate Schritte mit explizitem `$?` direkt nach dem Tool, bevor irgendeine Pipe oder weitere Aufrufe folgen. Oder via Test-Framework (Vitest mit `child_process.spawn`) wo der Exit-Code typed-strukturiert kommt.
