@@ -31,3 +31,4 @@ export {
   type ChecklistSnapshot,
   type ChecklistStatus,
 } from './resumable-checklist.js';
+export { updatePlugins, pluginUpdateLogPath, PLUGINS_V1_HINT } from './plugins.js';
