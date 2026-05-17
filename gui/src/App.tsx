@@ -76,6 +76,8 @@ function SidecarFailedBanner({ payload }: { payload: SidecarFailedPayload }) {
   );
 }
 
+const BANNER_TTL_MS = 5_000;
+
 export function App() {
   const [showLoading, setShowLoading] = useState(true);
   const [failure, setFailure] = useState<SidecarFailedPayload | null>(null);
@@ -87,6 +89,24 @@ export function App() {
     const t = setTimeout(() => setShowLoading(false), 500);
     return () => clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    if (!lastDrop) return;
+    const t = setTimeout(() => setLastDrop(null), BANNER_TTL_MS);
+    return () => clearTimeout(t);
+  }, [lastDrop]);
+
+  useEffect(() => {
+    if (!lastInbox) return;
+    const t = setTimeout(() => setLastInbox(null), BANNER_TTL_MS);
+    return () => clearTimeout(t);
+  }, [lastInbox]);
+
+  useEffect(() => {
+    if (!lastOutbox) return;
+    const t = setTimeout(() => setLastOutbox(null), BANNER_TTL_MS);
+    return () => clearTimeout(t);
+  }, [lastOutbox]);
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
@@ -111,38 +131,40 @@ export function App() {
 
   return (
     <Router>
-      {failure && <SidecarFailedBanner payload={failure} />}
-      {lastDrop && (
-        <div className="banner" role="status" key={lastDrop.ts}>
-          {lastDrop.count} Datei(en) in den Inbox kopiert.
-        </div>
-      )}
-      {(lastInbox || lastOutbox) && (
-        <div className="banner muted" role="status">
-          {lastInbox && (
-            <span>
-              inbox: {lastInbox.event} {lastInbox.path}
-            </span>
-          )}
-          {lastOutbox && (
-            <span>
-              {' '}
-              · outbox: {lastOutbox.event} {lastOutbox.path}
-            </span>
-          )}
-        </div>
-      )}
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="chat" element={<ChatPage />} />
-          <Route path="catalog" element={<CatalogPage />} />
-          <Route path="vault" element={<VaultPage />} />
-          <Route path="agent-runs" element={<AgentRunsPage />} />
-          <Route path="secrets" element={<SecretsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
-      </Routes>
+      <div className="app-root">
+        {failure && <SidecarFailedBanner payload={failure} />}
+        {lastDrop && (
+          <div className="banner" role="status" key={lastDrop.ts}>
+            {lastDrop.count} Datei(en) in den Inbox kopiert.
+          </div>
+        )}
+        {(lastInbox || lastOutbox) && (
+          <div className="banner muted" role="status">
+            {lastInbox && (
+              <span>
+                inbox: {lastInbox.event} {lastInbox.path}
+              </span>
+            )}
+            {lastOutbox && (
+              <span>
+                {' '}
+                · outbox: {lastOutbox.event} {lastOutbox.path}
+              </span>
+            )}
+          </div>
+        )}
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="catalog" element={<CatalogPage />} />
+            <Route path="vault" element={<VaultPage />} />
+            <Route path="agent-runs" element={<AgentRunsPage />} />
+            <Route path="secrets" element={<SecretsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
+        </Routes>
+      </div>
     </Router>
   );
 }

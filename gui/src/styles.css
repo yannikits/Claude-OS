@@ -28,10 +28,17 @@ body,
   color: var(--text);
 }
 
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .app {
   display: grid;
   grid-template-columns: 220px 1fr;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .sidebar {
@@ -41,6 +48,12 @@ body,
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .brand {
@@ -53,6 +66,7 @@ body,
 }
 
 .nav-item {
+  display: block;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   text-decoration: none;

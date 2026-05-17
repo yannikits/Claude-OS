@@ -42,3 +42,7 @@ ruvector.db-*
 .DS_Store
 Thumbs.db
 *.swp
+
+# Sidecar runtime dirs (created when claude-os runs against the repo root in dev)
+inbox/
+outbox/
