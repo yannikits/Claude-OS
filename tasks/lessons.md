@@ -153,6 +153,26 @@ Format pro Eintrag:
 
 ---
 
+## 2026-05-17 — macOS-Universal-Bundles: rustup-Targets MÜSSEN vor `tauri build` da sein
+
+**Situation:** Phase 7b Workflow für macos-universal. `--target universal-apple-darwin` ist ein tauri-CLI-Flag, NICHT cargo's nativer Target-Triple — cargo allein versteht ihn nicht. Tauri bündelt darunter zwei separate cargo-builds (`x86_64-apple-darwin` + `aarch64-apple-darwin`) zu einem fat-Binary via `lipo`. Wenn die rustup-Targets nicht vorinstalliert sind, fail-loud mit `error: target 'x86_64-apple-darwin' may not be installed`.
+
+**Lektion:** Bevor `tauri build --target universal-apple-darwin` läuft, in der CI explizit beide rustup-Targets adden: `rustup target add x86_64-apple-darwin && rustup target add aarch64-apple-darwin`. setup-rust-toolchain installiert nur das default-host-target — die universal-build-Pre-Requisites sind Add-Ons.
+
+**Anwendung:** Jeder CI-Job der ein nicht-host-cargo-target baut (universal-darwin, embedded-targets, WASM-targets) muss `rustup target add <triple>` als expliziter Schritt vor dem Build.
+
+---
+
+## 2026-05-17 — Sidecar-Binary muss vor `tauri build` im gleichen CI-Job gebaut werden
+
+**Situation:** Phase 7b Workflow Reihenfolge: `npm ci → npm run build → npm run sidecar:build → tauri-action`. Versuch mit getrennten Jobs (sidecar in einem Job, tauri-bundle in einem nachgelagerten Job mit upload-artifact + download-artifact) wäre sauberer, aber ist fragile: das Tauri-bundle.externalBin-Resolution erwartet das Sidecar-Binary unter `gui/src-tauri/binaries/claude-os-sidecar-<TRIPLE>.exe` im Working-Tree zum Zeitpunkt von `tauri build`.
+
+**Lektion:** Linear in einem Job. Pre-Build (sidecar) → Bundle (tauri). Cross-Job-Artifact-Sharing kostet Komplexität (artifact-upload pre-step + download im Bundle-Job + Path-Restoration), bringt keine echten Vorteile, und verliert beim Cache-Miss die direkten Build-Hits (Swatinem/rust-cache deckt nur cargo-Target ab, nicht den fertigen Sidecar).
+
+**Anwendung:** Wenn Tauri-Sidecar gebaut wird, gehört die `sidecar:build`-Stufe direkt vor `tauri-action` im gleichen Job. Cross-Platform-Multi-Job-Splitting nur dann lohnenswert wenn die Bauzeiten >15min sind ODER die Tools unterschiedliche Runner-Images brauchen (z.B. macOS vs. Win für native-deps).
+
+---
+
 ## 2026-05-16 — Plattform-bewusste Module brauchen `path.posix`/`path.win32`, nicht runtime `path`
 
 **Situation:** `src/core/paths/machine-paths.ts` akzeptiert `platform: NodeJS.Platform` als Argument und sollte plattform-spezifisch resolven. Initial mit `import { join, resolve } from 'node:path'` geschrieben. Tests die `platform: 'linux'` mit POSIX-Pfad `/home/test/.config/claude-os` injizierten scheiterten auf Windows-Runner mit Output `C:\home\test\.config\claude-os` — `path.resolve` ist zur Runtime an die Host-Platform gebunden, nicht an das Funktions-Argument.

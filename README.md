@@ -2,7 +2,7 @@
 
 OS-unabhängige Entwicklungs-Umgebung rund um Anthropic Claude. Tauri-GUI + Node-CLI + cloud-mount Vault-Sync.
 
-> **Status:** v1 in Entwicklung. Phase 0–6 abgeschlossen. Phase 6 (Tauri-GUI) shipped 6a–6h: Rust-Shell-Scaffold, `$TARGET_TRIPLE`-Sidecar-Build-Script, JSON-RPC-2.0-Bridge (Node + Rust), 3-Strikes-Supervisor mit graceful shutdown, Vite + React 19 + TS Frontend mit 7 Views (4 wired: Dashboard/Catalog/Vault/AgentRuns; 3 stubs: Chat/Settings/Secrets), Drag-Drop + inbox/outbox chokidar-Watcher mit Tauri-Event-Notifications, Icons + Bundle-Config + Sidecar-Restart-E2E. **529/532 Tests grün** (3 long-running gated hinter `RUN_SLOW_TESTS=1`). Offen: Phase 7 Cross-Platform-Validation + CI-Matrix + Docs-Rewrite + Tag v1.0.0. Tracker: [`tasks/todo.md`](tasks/todo.md).
+> **Status:** v1-rc.1. Phase 0–7 abgeschlossen (7g v1.0.0-Tag deferred bis externer Cross-OS-Smoke). Phase 6 (Tauri-GUI) shipped 6a–6h: Rust-Shell + Supervisor + JSON-RPC-Bridge + React-19-Frontend + Drag-Drop + Bundle. Phase 7 shipped 7a–7f: GitHub-Actions-Matrix (cli/rust-shell/gui-typecheck) + tauri-bundle Workflow (linux/win/macos-universal) + Cloud-Provider-Setup + Migration-from-portable-Guide + README-Tauri-Diagram + macOS-Gatekeeper-Workaround. **529/532 Tests grün** (3 long-running gated hinter `RUN_SLOW_TESTS=1`). Tracker: [`tasks/todo.md`](tasks/todo.md).
 >
 > Vorgänger: `claude-portable` (USB-only Variante). Die alten Launch-Scripts liegen in `legacy/` und sind nicht mehr aktiv.
 
