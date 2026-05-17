@@ -9,3 +9,10 @@ export {
   type AgentRunRecord,
 } from './types.js';
 export { JsonlWriter, sanitiseSegment } from './jsonl-writer.js';
+export {
+  AgentRunsIndex,
+  agentRunsIndexPathFor,
+  type IndexFileEnvelope,
+  type QueryOpts,
+  type RebuildResult,
+} from './index-builder.js';
