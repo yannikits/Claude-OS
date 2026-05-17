@@ -5,16 +5,25 @@
  * Format: `<kind>:<name>[<op><version>]`
  *   kind:    mcp | skill | command | agent | hook
  *   name:    [A-Za-z0-9._:-]+ (colon allowed for `command:<plugin>:<cmd>`)
- *   op:      `>=` | `>` | `<=` | `<` | `=` or omitted (any version matches)
- *   version: X.Y[.Z] dotted integer triple. v1 keeps the comparator
- *            minimal (no `^` / `~` ranges); those land in v1.x.
+ *   op:      `>=` | `>` | `<=` | `<` | `=` | `^` | `~` or omitted
+ *            (any version matches)
+ *   version: X.Y[.Z] dotted integer triple.
+ *
+ *   `^X.Y.Z` (caret) matches the left-most-non-zero npm semver rule:
+ *     ^1.2.3 -> >=1.2.3 <2.0.0
+ *     ^0.2.3 -> >=0.2.3 <0.3.0
+ *     ^0.0.3 -> ==0.0.3
+ *   `~X.Y.Z` (tilde) pins major+minor and allows patch bumps:
+ *     ~1.2.3 -> >=1.2.3 <1.3.0
+ *     ~1.2   -> >=1.2.0 <1.3.0
+ *     ~1     -> ==1.0.0  (v1 simplification — for "any 1.x.x" use ^1)
  *
  * @module @domains/catalog/capability
  */
 
 export type CapabilityKind = 'mcp' | 'skill' | 'command' | 'agent' | 'hook';
 
-export type ComparisonOp = '>=' | '>' | '<=' | '<' | '=';
+export type ComparisonOp = '>=' | '>' | '<=' | '<' | '=' | '^' | '~';
 
 export interface VersionConstraint {
   readonly op: ComparisonOp;
@@ -37,7 +46,7 @@ export class CapabilityParseError extends Error {
 
 const KINDS: ReadonlyArray<CapabilityKind> = ['mcp', 'skill', 'command', 'agent', 'hook'];
 const NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
-const OPS: ReadonlyArray<ComparisonOp> = ['>=', '<=', '=', '>', '<'];
+const OPS: ReadonlyArray<ComparisonOp> = ['>=', '<=', '=', '>', '<', '^', '~'];
 const VERSION_PATTERN = /^\d+(?:\.\d+){0,2}$/;
 
 function splitOnFirstOp(body: string): { name: string; constraint?: VersionConstraint } {
@@ -123,6 +132,21 @@ export function satisfies(candidate: string, constraint: VersionConstraint): boo
       return cmp <= 0;
     case '<':
       return cmp < 0;
+    case '^': {
+      if (cmp < 0) return false;
+      const [cMaj, cMin, cPat] = parseVersionTriple(candidate);
+      const [bMaj, bMin, bPat] = parseVersionTriple(constraint.version);
+      // Left-most-non-zero rule per npm semver.
+      if (bMaj > 0) return cMaj === bMaj;
+      if (bMin > 0) return cMaj === 0 && cMin === bMin;
+      return cMaj === 0 && cMin === 0 && cPat === bPat;
+    }
+    case '~': {
+      if (cmp < 0) return false;
+      const [cMaj, cMin] = parseVersionTriple(candidate);
+      const [bMaj, bMin] = parseVersionTriple(constraint.version);
+      return cMaj === bMaj && cMin === bMin;
+    }
   }
 }
 

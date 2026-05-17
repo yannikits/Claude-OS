@@ -115,4 +115,95 @@ describe('capabilityToString', () => {
     const cap = parseCapability('skill:pragmatic-review');
     expect(capabilityToString(cap)).toBe('skill:pragmatic-review');
   });
+
+  it('round-trips ^ and ~ constraints', () => {
+    expect(capabilityToString(parseCapability('mcp:x^1.2.3'))).toBe('mcp:x^1.2.3');
+    expect(capabilityToString(parseCapability('mcp:x~1.2.3'))).toBe('mcp:x~1.2.3');
+  });
+});
+
+describe('parseCapability with ^ / ~ operators', () => {
+  it('parses caret', () => {
+    const cap = parseCapability('mcp:filesystem^1.2.3');
+    expect(cap.constraint).toEqual({ op: '^', version: '1.2.3' });
+  });
+
+  it('parses tilde', () => {
+    const cap = parseCapability('skill:x~0.5.0');
+    expect(cap.constraint).toEqual({ op: '~', version: '0.5.0' });
+  });
+
+  it('rejects ^ with malformed version', () => {
+    expect(() => parseCapability('mcp:x^1.a.0')).toThrow(CapabilityParseError);
+  });
+});
+
+describe('satisfies ^ (caret, npm semver left-most-non-zero rule)', () => {
+  it('^1.2.3 matches >=1.2.3 within major 1', () => {
+    const c = { op: '^' as const, version: '1.2.3' };
+    expect(satisfies('1.2.3', c)).toBe(true);
+    expect(satisfies('1.2.99', c)).toBe(true);
+    expect(satisfies('1.99.0', c)).toBe(true);
+  });
+
+  it('^1.2.3 rejects pre-version + cross-major', () => {
+    const c = { op: '^' as const, version: '1.2.3' };
+    expect(satisfies('1.2.2', c)).toBe(false);
+    expect(satisfies('1.0.0', c)).toBe(false);
+    expect(satisfies('2.0.0', c)).toBe(false);
+    expect(satisfies('0.9.9', c)).toBe(false);
+  });
+
+  it('^0.2.3 stays within minor 0.2 (major-zero rule)', () => {
+    const c = { op: '^' as const, version: '0.2.3' };
+    expect(satisfies('0.2.3', c)).toBe(true);
+    expect(satisfies('0.2.99', c)).toBe(true);
+    expect(satisfies('0.3.0', c)).toBe(false);
+    expect(satisfies('1.0.0', c)).toBe(false);
+    expect(satisfies('0.2.2', c)).toBe(false);
+  });
+
+  it('^0.0.3 pins exactly to the patch (major+minor both zero)', () => {
+    const c = { op: '^' as const, version: '0.0.3' };
+    expect(satisfies('0.0.3', c)).toBe(true);
+    expect(satisfies('0.0.4', c)).toBe(false);
+    expect(satisfies('0.0.2', c)).toBe(false);
+    expect(satisfies('0.1.0', c)).toBe(false);
+  });
+
+  it('^ rejects non-version candidate strings', () => {
+    const c = { op: '^' as const, version: '1.2.3' };
+    expect(satisfies('not-a-version', c)).toBe(false);
+    expect(satisfies('1.2.3-beta', c)).toBe(false);
+  });
+});
+
+describe('satisfies ~ (tilde, major+minor pin)', () => {
+  it('~1.2.3 matches patch bumps inside 1.2.x', () => {
+    const c = { op: '~' as const, version: '1.2.3' };
+    expect(satisfies('1.2.3', c)).toBe(true);
+    expect(satisfies('1.2.99', c)).toBe(true);
+  });
+
+  it('~1.2.3 rejects minor bumps and pre-version', () => {
+    const c = { op: '~' as const, version: '1.2.3' };
+    expect(satisfies('1.3.0', c)).toBe(false);
+    expect(satisfies('1.2.2', c)).toBe(false);
+    expect(satisfies('2.2.3', c)).toBe(false);
+  });
+
+  it('~1.2 (no patch) accepts any 1.2.x', () => {
+    const c = { op: '~' as const, version: '1.2' };
+    expect(satisfies('1.2.0', c)).toBe(true);
+    expect(satisfies('1.2.99', c)).toBe(true);
+    expect(satisfies('1.3.0', c)).toBe(false);
+  });
+
+  it('~1 (just major) pins to 1.0.x per v1 simplification', () => {
+    const c = { op: '~' as const, version: '1' };
+    expect(satisfies('1.0.0', c)).toBe(true);
+    expect(satisfies('1.0.99', c)).toBe(true);
+    expect(satisfies('1.1.0', c)).toBe(false);
+    expect(satisfies('2.0.0', c)).toBe(false);
+  });
 });
