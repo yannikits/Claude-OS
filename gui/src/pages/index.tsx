@@ -18,6 +18,7 @@ function useRpc<T>(fetcher: () => Promise<T>): {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fetcher identity is stable per page mount; deps array intentionally empty so the fetch fires exactly once per mount
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -37,7 +38,6 @@ function useRpc<T>(fetcher: () => Promise<T>): {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: fetcher identity is stable per page mount
   }, []);
 
   return { data, error, loading };
