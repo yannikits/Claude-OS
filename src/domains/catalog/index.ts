@@ -99,6 +99,16 @@ export {
   SourceParseError,
 } from './source-resolver.js';
 export {
+  applyLock,
+  installDestinationFor,
+  mergeLockEntry,
+  type SyncAppliedEntry,
+  type SyncApplyOpts,
+  type SyncApplyResult,
+  type SyncError,
+  type SyncSkipReason,
+} from './sync-applier.js';
+export {
   type InstallResult,
   installFromTarball,
   TarballInstallError,

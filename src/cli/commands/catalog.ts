@@ -17,14 +17,17 @@ import type { Command } from 'commander';
 import { RootNotFoundError, resolveRoot } from '../../core/environment/index.js';
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import {
+  applyLock,
   type Catalog,
   type CatalogEntry,
+  type CatalogLock,
   catalogPathsFor,
   githubTarballUrl,
   InvalidCatalogError,
   installFromTarball,
   LockBuilderError,
   lockCatalog,
+  mergeLockEntry,
   type PluginManifest,
   parseSource,
   readCatalog,
@@ -336,18 +339,164 @@ async function actLock(globals: GlobalOpts): Promise<void> {
   }
 }
 
-function notInMvp(globals: GlobalOpts, action: string): void {
-  const hint =
-    `catalog ${action}: not in v1 MVP. The catalog.json + catalog.lock.json ` +
-    'lifecycle is staged for Phase 6 sidecar integration. The Phase 5 domain ' +
-    'primitives (BackupManager, MarketplaceRegistry, ScopeMerger, ' +
-    'CapabilityResolver) are shipped and unit-tested.';
-  if (globals.json === true) {
-    printJson({ ok: false, action, hint });
-  } else {
-    printErr(hint);
+async function actSync(globals: GlobalOpts): Promise<void> {
+  let root: ReturnType<typeof resolveRoot>;
+  try {
+    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
+  } catch (err) {
+    if (err instanceof RootNotFoundError) {
+      printErr(`catalog sync: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
   }
-  process.exit(2);
+  const paths = catalogPathsFor(root.path);
+  const machinePaths = resolveMachinePaths();
+  const cacheDir = tarballCacheDirFor(machinePaths.dataRoot);
+
+  let catalog: ReturnType<typeof readCatalog>;
+  let lock: CatalogLock | null;
+  try {
+    catalog = readCatalog(paths.catalogPath);
+    lock = readCatalogLock(paths.lockPath);
+  } catch (err) {
+    if (err instanceof InvalidCatalogError) {
+      printErr(`catalog sync: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  if (lock === null) {
+    printErr(
+      `catalog sync: no catalog.lock.json at ${paths.lockPath} — run \`catalog lock\` first`,
+    );
+    process.exit(2);
+  }
+
+  const result = await applyLock({
+    root: root.path,
+    catalog,
+    lock,
+    cacheDir,
+  });
+
+  if (globals.json === true) {
+    printJson({ applied: result.applied, skipped: result.skipped, errors: result.errors });
+  } else {
+    printLine(
+      `[OK] synced ${result.applied.length} entries (${result.skipped.length} skipped, ${result.errors.length} errors)`,
+    );
+    for (const a of result.applied) printLine(`     [OK]   ${a.id} -> ${a.destination}`);
+    for (const s of result.skipped) printLine(`     [SKIP] ${s.id}: ${s.reason}`);
+    for (const e of result.errors) printLine(`     [FAIL] ${e.id}: ${e.message}`);
+  }
+  if (result.errors.length > 0) process.exit(1);
+}
+
+async function actUpdate(globals: GlobalOpts, id: string | undefined): Promise<void> {
+  let root: ReturnType<typeof resolveRoot>;
+  try {
+    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
+  } catch (err) {
+    if (err instanceof RootNotFoundError) {
+      printErr(`catalog update: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  const paths = catalogPathsFor(root.path);
+  const machinePaths = resolveMachinePaths();
+  const cacheDir = tarballCacheDirFor(machinePaths.dataRoot);
+
+  let catalog: ReturnType<typeof readCatalog>;
+  let existingLock: CatalogLock | null;
+  try {
+    catalog = readCatalog(paths.catalogPath);
+    existingLock = readCatalogLock(paths.lockPath);
+  } catch (err) {
+    if (err instanceof InvalidCatalogError) {
+      printErr(`catalog update: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  if (catalog.entries.length === 0) {
+    printErr(`catalog update: catalog.json is empty (${paths.catalogPath})`);
+    process.exit(2);
+  }
+
+  // Without an id this is a full re-lock = alias for `catalog lock`.
+  if (id === undefined) {
+    let lockResult: Awaited<ReturnType<typeof lockCatalog>>;
+    try {
+      lockResult = await lockCatalog({ catalog, cacheDir });
+    } catch (err) {
+      if (err instanceof LockBuilderError) {
+        printErr(`catalog update: ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
+    }
+    writeCatalogLock(paths.lockPath, lockResult.lock);
+    if (globals.json === true) {
+      printJson({ lock: lockResult.lock, warnings: lockResult.warnings, scope: 'all' });
+      return;
+    }
+    printLine(
+      `[OK] re-locked ${lockResult.lock.entries.length}/${catalog.entries.length} entries (${lockResult.lock.resolvedAt})`,
+    );
+    for (const w of lockResult.warnings) printLine(`     [WARN] ${w}`);
+    return;
+  }
+
+  // Single-entry update: re-lock just `id`, merge into existing lock.
+  const targetEntry = catalog.entries.find((e) => e.id === id);
+  if (targetEntry === undefined) {
+    printErr(`catalog update: unknown id "${id}" in ${paths.catalogPath}`);
+    process.exit(1);
+  }
+  const slice: Catalog | Awaited<ReturnType<typeof readCatalog>> = {
+    version: 1,
+    entries: [targetEntry],
+  } as const as never;
+  let sliceResult: Awaited<ReturnType<typeof lockCatalog>>;
+  try {
+    sliceResult = await lockCatalog({ catalog: slice as never, cacheDir });
+  } catch (err) {
+    if (err instanceof LockBuilderError) {
+      printErr(`catalog update: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  const newEntry = sliceResult.lock.entries[0] ?? null;
+  const baseLock: CatalogLock = existingLock ?? {
+    version: 1,
+    resolvedAt: sliceResult.lock.resolvedAt,
+    entries: [],
+  };
+  const merged = mergeLockEntry(baseLock, id, newEntry, sliceResult.lock.resolvedAt);
+  writeCatalogLock(paths.lockPath, merged);
+
+  if (globals.json === true) {
+    printJson({
+      lock: merged,
+      warnings: sliceResult.warnings,
+      scope: 'one',
+      id,
+      replaced: newEntry !== null,
+    });
+    return;
+  }
+  if (newEntry === null) {
+    printLine(`[WARN] update ${id}: lock-builder produced no entry`);
+    for (const w of sliceResult.warnings) printLine(`     [WARN] ${w}`);
+    process.exit(1);
+  }
+  printLine(
+    `[OK] updated ${id} -> sha256=${newEntry.sha256.slice(0, 12)}..., resolvedRef=${newEntry.resolvedRef ?? 'HEAD'}, lock at ${merged.resolvedAt}`,
+  );
+  for (const w of sliceResult.warnings) printLine(`     [WARN] ${w}`);
 }
 
 export function registerCatalogCommand(program: Command): void {
@@ -404,12 +553,17 @@ export function registerCatalogCommand(program: Command): void {
       await actLock(command.optsWithGlobals<GlobalOpts>());
     });
 
-  for (const sub of ['update', 'sync']) {
-    catalog
-      .command(sub)
-      .description(`${sub} — staged for catalog.json lifecycle (Phase 6 sidecar)`)
-      .action((_opts: unknown, command: Command) => {
-        notInMvp(command.optsWithGlobals<GlobalOpts>(), sub);
-      });
-  }
+  catalog
+    .command('sync')
+    .description('Extract enabled lock entries into <root>/config/<bucket>/<id> install dirs')
+    .action(async (_opts: unknown, command: Command) => {
+      await actSync(command.optsWithGlobals<GlobalOpts>());
+    });
+
+  catalog
+    .command('update [id]')
+    .description('Re-lock entries: all (alias for `lock`) or just <id> (merged into existing lock)')
+    .action(async (id: string | undefined, _opts: unknown, command: Command) => {
+      await actUpdate(command.optsWithGlobals<GlobalOpts>(), id);
+    });
 }
