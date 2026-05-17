@@ -8,9 +8,9 @@ try {
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
 
-    $entry = Join-Path $repoRoot "dist\cli\index.js"
+    $entry = Join-Path $repoRoot "dist\sidecar\index.js"
     if (-not (Test-Path $entry)) {
-        throw "dist/cli/index.js missing after build"
+        throw "dist/sidecar/index.js missing after build"
     }
 
     Write-Host "[2/4] resolving rustc target triple"

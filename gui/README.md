@@ -26,7 +26,7 @@ cargo check
 |-----------|--------|--------|
 | 6a | Tauri-Rust-Shell-Scaffold | shipped |
 | 6b | Sidecar-Binary-Build-Script (`$TARGET_TRIPLE`) | shipped |
-| 6c | JSON-RPC-Bridge (Rust + Node) | pending |
+| 6c | JSON-RPC-Bridge (Rust + Node) | shipped |
 | 6d | Sidecar-Lifecycle + Health-Check | pending |
 | 6e | Vite + React + TS Frontend | pending |
 | 6f | 7 Views | pending |

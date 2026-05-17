@@ -7,8 +7,8 @@ cd "$repo_root"
 echo "[1/4] npm run build"
 npm run build
 
-entry="$repo_root/dist/cli/index.js"
-[[ -f "$entry" ]] || { echo "dist/cli/index.js missing after build" >&2; exit 1; }
+entry="$repo_root/dist/sidecar/index.js"
+[[ -f "$entry" ]] || { echo "dist/sidecar/index.js missing after build" >&2; exit 1; }
 
 echo "[2/4] resolving rustc target triple"
 if ! command -v rustc >/dev/null 2>&1; then
