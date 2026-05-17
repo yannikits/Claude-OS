@@ -50,6 +50,12 @@ export {
   writeCatalogLock,
 } from './catalog-store.js';
 export {
+  LockBuilderError,
+  type LockBuilderOpts,
+  type LockBuilderResult,
+  lockCatalog,
+} from './lock-builder.js';
+export {
   fileLoader,
   type MarketplaceEntry,
   type MarketplacePlugin,

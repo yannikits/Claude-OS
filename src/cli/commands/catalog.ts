@@ -23,6 +23,8 @@ import {
   githubTarballUrl,
   InvalidCatalogError,
   installFromTarball,
+  LockBuilderError,
+  lockCatalog,
   type PluginManifest,
   parseSource,
   readCatalog,
@@ -34,6 +36,7 @@ import {
   TarballInstallError,
   tarballCacheDirFor,
   UnknownCatalogEntryError,
+  writeCatalogLock,
 } from '../../domains/catalog/index.js';
 
 interface GlobalOpts {
@@ -275,6 +278,64 @@ function actUninstall(globals: GlobalOpts, id: string): void {
   }
 }
 
+async function actLock(globals: GlobalOpts): Promise<void> {
+  let root: ReturnType<typeof resolveRoot>;
+  try {
+    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
+  } catch (err) {
+    if (err instanceof RootNotFoundError) {
+      printErr(`catalog lock: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  const paths = catalogPathsFor(root.path);
+  const machinePaths = resolveMachinePaths();
+  const cacheDir = tarballCacheDirFor(machinePaths.dataRoot);
+
+  let catalog: ReturnType<typeof readCatalog>;
+  try {
+    catalog = readCatalog(paths.catalogPath);
+  } catch (err) {
+    if (err instanceof InvalidCatalogError) {
+      printErr(`catalog lock: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  if (catalog.entries.length === 0) {
+    printErr(`catalog lock: catalog.json is empty (${paths.catalogPath})`);
+    process.exit(2);
+  }
+
+  let result: Awaited<ReturnType<typeof lockCatalog>>;
+  try {
+    result = await lockCatalog({ catalog, cacheDir });
+  } catch (err) {
+    if (err instanceof LockBuilderError) {
+      printErr(`catalog lock: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  writeCatalogLock(paths.lockPath, result.lock);
+
+  if (globals.json === true) {
+    printJson({
+      lockPath: paths.lockPath,
+      lock: result.lock,
+      warnings: result.warnings,
+    });
+    return;
+  }
+  printLine(
+    `[OK] wrote ${paths.lockPath} (${result.lock.entries.length}/${catalog.entries.length} entries, resolved ${result.lock.resolvedAt})`,
+  );
+  for (const w of result.warnings) {
+    printLine(`     [WARN] ${w}`);
+  }
+}
+
 function notInMvp(globals: GlobalOpts, action: string): void {
   const hint =
     `catalog ${action}: not in v1 MVP. The catalog.json + catalog.lock.json ` +
@@ -336,7 +397,14 @@ export function registerCatalogCommand(program: Command): void {
       actUninstall(command.optsWithGlobals<GlobalOpts>(), id);
     });
 
-  for (const sub of ['update', 'lock', 'sync']) {
+  catalog
+    .command('lock')
+    .description('Compute catalog.lock.json from catalog.json (sha256 + resolvedRef per entry)')
+    .action(async (_opts: unknown, command: Command) => {
+      await actLock(command.optsWithGlobals<GlobalOpts>());
+    });
+
+  for (const sub of ['update', 'sync']) {
     catalog
       .command(sub)
       .description(`${sub} — staged for catalog.json lifecycle (Phase 6 sidecar)`)
