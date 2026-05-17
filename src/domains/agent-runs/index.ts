@@ -16,3 +16,9 @@ export {
   type QueryOpts,
   type RebuildResult,
 } from './index-builder.js';
+export { VaultWriter } from './vault-writer.js';
+export {
+  AgentRunsRepository,
+  type RecordOpts,
+  type RecordResult,
+} from './repository.js';
