@@ -48,7 +48,7 @@ export class MarketplaceRegistryError extends Error {
   }
 }
 
-type RegistryLoader = () => Promise<MarketplaceRegistryFile> | MarketplaceRegistryFile;
+export type RegistryLoader = () => Promise<MarketplaceRegistryFile> | MarketplaceRegistryFile;
 
 interface RegistryOpts {
   readonly load: RegistryLoader;
@@ -92,6 +92,26 @@ function isRegistryFile(value: unknown): value is MarketplaceRegistryFile {
   return true;
 }
 
+/**
+ * Validates a raw JSON string against the registry shape. Used by both
+ * `fileLoader` and `urlLoader` (Phase 5k) so the parse + structural
+ * check is single-sourced.
+ */
+export function validateRegistry(raw: string, source: string): MarketplaceRegistryFile {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new MarketplaceRegistryError(
+      `registry ${source} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!isRegistryFile(parsed)) {
+    throw new MarketplaceRegistryError(`registry ${source} has invalid shape`);
+  }
+  return parsed;
+}
+
 /** Returns a loader that reads + validates a JSON file at `path`. */
 export function fileLoader(path: string): RegistryLoader {
   return () => {
@@ -106,18 +126,7 @@ export function fileLoader(path: string): RegistryLoader {
         `cannot read registry ${path}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      throw new MarketplaceRegistryError(
-        `registry ${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!isRegistryFile(parsed)) {
-      throw new MarketplaceRegistryError(`registry ${path} has invalid shape`);
-    }
-    return parsed;
+    return validateRegistry(raw, path);
   };
 }
 

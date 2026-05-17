@@ -51,7 +51,10 @@ export {
   MarketplaceRegistry,
   MarketplaceRegistryError,
   type MarketplaceRegistryFile,
+  type RegistryLoader,
+  validateRegistry,
 } from './marketplace-registry.js';
+export { type UrlLoaderOpts, urlLoader } from './marketplace-url-loader.js';
 export {
   type CatalogConfig,
   CatalogConfigJsonSchema,
