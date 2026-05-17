@@ -12,3 +12,8 @@ export {
   backupPathFor,
   type BackupEntry,
 } from './backup-manager.js';
+export {
+  ZoneClassifier,
+  type Classification,
+  type Zone,
+} from './zone-classifier.js';
