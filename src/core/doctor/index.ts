@@ -3,12 +3,14 @@
  *
  * @module @core/doctor
  */
-export { runDoctor } from './runner.js';
+
 export {
-  checkNodeVersion,
-  checkGitAvailable,
   checkClaudeBinary,
+  checkGitAvailable,
   checkMountReachable,
+  checkNodeVersion,
+  checkWindowsLongPaths,
   checkWritePermission,
 } from './checks.js';
-export type { CheckResult, DoctorReport, CheckSeverity, CheckFn } from './types.js';
+export { runDoctor } from './runner.js';
+export type { CheckFn, CheckResult, CheckSeverity, DoctorReport } from './types.js';

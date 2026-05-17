@@ -3,4 +3,4 @@
  *
  * @module @core/validation
  */
-export { formatErrors, formatPath, assertValid, ValidationError } from './format.js';
+export { assertValid, formatErrors, formatPath, ValidationError } from './format.js';

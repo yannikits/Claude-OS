@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runDoctor } from '../../../src/core/doctor/index.js';
 
 describe('runDoctor', () => {
@@ -16,9 +16,9 @@ describe('runDoctor', () => {
     if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('runs all 5 checks when root resolves', async () => {
+  it('runs all 6 checks when root resolves', async () => {
     const report = await runDoctor({ explicitRoot: tmpRoot });
-    expect(report.checks).toHaveLength(5);
+    expect(report.checks).toHaveLength(6);
     const names = report.checks.map((c) => c.name).sort();
     expect(names).toEqual(
       [
@@ -26,6 +26,7 @@ describe('runDoctor', () => {
         'git-available',
         'mount-reachable',
         'node-version',
+        'windows-long-paths',
         'write-permission',
       ].sort(),
     );
@@ -49,8 +50,8 @@ describe('runDoctor', () => {
   it('runs only root-independent checks when root unresolvable', async () => {
     const bogus = join(tmpRoot, 'does-not-exist');
     const report = await runDoctor({ explicitRoot: bogus });
-    // root-resolution + node-version + git-available = 3
-    expect(report.checks).toHaveLength(3);
+    // root-resolution + node-version + git-available + windows-long-paths = 4
+    expect(report.checks).toHaveLength(4);
   });
 
   it('summary counts match check severities', async () => {

@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest';
 import { Writable } from 'node:stream';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createLogger } from '../../../src/core/logging/index.js';
 
 /**

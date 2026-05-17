@@ -6,12 +6,13 @@
  *
  * @module @core/doctor/checks
  */
-import { existsSync, accessSync, constants as fsConstants } from 'node:fs';
-import { join } from 'node:path';
+
 import { exec } from 'node:child_process';
+import { accessSync, existsSync, constants as fsConstants } from 'node:fs';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { CheckResult, CheckFn } from './types.js';
 import type { ResolvedRoot } from '../environment/index.js';
+import type { CheckFn, CheckResult } from './types.js';
 
 const execAsync = promisify(exec);
 
@@ -116,6 +117,43 @@ export async function checkMountReachable(root: ResolvedRoot): Promise<CheckResu
       severity: 'ok',
       message: `${root.path} (source=${root.source}, cloud=${root.cloudProvider})`,
     });
+  });
+}
+
+export async function checkWindowsLongPaths(): Promise<CheckResult> {
+  return timed('windows-long-paths', async () => {
+    if (process.platform !== 'win32') {
+      return {
+        name: 'windows-long-paths',
+        severity: 'ok',
+        message: 'not applicable (non-Windows)',
+      };
+    }
+    try {
+      const { stdout } = await execAsync('git config --global --get core.longpaths');
+      const value = stdout.trim().toLowerCase();
+      if (value === 'true') {
+        return {
+          name: 'windows-long-paths',
+          severity: 'ok',
+          message: 'git core.longpaths=true (vault deep-tree paths supported)',
+        };
+      }
+      return {
+        name: 'windows-long-paths',
+        severity: 'warn',
+        message: `git core.longpaths="${value}" — paths >260 chars may fail`,
+        hint: 'Run: git config --global core.longpaths true',
+      };
+    } catch {
+      // Non-zero exit usually means the key is unset.
+      return {
+        name: 'windows-long-paths',
+        severity: 'warn',
+        message: 'git core.longpaths is unset — paths >260 chars may fail',
+        hint: 'Run: git config --global core.longpaths true',
+      };
+    }
   });
 }
 

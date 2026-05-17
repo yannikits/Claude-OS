@@ -3,6 +3,6 @@
  *
  * @module @core/environment
  */
-export { resolveRoot, detectCloudProvider } from './root-resolver.js';
+export { detectCloudProvider, resolveRoot } from './root-resolver.js';
+export type { CloudProvider, ResolvedRoot, RootSource } from './types.js';
 export { RootNotFoundError } from './types.js';
-export type { ResolvedRoot, CloudProvider, RootSource } from './types.js';

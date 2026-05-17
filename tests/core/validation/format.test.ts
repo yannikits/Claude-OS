@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
 import { Type } from '@sinclair/typebox';
+import { describe, expect, it } from 'vitest';
 import {
+  assertValid,
   formatErrors,
   formatPath,
-  assertValid,
   ValidationError,
 } from '../../../src/core/validation/index.js';
 
@@ -42,9 +42,7 @@ const UserSchema = Type.Object({
 
 describe('formatErrors', () => {
   it('returns [] for valid input', () => {
-    expect(
-      formatErrors(UserSchema, { id: 'u1', age: 30, email: 'a@b.com' }),
-    ).toEqual([]);
+    expect(formatErrors(UserSchema, { id: 'u1', age: 30, email: 'a@b.com' })).toEqual([]);
   });
 
   it('reports missing required field', () => {

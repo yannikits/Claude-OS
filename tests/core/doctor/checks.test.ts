@@ -1,12 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  checkNodeVersion,
-  checkGitAvailable,
   checkClaudeBinary,
+  checkGitAvailable,
   checkMountReachable,
+  checkNodeVersion,
+  checkWindowsLongPaths,
   checkWritePermission,
 } from '../../../src/core/doctor/index.js';
 import type { ResolvedRoot } from '../../../src/core/environment/index.js';
@@ -119,5 +120,21 @@ describe('checkWritePermission', () => {
   it('returns fail for non-existent path', async () => {
     const result = await checkWritePermission(join(tmpRoot, 'nonexistent'));
     expect(result.severity).toBe('fail');
+  });
+});
+
+describe('checkWindowsLongPaths', () => {
+  it('returns ok with "not applicable" on non-Windows', async () => {
+    if (process.platform === 'win32') return; // platform-specific test
+    const result = await checkWindowsLongPaths();
+    expect(result.severity).toBe('ok');
+    expect(result.message).toContain('not applicable');
+  });
+
+  it('returns ok or warn on Windows depending on global git config', async () => {
+    if (process.platform !== 'win32') return;
+    const result = await checkWindowsLongPaths();
+    expect(['ok', 'warn']).toContain(result.severity);
+    expect(result.name).toBe('windows-long-paths');
   });
 });

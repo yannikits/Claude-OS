@@ -15,8 +15,8 @@
  * @module @core/environment/root-resolver
  */
 import { existsSync, statSync } from 'node:fs';
-import { resolve, join, dirname, parse } from 'node:path';
-import type { ResolvedRoot, CloudProvider } from './types.js';
+import { dirname, join, parse, resolve } from 'node:path';
+import type { CloudProvider, ResolvedRoot } from './types.js';
 import { RootNotFoundError } from './types.js';
 
 const MARKER_FILE = '.claude-os-root';
@@ -32,7 +32,11 @@ export function detectCloudProvider(path: string): CloudProvider {
   // rclone first — its mount-points can contain other provider names
   // (e.g. /mnt/rclone/onedrive/...). rclone is the file-watcher-relevant
   // layer regardless of what's being mounted underneath.
-  if (lower.includes('/mnt/rclone') || lower.includes('\\rclone') || lower.includes('/rclone-mount')) {
+  if (
+    lower.includes('/mnt/rclone') ||
+    lower.includes('\\rclone') ||
+    lower.includes('/rclone-mount')
+  ) {
     return 'rclone';
   }
   if (
@@ -42,7 +46,11 @@ export function detectCloudProvider(path: string): CloudProvider {
   ) {
     return 'onedrive';
   }
-  if (lower.includes('google drive') || lower.includes('drivefs') || lower.includes('googledrive')) {
+  if (
+    lower.includes('google drive') ||
+    lower.includes('drivefs') ||
+    lower.includes('googledrive')
+  ) {
     return 'gdrive';
   }
   if (lower.includes('dropbox')) return 'dropbox';
@@ -68,10 +76,7 @@ function isClaudeOsRoot(path: string): boolean {
   }
   if (!stat.isDirectory()) return false;
   if (existsSync(join(path, MARKER_FILE))) return true;
-  if (
-    existsSync(join(path, 'bin', 'claude.exe')) ||
-    existsSync(join(path, 'bin', 'claude'))
-  ) {
+  if (existsSync(join(path, 'bin', 'claude.exe')) || existsSync(join(path, 'bin', 'claude'))) {
     return true;
   }
   return false;

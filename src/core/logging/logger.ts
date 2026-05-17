@@ -16,8 +16,8 @@
  *
  * @module @core/logging/logger
  */
-import { pino, type Logger, type LoggerOptions, type DestinationStream } from 'pino';
-import { REDACT_PATHS, REDACT_CENSOR } from './redact-paths.js';
+import { type DestinationStream, type Logger, type LoggerOptions, pino } from 'pino';
+import { REDACT_CENSOR, REDACT_PATHS } from './redact-paths.js';
 
 const VALID_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 export type LogLevel = (typeof VALID_LEVELS)[number];

@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# claude-os POSIX shim — invokes the compiled CLI with passthrough args.
+# Build the project once via `npm run build` before first use.
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$DIR/dist/cli/index.js" "$@"

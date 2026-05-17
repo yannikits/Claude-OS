@@ -1,2 +1,19 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Force LF line-endings repo-wide so biome/prettier formatting checks
+# stay deterministic across Windows / macOS / Linux checkouts. With
+# `text=auto` only, Git auto-normalises to LF in the repo but Windows
+# checkouts re-introduce CRLF on disk via core.autocrlf=true, which
+# biome (LF-only by default) then flags as "content differs from
+# formatting output". `eol=lf` pins on-disk EOL too.
+* text=auto eol=lf
+
+# Binary assets must not be normalised
+*.png       binary
+*.ico       binary
+*.icns      binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.pdf       binary
+*.zip       binary
+*.gz        binary
+*.tgz       binary

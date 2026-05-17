@@ -11,8 +11,9 @@
  *
  * @module @core/validation/format
  */
-import { Value, type ValueError } from '@sinclair/typebox/value';
+
 import type { TSchema } from '@sinclair/typebox';
+import { Value, type ValueError } from '@sinclair/typebox/value';
 
 /**
  * Validate `value` against `schema`. Returns an empty array on success;

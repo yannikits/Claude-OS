@@ -7,7 +7,7 @@
  *
  * @module @cli/presenters/doctor
  */
-import type { DoctorReport, CheckSeverity } from '../../core/doctor/index.js';
+import type { CheckSeverity, DoctorReport } from '../../core/doctor/index.js';
 
 const MARKER: Record<CheckSeverity, string> = {
   ok: '[OK]  ',
