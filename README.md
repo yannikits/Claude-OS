@@ -121,6 +121,67 @@ Der Vault-Status auf der zweiten Maschine wird durch den Cloud-Sync-Client gepul
 - **`vault-sync-state.json`** — Persistent Busy-Flag (Crash-Recovery)
 - **`secrets.enc`** — AES-256-GCM Fallback wenn OS-Keychain nicht verfügbar
 
+## Tauri-GUI (Phase 6)
+
+Desktop-App-Shell mit Claude-Desktop-Look-and-Feel (per [ADR-0001](docs/architecture/adr/0001-gui-framework-tauri.md) / [ADR-0006](docs/architecture/adr/0006-sidecar-architecture.md)).
+
+```
++-------------------------------------+
+|  Tauri Window (WebView)             |
+|  React 19 + Vite + react-router     |
+|  Views: Dashboard / Catalog /       |
+|         Vault / AgentRuns / +3 stubs|
++----------------+--------------------+
+                 | invoke("rpc_call") +
+                 | listen("...://...")
++----------------v--------------------+
+|  Rust Shell (claude-os-shell.exe)   |
+|  - SupervisorState (Arc-managed)    |
+|  - 3-strikes backoff (1s/4s/16s)    |
+|  - 30s ping health-check            |
+|  - graceful shutdown                |
+|    (shutdown-RPC -> 2s -> kill)     |
+|  - DragDrop dedup (paths-hash       |
+|    + 200ms time-bucket)             |
++----------------+--------------------+
+                 | stdio NDJSON (json-rpc 2.0)
++----------------v--------------------+
+|  Node Sidecar (claude-os-sidecar    |
+|                -<TARGET_TRIPLE>.exe)|
+|  - RpcDispatcher                    |
+|  - Domain methods (catalog.list /   |
+|    vault.status / agent.list /      |
+|    inbox.import)                    |
+|  - chokidar watcher                 |
+|    (inbox/ + outbox/)               |
++-------------------------------------+
+```
+
+GUI bauen + starten:
+
+```powershell
+# Erst Sidecar-Binary für die eigene Plattform
+npm run sidecar:build
+
+# Dann Tauri dev oder full bundle
+cd gui
+npm install
+npm run tauri:dev      # entwicklung
+npm run tauri:build    # produktion: MSI / DMG / AppImage
+```
+
+Voraussetzung: Rust-Toolchain via [rustup](https://rustup.rs/) + plattformspezifische Build-Tools. Details + Gatekeeper-Workaround in [`gui/README.md`](gui/README.md).
+
+## Weitere Docs
+
+- [`docs/cloud-providers.md`](docs/cloud-providers.md) — Setup für OneDrive, Drive, Dropbox, Nextcloud, rclone, abraunegg/onedrive
+- [`docs/migration-from-portable.md`](docs/migration-from-portable.md) — 7-Schritte-Migration von claude-portable v0.x (USB) zu claude-os v1
+- [`docs/macos-gatekeeper.md`](docs/macos-gatekeeper.md) — unsignierte DMG auf macOS öffnen
+- [`gui/README.md`](gui/README.md) — Tauri-Shell + Sidecar build
+- [`tasks/todo.md`](tasks/todo.md) — Phase-Tracker, Reviews, Deferrals
+- [`tasks/lessons.md`](tasks/lessons.md) — cross-session pattern-Sammlung
+- [`docs/architecture/adr/`](docs/architecture/adr/) — 14 ADRs (siehe unten)
+
 ## Architektur-Entscheidungen
 
 Alle wesentlichen Design-Entscheidungen sind in [`docs/architecture/adr/`](docs/architecture/adr/) als ADRs dokumentiert. Hot-Spots:

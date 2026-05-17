@@ -180,18 +180,15 @@
 
 ## Phase 7 — Cross-Platform-Validation und Docs (16 h, M, deps: Phase 6)
 
-**Ziel:** Beweis der OS-Unabhängigkeit, vollständige Doku.
+**Ziel:** Beweis der OS-Unabhängigkeit, vollständige Doku. Aufgeteilt in 7 Sub-Phasen (7a–7g).
 
-- [ ] macOS-Build via `tauri build`, manueller Run auf macOS-VM
-- [ ] Linux-AppImage-Build, Run unter Ubuntu LTS
-- [ ] `docs/cloud-providers.md` — Setups für OneDrive (Default), Google Drive, Dropbox, Nextcloud, rclone, `abraunegg/onedrive` für Linux
-- [ ] `docs/migration-from-portable.md` — Schritt-für-Schritt für Bestands-User
-- [ ] README rewrite (Deutsch, Bootstrap, Quickstart, Architekturdiagramm)
-- [ ] **CI: GitHub Actions Matrix via `tauri-apps/tauri-action@v0`** über `windows-latest`, `macos-latest`, `ubuntu-22.04` für `build` + `test` + `biome ci`
-- [ ] **Sidecar-Pre-Build im Workflow**: `$TARGET_TRIPLE`-Suffix-Binaries vor `tauri build` (Hoppscotch-Pattern: `rustc -Vv | grep host` → Resolver-Step für triple-Name)
-- [ ] **macOS-Universal**: separate Builds für `x86_64-apple-darwin` + `aarch64-apple-darwin` (sonst Bundling-Fail)
-- [ ] **Gatekeeper-Workaround-Doc** für unsignierte macOS-DMG (Phase 6 lieferte ungezeichnet)
-- [ ] Tag v1.0.0
+- [x] **Phase 7a — GitHub Actions CI Matrix** (2026-05-17). `.github/workflows/ci.yml`: `cli` job auf ubuntu-22.04 / windows-latest / macos-latest × Node 24 (npm ci → biome ci → tsc --noEmit → vitest --coverage). `rust-shell` job auf ubuntu-22.04 mit webkit2gtk-deps + actions-rust-lang/setup-rust-toolchain@v1 + Swatinem/rust-cache@v2 (cargo check --all-targets / cargo test / cargo clippy -D warnings auf gui/src-tauri). `gui-typecheck` job mit dual-package-lock-cache (root + gui/) und gui tsc -b.
+- [x] **Phase 7b — Tauri-Bundle-Workflow** (2026-05-17). `.github/workflows/tauri-bundle.yml`: triggered on tag push `v*.*.*` ODER workflow_dispatch. Matrix: linux-x86_64 (ubuntu-22.04) / windows-x86_64 / macos-universal mit `--target universal-apple-darwin`. Steps: rustup-stable + macos rustup targets (x86_64 + aarch64), linux deps install, npm ci (root + gui), `npm run build` → `npm run sidecar:build` ($TARGET_TRIPLE Hoppscotch), tauri-apps/tauri-action@v0 mit projectPath: gui + draft release. upload-artifact für .msi/.dmg/.AppImage.
+- [x] **Phase 7c — docs/cloud-providers.md** (2026-05-17). Setup für OneDrive (Default, mit Files-On-Demand + Long-Path-Hinweisen), Google Drive (Mirroring vs. Streaming, reservierte Zeichen), Dropbox (Selective Sync), Nextcloud/ownCloud (VFS deaktivieren), rclone (--vfs-cache-mode writes + --vfs-write-back 10s), abraunegg/onedrive für Linux (systemd-Unit), lokal. Was claude-os pro Provider erkennt via detectCloudProvider().
+- [x] **Phase 7d — docs/migration-from-portable.md** (2026-05-17). 7-Schritte-Guide für v0.x→v1 Migration: USB-Backup, Cloud-Mount-Setup, Vault-robocopy /E /COPYALL, Configs-robocopy (ohne vault/.git und cache/), claude-os install + `doctor --init-marker`, **critical** `doctor --migrate-git-metadata` (idempotent), Auth + Secrets neu aufsetzen. Verifikation-Block, Rollback-Block, Bekannte-Stolpersteine.
+- [x] **Phase 7e — README rewrite + Tauri-GUI section + Docs-Links** (2026-05-17). Status-Block auf Phase 0-6 complete + 529/532 Tests grün. Neue "Tauri-GUI (Phase 6)" Sektion mit ASCII-Topology-Diagram (WebView → Rust-Shell mit Supervisor/DragDrop-Dedup → Sidecar via stdio NDJSON → chokidar/methods). Build-Anweisungen (npm run sidecar:build → tauri:dev/build). Neue "Weitere Docs" Sektion verlinkt cloud-providers, migration-from-portable, macos-gatekeeper, gui/README.md, tasks/todo.md, tasks/lessons.md, adr/.
+- [x] **Phase 7f — Gatekeeper-Workaround-Doc** (2026-05-17). `docs/macos-gatekeeper.md`: 3 Workarounds (xattr -d com.apple.quarantine empfohlen, Right-Click→Open one-time, spctl --master-disable systemweit nicht empfohlen). Was v1 NICHT macht (kein Signing, kein Notarization). Future v1.x: signed + notarized mit Apple-Dev-Account, geplante ENVs (APPLE_CERTIFICATE/PASSWORD/SIGNING_IDENTITY/ID/PASSWORD/TEAM_ID). macOS-Universal-Config wurde bereits in 7b workflow (`--target universal-apple-darwin`) gehandled.
+- [ ] **Phase 7g — v1.0.0 tag**. Erst nach grüner CI-Matrix + tatsächlichen OS-Smoke-Tests durch User auf macOS + Linux. NICHT in dieser Session geshipped — braucht externe Verifikation.
 
 **Test-Kriterium:** Grüne CI-Matrix; Smoke-Test je OS dokumentiert.
 
