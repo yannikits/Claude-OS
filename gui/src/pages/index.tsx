@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import {
   type AgentListResult,
   type CatalogListResult,
+  getSettings,
   getVaultStatus,
   listAgentRuns,
   listCatalog,
   ping,
+  type SettingsReadResult,
   type VaultStatusResult,
 } from '../lib/rpc';
 
@@ -218,12 +220,97 @@ export function ChatPage() {
   );
 }
 
-export function SettingsPage() {
+function YesNo({ value }: { value: boolean }) {
   return (
-    <Stub
-      title="Settings"
-      hint="settings.local.json + Anthropic-config-dir surface wired in der 6f-tail. Aktuell nur Anzeige geplant — Mutation per CLI."
-    />
+    <span className={value ? 'badge badge-ok' : 'badge badge-muted'}>{value ? 'ja' : 'nein'}</span>
+  );
+}
+
+export function SettingsPage() {
+  const { data, error, loading } = useRpc<SettingsReadResult>(() => getSettings());
+  return (
+    <section className="page">
+      <h1>Settings</h1>
+      <p className="muted">
+        Read-only Anzeige. Änderungen aktuell nur per CLI (<code>claude-os auth …</code>,{' '}
+        <code>claude-os secrets …</code>).
+      </p>
+      <Status loading={loading} error={error} />
+      {data && (
+        <>
+          <h2>Anthropic Setup</h2>
+          <dl className="kv">
+            <dt>Config-Verzeichnis</dt>
+            <dd>
+              <code>{data.anthropic.resolvedConfigDir}</code>
+            </dd>
+            <dt>$ANTHROPIC_CONFIG_DIR</dt>
+            <dd>{data.anthropic.envOverride ?? <span className="muted">(unset)</span>}</dd>
+            <dt>Aktives Profil</dt>
+            <dd>{data.anthropic.activeProfile ?? <span className="muted">(default)</span>}</dd>
+            <dt>Verfügbare Profile</dt>
+            <dd>
+              {data.anthropic.availableProfiles.length === 0 ? (
+                <span className="muted">keine</span>
+              ) : (
+                data.anthropic.availableProfiles.map((p) => (
+                  <span key={p.name} className={p.active ? 'badge badge-ok' : 'badge badge-muted'}>
+                    {p.name}
+                  </span>
+                ))
+              )}
+            </dd>
+            <dt>.credentials.json vorhanden</dt>
+            <dd>
+              <YesNo value={data.anthropic.credentialsFileExists} />{' '}
+              <code className="muted">{data.anthropic.credentialsFile}</code>
+            </dd>
+          </dl>
+
+          <h2>Secrets-Backend</h2>
+          <dl className="kv">
+            <dt>Aktives Backend</dt>
+            <dd>
+              <code>{data.secrets.backend}</code>
+            </dd>
+            <dt>$CLAUDE_OS_SECRETS_BACKEND</dt>
+            <dd>{data.secrets.envOverride ?? <span className="muted">(unset)</span>}</dd>
+          </dl>
+
+          <h2>Claude-Code-Settings</h2>
+          <p className="muted">
+            Informationell — diese Dateien gehören zu Claude-Code, nicht zu claude-os. Wird nur die
+            Existenz angezeigt, keine Inhalte.
+          </p>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>scope</th>
+                <th>name</th>
+                <th>vorhanden</th>
+                <th>Größe</th>
+                <th>geändert</th>
+                <th>Pfad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.claudeCodeSettings.map((f) => (
+                <tr key={`${f.scope}:${f.name}`}>
+                  <td>{f.scope}</td>
+                  <td>{f.name}</td>
+                  <td>
+                    <YesNo value={f.exists} />
+                  </td>
+                  <td>{f.size === null ? '—' : `${f.size} B`}</td>
+                  <td>{f.mtime ?? '—'}</td>
+                  <td className="ellipsis">{f.path}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </section>
   );
 }
 

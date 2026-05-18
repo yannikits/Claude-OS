@@ -84,6 +84,40 @@ export async function listAgentRuns(
   return rpcCall<AgentListResult>('agent.list', opts);
 }
 
+export interface SettingsProfile {
+  name: string;
+  active: boolean;
+}
+
+export interface ClaudeCodeSettingsFile {
+  scope: 'global' | 'project';
+  name: 'settings.json' | 'settings.local.json';
+  path: string;
+  exists: boolean;
+  mtime: string | null;
+  size: number | null;
+}
+
+export interface SettingsReadResult {
+  anthropic: {
+    resolvedConfigDir: string;
+    envOverride: string | null;
+    activeProfile: string | null;
+    availableProfiles: SettingsProfile[];
+    credentialsFile: string;
+    credentialsFileExists: boolean;
+  };
+  secrets: {
+    backend: 'keyring' | 'encrypted-file';
+    envOverride: string | null;
+  };
+  claudeCodeSettings: ClaudeCodeSettingsFile[];
+}
+
+export async function getSettings(): Promise<SettingsReadResult> {
+  return rpcCall<SettingsReadResult>('settings.read');
+}
+
 export const FILES_DROPPED_EVENT = 'files://dropped';
 export const INBOX_CHANGED_EVENT = 'inbox://changed';
 export const OUTBOX_CHANGED_EVENT = 'outbox://changed';
