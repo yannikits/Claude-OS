@@ -49,3 +49,6 @@ outbox/
 
 # Claude Code per-machine local settings (convention: *.local.json is never committed)
 .claude/settings.local.json
+# Claude Code scheduled-task scratch (session-only state)
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock

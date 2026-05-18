@@ -1,17 +1,27 @@
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { resolveRoot } from '../core/environment/index.js';
 import { resolveMachinePaths } from '../core/paths/index.js';
 import { AgentRunsRepository, agentRunsIndexPathFor } from '../domains/agent-runs/index.js';
+import { ProfileManager } from '../domains/auth/index.js';
 import { catalogPathsFor, readCatalog, readCatalogLock } from '../domains/catalog/index.js';
+import { createSecretStore } from '../domains/secrets/index.js';
 import { BusyFlag, loadVaultConfig } from '../domains/vault-sync/index.js';
 import type { RpcDispatcher } from './rpc.js';
+
+interface MethodOpts {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly home?: string;
+}
 
 function rootPath(): string {
   return resolveRoot({}).path;
 }
 
-export function registerMethods(dispatcher: RpcDispatcher): void {
+export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}): void {
+  const env = (): NodeJS.ProcessEnv => opts.env ?? process.env;
+  const home = (): string => opts.home ?? homedir();
   dispatcher.register('catalog.list', () => {
     const paths = catalogPathsFor(rootPath());
     const catalog = readCatalog(paths.catalogPath);
@@ -50,6 +60,69 @@ export function registerMethods(dispatcher: RpcDispatcher): void {
       written.push(dest);
     }
     return { count: written.length, paths: written };
+  });
+
+  dispatcher.register('settings.read', () => {
+    const machine = resolveMachinePaths();
+    const profileMgr = new ProfileManager({ dataRoot: machine.dataDir });
+    const activeProfile = profileMgr.active();
+    const profiles = profileMgr.list();
+    const e = env();
+    const h = home();
+    const envOverride = e.ANTHROPIC_CONFIG_DIR ?? null;
+    const resolvedAnthropicConfigDir =
+      envOverride ?? profileMgr.resolveEnvOverride() ?? join(h, '.claude');
+    const credentialsFile = join(resolvedAnthropicConfigDir, '.credentials.json');
+    const credentialsFileExists = existsSync(credentialsFile);
+    const secretsBackend = createSecretStore({ env: e }).backend;
+    const secretsBackendOverride = e.CLAUDE_OS_SECRETS_BACKEND ?? null;
+
+    const claudeCodeRoots = [
+      { label: 'global', path: join(h, '.claude') },
+      { label: 'project', path: join(rootPath(), '.claude') },
+    ];
+    const claudeCodeSettings = claudeCodeRoots.flatMap(({ label, path }) => {
+      const files: {
+        scope: string;
+        name: string;
+        path: string;
+        exists: boolean;
+        mtime: string | null;
+        size: number | null;
+      }[] = [];
+      for (const name of ['settings.json', 'settings.local.json']) {
+        const full = join(path, name);
+        let exists = false;
+        let mtime: string | null = null;
+        let size: number | null = null;
+        try {
+          const s = statSync(full);
+          exists = true;
+          mtime = s.mtime.toISOString();
+          size = s.size;
+        } catch {
+          // not present — leave defaults
+        }
+        files.push({ scope: label, name, path: full, exists, mtime, size });
+      }
+      return files;
+    });
+
+    return {
+      anthropic: {
+        resolvedConfigDir: resolvedAnthropicConfigDir,
+        envOverride,
+        activeProfile,
+        availableProfiles: profiles.map((p) => ({ name: p.name, active: p.active })),
+        credentialsFile,
+        credentialsFileExists,
+      },
+      secrets: {
+        backend: secretsBackend,
+        envOverride: secretsBackendOverride,
+      },
+      claudeCodeSettings,
+    };
   });
 
   dispatcher.register('agent.list', (rawParams: unknown) => {

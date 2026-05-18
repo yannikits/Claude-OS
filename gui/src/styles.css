@@ -214,3 +214,22 @@ code {
 .kv dd {
   margin: 0;
 }
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  margin-right: 0.4rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.badge-ok {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge-muted {
+  color: var(--muted);
+}
