@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -91,6 +91,64 @@ describe('resolveRoot', () => {
 
   it('throws RootNotFoundError when no root found in any strategy', () => {
     expect(() => resolveRoot({ env: {}, cwd: tmpRoot })).toThrow(RootNotFoundError);
+  });
+
+  it('bootstraps portable root when CLAUDE_OS_PORTABLE=1 and no other strategy resolves', () => {
+    const dataDir = join(tmpRoot, 'data');
+    const result = resolveRoot({
+      env: { CLAUDE_OS_PORTABLE: '1', CLAUDE_OS_DATA_DIR: dataDir },
+      cwd: tmpRoot,
+    });
+    expect(result.source).toBe('portable');
+    expect(result.path).toBe(join(dataDir, 'portable-root'));
+    expect(existsSync(join(result.path, '.claude-os-root'))).toBe(true);
+    expect(existsSync(join(result.path, 'config', 'catalog.json'))).toBe(true);
+    expect(existsSync(join(result.path, 'vault'))).toBe(true);
+    expect(existsSync(join(result.path, 'inbox'))).toBe(true);
+    expect(existsSync(join(result.path, 'outbox'))).toBe(true);
+  });
+
+  it('does not enter portable mode when CLAUDE_OS_PORTABLE is unset', () => {
+    expect(() =>
+      resolveRoot({ env: { CLAUDE_OS_DATA_DIR: join(tmpRoot, 'data') }, cwd: tmpRoot }),
+    ).toThrow(RootNotFoundError);
+  });
+
+  it('treats CLAUDE_OS_PORTABLE=0 as disabled', () => {
+    expect(() =>
+      resolveRoot({
+        env: { CLAUDE_OS_PORTABLE: '0', CLAUDE_OS_DATA_DIR: join(tmpRoot, 'data') },
+        cwd: tmpRoot,
+      }),
+    ).toThrow(RootNotFoundError);
+  });
+
+  it('repo-detect wins over portable fallback when both could resolve', () => {
+    writeFileSync(join(tmpRoot, '.claude-os-root'), '');
+    const result = resolveRoot({
+      env: { CLAUDE_OS_PORTABLE: '1', CLAUDE_OS_DATA_DIR: join(tmpRoot, 'data') },
+      cwd: tmpRoot,
+    });
+    expect(result.source).toBe('repo-detect');
+    expect(result.path).toBe(tmpRoot);
+  });
+
+  it('portable bootstrap is idempotent and preserves existing catalog', () => {
+    const dataDir = join(tmpRoot, 'data');
+    const first = resolveRoot({
+      env: { CLAUDE_OS_PORTABLE: '1', CLAUDE_OS_DATA_DIR: dataDir },
+      cwd: tmpRoot,
+    });
+    writeFileSync(
+      join(first.path, 'config', 'catalog.json'),
+      `${JSON.stringify({ version: 1, entries: [{ id: 'x' }] }, null, 2)}\n`,
+    );
+    const second = resolveRoot({
+      env: { CLAUDE_OS_PORTABLE: '1', CLAUDE_OS_DATA_DIR: dataDir },
+      cwd: tmpRoot,
+    });
+    expect(second.path).toBe(first.path);
+    expect(readFileSync(join(second.path, 'config', 'catalog.json'), 'utf8')).toContain('"x"');
   });
 
   it('priorities: explicit > env-var > repo-detect', () => {

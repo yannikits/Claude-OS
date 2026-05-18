@@ -55,6 +55,13 @@ claude-os findet seinen Root entweder per `$CLAUDE_OS_ROOT` env-var ODER per Mar
 
 Neuer Shell öffnen, dann `echo $env:CLAUDE_OS_ROOT` testen.
 
+> **Portable-Modus (seit v1.1)** — die Desktop-App spawnt den Sidecar bereits mit `CLAUDE_OS_PORTABLE=1`. Wenn du Schritt 1 + 2 überspringst, legt sich claude-os beim ersten Start ein **per-User-Root** an unter:
+>
+> - Windows: `%APPDATA%\claude-os\portable-root\`
+> - macOS / Linux: `${XDG_CONFIG_HOME:-~/.config}/claude-os/portable-root/`
+>
+> Marker-File, leerer Catalog (`config/catalog.json`), und `vault/`/`inbox/`/`outbox/` werden idempotent angelegt. Nutze diesen Modus wenn du nur **lokal** arbeiten willst (kein Cross-Machine-Sync). Sobald du `CLAUDE_OS_ROOT` auf einen Cloud-Mount setzt, gewinnt der env-var und Portable-Modus wird übersprungen.
+
 ### Schritt 3 — MSI/DMG/AppImage downloaden + installieren
 
 Hol das passende Installer-File von [Releases](https://github.com/yannikits/Claude-portable/releases) (immer das neueste, aktuell `v1.0.0`):
@@ -286,7 +293,9 @@ Output unter `gui/src-tauri/target/release/bundle/`.
 
 ## Cross-Machine-Setup (zweite Maschine)
 
-Wenn du claude-os auf einer zweiten Maschine einrichtest:
+Wenn du claude-os auf einer zweiten Maschine einrichtest, hast du zwei Wege:
+
+**Variante 1 — Cloud-synced Vault (gleicher State auf allen PCs)**
 
 1. **Cloud-Mount-Client** installieren und auf den gleichen Mount-Pfad zeigen wie auf der ersten Maschine. Auf grünes Sync-Häkchen warten.
 2. `$CLAUDE_OS_ROOT` setzen (gleicher Path-Style wie Schritt 2 in Szenario A).
@@ -294,6 +303,13 @@ Wenn du claude-os auf einer zweiten Maschine einrichtest:
 4. (Optional) CLI bauen (Szenario B).
 5. **WICHTIG**: `claude-os doctor --migrate-git-metadata` einmal auf der zweiten Maschine laufen lassen. Das setzt die externe Git-Metadata-Direction auf, sodass `vault/.git/` nicht über den Cloud-Mount kollidiert.
 6. App starten — Vault/Configs/Catalog kommen automatisch vom Cloud-Sync.
+
+**Variante 2 — Portable-Modus (lokaler State pro Maschine)**
+
+1. MSI/DMG/AppImage installieren (Szenario A).
+2. App starten — fertig. Root liegt unter `%APPDATA%\claude-os\portable-root\` (Win) bzw. `~/.config/claude-os/portable-root/` (mac/linux) und wird auf erstem Start angelegt.
+
+Variante 2 ist ideal für Arbeits-PCs ohne Cloud-Sync oder fürs Ausprobieren. Wechsel auf Variante 1 jederzeit möglich: `$CLAUDE_OS_ROOT` setzen → App neu starten → der env-var-Pfad gewinnt vor Portable.
 
 ---
 

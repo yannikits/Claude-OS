@@ -24,7 +24,7 @@ export type CloudProvider =
  * succeeded. Used by `claude-os doctor` to explain to the user
  * how the root was found.
  */
-export type RootSource = 'explicit' | 'env-var' | 'repo-detect';
+export type RootSource = 'explicit' | 'env-var' | 'repo-detect' | 'portable';
 
 /**
  * Result of {@link resolveRoot}.
