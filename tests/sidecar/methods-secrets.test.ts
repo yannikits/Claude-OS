@@ -52,7 +52,23 @@ describe('secrets.list + secrets.delete RPC', () => {
 
   it('returns empty list when no secrets are stored', async () => {
     const r = await call('secrets.list');
-    expect(r.result).toEqual({ backend: 'encrypted-file', count: 0, entries: [] });
+    expect(r.result).toEqual({
+      backend: 'encrypted-file',
+      count: 0,
+      entries: [],
+      locked: false,
+    });
+  });
+
+  it('returns locked=true when secrets file exists but master key is missing', async () => {
+    await seedStore({ whatever: 'value' });
+    delete testEnv.CLAUDE_OS_SECRETS_KEY;
+    const r = (await call('secrets.list')) as {
+      result: { locked: boolean; entries: unknown[]; lockedReason?: string };
+    };
+    expect(r.result.locked).toBe(true);
+    expect(r.result.entries).toEqual([]);
+    expect(r.result.lockedReason).toMatch(/master key/i);
   });
 
   it('returns key + backend for each stored secret without exposing values', async () => {

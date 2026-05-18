@@ -7,6 +7,7 @@ import { AgentRunsRepository, agentRunsIndexPathFor } from '../domains/agent-run
 import { ProfileManager } from '../domains/auth/index.js';
 import { catalogPathsFor, readCatalog, readCatalogLock } from '../domains/catalog/index.js';
 import { createSecretStore } from '../domains/secrets/index.js';
+import { SecretsLockedError } from '../domains/secrets/types.js';
 import { BusyFlag, loadVaultConfig } from '../domains/vault-sync/index.js';
 import type { RpcDispatcher } from './rpc.js';
 
@@ -127,10 +128,28 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
 
   dispatcher.register('secrets.list', async () => {
     const store = createSecretStore({ env: env() });
-    const entries = await store.list();
-    // SecretMetadata is already values-free: { key, backend } only. Returning it
-    // verbatim is safe per ADR-0004 §51 — never log or expose values.
-    return { backend: store.backend, count: entries.length, entries };
+    try {
+      const entries = await store.list();
+      // SecretMetadata is already values-free: { key, backend } only. Returning it
+      // verbatim is safe per ADR-0004 §51 — never log or expose values.
+      return {
+        backend: store.backend,
+        count: entries.length,
+        entries,
+        locked: false as const,
+      };
+    } catch (err) {
+      if (err instanceof SecretsLockedError) {
+        return {
+          backend: store.backend,
+          count: 0,
+          entries: [],
+          locked: true as const,
+          lockedReason: err.message,
+        };
+      }
+      throw err;
+    }
   });
 
   dispatcher.register('secrets.delete', async (rawParams: unknown) => {

@@ -129,6 +129,8 @@ export interface SecretsListResult {
   backend: SecretBackend;
   count: number;
   entries: SecretMetadata[];
+  locked: boolean;
+  lockedReason?: string;
 }
 
 export interface SecretsDeleteResult {
