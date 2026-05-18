@@ -139,7 +139,7 @@ pub fn start(app: AppHandle, state: Arc<SupervisorState>) {
 async fn spawn_and_run(app: &AppHandle, state: &Arc<SupervisorState>) -> RpcError {
     let cmd = match app.shell().sidecar("claude-os-sidecar") {
         Ok(c) => c
-            .env("CLAUDE_OS_SECRETS_BACKEND", "file")
+            .env("CLAUDE_OS_SECRETS_BACKEND", "encrypted-file")
             .env("CLAUDE_OS_PORTABLE", "1"),
         Err(e) => return RpcError::Io(format!("sidecar() failed: {e}")),
     };

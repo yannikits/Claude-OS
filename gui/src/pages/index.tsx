@@ -372,7 +372,19 @@ export function SecretsPage() {
           <p className="muted">
             Backend: <code>{data.backend}</code> · {data.count} Einträge
           </p>
-          {data.entries.length === 0 ? (
+          {data.locked ? (
+            <p className="banner banner-error">
+              Backend gesperrt — Master-Key fehlt. Setze die Env-Var{' '}
+              <code>CLAUDE_OS_SECRETS_KEY</code> bevor du die App startest, oder verwalte Secrets
+              per CLI (<code>claude-os secrets set/get/list</code>).
+              {data.lockedReason && (
+                <>
+                  <br />
+                  <span className="muted">Details: {data.lockedReason}</span>
+                </>
+              )}
+            </p>
+          ) : data.entries.length === 0 ? (
             <p className="muted">Keine Secrets gespeichert.</p>
           ) : (
             <table className="data-table">
