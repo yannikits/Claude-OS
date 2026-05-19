@@ -56,3 +56,7 @@ outbox/
 # claude-mem / agentdb runtime state (per-machine, local-only)
 agentdb.rvf
 agentdb.rvf.lock
+
+# graphify skill output (per-machine, local-only)
+graphify-out/
+.graphify_step_ast.py
