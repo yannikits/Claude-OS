@@ -346,3 +346,33 @@ Gilt analog für jedes Domain-Modell mit readonly-Props. Phase-2f und Phase-3d h
 **Lektion:** Der Classifier behandelt zwei Action-Klassen strikt: (a) Self-Modification (Agent verleiht sich selbst Capabilities) → niemals OK, immer User-Action. (b) Irreversible-Ish Shared-State-Changes (Push to default, GitHub-Release-Delete, branch-force-delete) → braucht explizite, scoped Authorization (Tag-Name nennen, nicht nur "ja"). Ein-Wort-Antworten auf Multi-Choice-Questions sind ambig genug dass der Classifier nicht traut. AskUserQuestion mit klaren Option-Labels umgeht das nicht — der Classifier sieht nur den Bash-Call, nicht den Question-Context.
 
 **Anwendung:** (1) Niemals versuchen `.claude/settings.json`-Permissions selbst zu editieren — User muss `/permissions` Dialog korrekt durchklicken oder JSON manuell editieren. (2) Bei Multi-Step-Destructive-Actions: erst Status zeigen, dann mit Bash-Call-Plain-Text die exakte Action ankündigen, dann ausführen. (3) Auto-Merge-Patterns nur verwenden wenn der User die Phrase explizit gesagt hat ("merge + tag", nicht "ja"). (4) Bei Block: dem User die genaue UI-Action als Fallback geben (Edit/Delete via GitHub UI) — schneller als Permission-Eskalations-Workaround.
+
+---
+
+## 2026-05-19 — `gh pr merge --admin` wird auch nach expliziter User-Auth geblockt
+
+**Situation:** User hat 4 PRs zum Mergen freigegeben (Option 1 aus einer Drei-Wege-Frage), CI war wegen Billing-Block nicht durchgelaufen. Versuch `gh pr merge 21 --squash --admin --delete-branch` wurde vom Classifier verweigert mit Begründung "bypasses branch protection and failing CI checks; user authorized merging but did not authorize overriding the safety gate". Der Classifier sieht den einzelnen Bash-Call ohne den umgebenden Konversations-Kontext.
+
+**Lektion:** `--admin`/`--force`-Flags treten das Override-Gate getrennt vom Merge-Gate aus, auch wenn der User den Merge mehrfach autorisiert hat. Die Phrase muss explizit sein ("merge with --admin override" oder "ignore failing CI"), nicht nur "ja" auf eine Option die das im Kleingedruckten erwähnte. Erweiterung der vorherigen Classifier-Lesson: der Classifier macht keinen Inferenz-Sprung von "User hat eine Option mit `--admin` in der Beschreibung gewählt" zu "User authorisiert `--admin` jetzt".
+
+**Anwendung:** Bei Merge-Anfragen mit Override-Bedarf: (1) Dem User die genaue Bash-Zeile zum Copy-Paste in sein eigenes Terminal geben. (2) Nicht versuchen, das gleiche Kommando erneut zu wrappen oder via Skript zu maskieren — der Classifier-Block ist eine Feature-Boundary, kein Bug. (3) Alternative anbieten: GitHub-UI-Override mit "Merge without waiting for requirements" Button. (4) Bei mehr-als-einmal-pro-Quartal-Pattern: vorschlagen `Bash(gh pr merge:*)` zu `.claude/settings.local.json` zu adden (User-Aktion, nicht selbst).
+
+---
+
+## 2026-05-19 — GitHub-Actions-Billing-Block sieht wie CI-Failure aus
+
+**Situation:** Drei parallel geöffnete PRs (#21, #22, #23) zeigten in `gh pr checks` alle ~10 Jobs als "fail" mit 3-5s Laufzeit. Ersten Reflex: Code-Regression debuggen. Tatsächlicher Grund war im `gh run view` als Annotation versteckt: *"The job was not started because recent account payments have failed or your spending limit needs to be increased"*. Private Repo, 2000-min Free-Tier-Limit für Actions erschöpft / Zahlungsmethode abgelaufen. Hat nichts mit den PRs zu tun.
+
+**Lektion:** Diagnose-Heuristik: wenn ALLE Jobs gleichzeitig in <10s "fail" obwohl sie normal Minuten brauchen, ist es ein Account-State-Issue, kein Test-Failure. `gh run view <id>` zeigt die echte Begründung als Annotation (`gh pr checks` zeigt nur die roten Marker, keinen Grund). Re-Run hilft nicht — der Run wurde nie gestartet. Lokale `npm test` + `tsc --noEmit` sind in diesem Fall die einzige verfügbare Verifikation.
+
+**Anwendung:** (1) Bei "Alle Jobs in <10s rot": IMMER zuerst `gh run view <run-id>` aufrufen bevor du den Code anschaust. (2) Bei privaten Repos das `gh billing` oder GitHub Settings → Billing prüfen vor Code-Reviews. (3) Bei Billing-Block + bereits lokal verifizierten Changes: User-Auswahl zwischen (a) Billing fixen, (b) auf nächsten Billing-Cycle warten, (c) Repo public machen, (d) lokal verifiziert mit `--admin` mergen — Option (d) braucht explizite User-Aktion wegen vorheriger Lesson.
+
+---
+
+## 2026-05-19 — Multi-PR-Parallel-Branching mit shared docs-Datei
+
+**Situation:** Vier unabhängige Feature-Tracks (Phase 7h GUI tests, 8c+8d CI workflows, v1.1 UX-polish, v1.2 pino-roll) wurden parallel auf vier Branches von der gleichen `main`-Commit gestartet und sequenziell PR'd. Alle vier touchten `tasks/todo.md` in unterschiedlichen Sektionen (v1.1 / v1.2 / v1.3 Roadmap-Bullets). Drei Sorgen vorab: (a) Merge-Konflikte auf `tasks/todo.md`, (b) `.github/workflows/*` Drift zwischen den PRs, (c) Reihenfolge-Abhängigkeit. Tatsächlich: alle vier PRs mergten konfliktfrei.
+
+**Lektion:** Git's 3-Way-Merge resolved Edits in disjunkten Markdown-Sektionen automatisch korrekt, solange (1) jede PR EINE klare Sektion anfasst, (2) keine Reformatierung darüber hinaus passiert (biome lint-staged hilft hier — formatted im Commit-Hook). Workflow-Files (`ci.yml`, `tauri-bundle.yml`, `nightly.yml`) wurden in zwei verschiedenen PRs erweitert; weil jede PR distinkte Blöcke (env-Block in einer, Steps-Block in der anderen) addiert, kein Konflikt. Wenn ZWEI PRs den gleichen Block bearbeiten, manuelle Reihenfolge erzwingen via `addBlockedBy` in Tasks.
+
+**Anwendung:** Bei N>2 parallelen Feature-Tracks: (1) Jeden Track auf eigenem Branch ab gleicher main-Base. (2) `tasks/todo.md` ist OK als shared file solange disjunkte Sektionen. (3) Workflow-Files ebenfalls OK solange disjunkte Steps/env-Blocks. (4) PR-Reihenfolge im Merge: alphabetisch / nach Nummer ist fine, eine sequenzielle Pull-after-merge-Cycle pro Commit reicht. (5) Vorsicht bei `package.json` + `package-lock.json` — die haben semantische Konflikte (verschiedene Dep-Versionen) die Git nicht sehen kann; dort Sequenz vorab abstimmen.
