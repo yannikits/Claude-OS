@@ -78,7 +78,7 @@ jobs:
         run: cargo clippy -- -D warnings
 
   gui-typecheck:
-    name: gui typecheck
+    name: gui typecheck + test
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -97,3 +97,6 @@ jobs:
       - name: gui typecheck
         working-directory: gui
         run: npx tsc -b
+      - name: gui vitest
+        working-directory: gui
+        run: npm test
