@@ -52,3 +52,7 @@ outbox/
 # Claude Code scheduled-task scratch (session-only state)
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
+
+# claude-mem / agentdb runtime state (per-machine, local-only)
+agentdb.rvf
+agentdb.rvf.lock
