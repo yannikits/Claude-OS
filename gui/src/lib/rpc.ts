@@ -2,10 +2,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export const SIDECAR_FAILED_EVENT = 'sidecar://failed';
+export const SIDECAR_STDERR_EVENT = 'sidecar://stderr';
 
 export interface SidecarFailedPayload {
   reason: string;
   strikes: number;
+}
+
+export interface SidecarStderrPayload {
+  line: string;
 }
 
 export async function rpcCall<T = unknown>(method: string, params: unknown = null): Promise<T> {
@@ -16,6 +21,12 @@ export async function onSidecarFailed(
   handler: (payload: SidecarFailedPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<SidecarFailedPayload>(SIDECAR_FAILED_EVENT, (e) => handler(e.payload));
+}
+
+export async function onSidecarStderr(
+  handler: (payload: SidecarStderrPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<SidecarStderrPayload>(SIDECAR_STDERR_EVENT, (e) => handler(e.payload));
 }
 
 export async function ping(): Promise<{ pong: boolean; ts: number }> {
