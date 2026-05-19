@@ -236,12 +236,34 @@ v1.0.0 ist GA. Diese Liste sammelt die natürlichen nächsten Schritte für kün
 - [ ] **Settings-View** wired. `settings.local.json` + `$ANTHROPIC_CONFIG_DIR` als read-only Anzeige im UI. Mutation bleibt CLI-only erst (siehe stub-Hint).
 - [ ] **pino-roll per-day rotation** für Sidecar-Logs unter `%APPDATA%/claude-os/logs/sidecar-YYYY-MM-DD.log`. Phase 6d-tail-Deferral. Aktuell schreibt sidecar nur via `process.stderr`. Setup: pino-roll als Transport, env-var `CLAUDE_OS_LOGS_DIR` mit machinePaths-Fallback.
 
-### v1.3 — Cross-Platform-Härtung
+### v1.3 — Cross-Platform-Härtung (20 h, M, deps: v1.0 GA)
 
-- [ ] **macOS code-signing + notarization** sobald Apple-Dev-Account verfügbar. Workflow `.github/workflows/tauri-bundle.yml` ist forward-prepared für die ENVs (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`) — `tauri-apps/tauri-action@v0` picked sie automatisch auf. Nach Aktivierung: `docs/macos-gatekeeper.md` als "deprecated" markieren, Gatekeeper-Hinweis entfernen.
-- [ ] **Windows code-signing** via Authenticode-Cert (Sectigo / DigiCert ~$200/y). SmartScreen-Warnung wird damit minimal — kein "unknown publisher" mehr. Cert in `WINDOWS_CERTIFICATE` (PFX-base64) + `WINDOWS_CERTIFICATE_PASSWORD` Secrets, tauri picked sie via `bundle.windows.certificateThumbprint`.
-- [ ] **Linux AppImage update-mechanism** über `AppImageUpdate` oder zsync. Aktuell muss user manuell re-downloaden. Setup: zsync-File neben dem AppImage im Release, AppImageUpdate-Tool im AppImage gebundled.
-- [ ] **Real cross-platform Phase-3e long-running E2E** auf jedem OS in CI. Aktuell `RUN_SLOW_TESTS=1`-gated, läuft nur lokal/auf demand. Nächtlicher cron-job in `.github/workflows/nightly.yml` mit Matrix × `RUN_SLOW_TESTS=1`.
+**Ziel:** Signierte/notarisierte Bundles auf allen drei OS, Self-Update-Mechanik für Linux, kontinuierliche cross-OS-E2E-Validierung. Voraussetzung für breitere Distribution außerhalb des Inner-Circles.
+
+**Sub-Phasen (sequenzielle Reihenfolge nur für 8e):**
+
+- [ ] **Phase 7h — Renderer-Smoke-Tests-Setup** (2 h, carry-over aus 6h-Deferral). Separater `gui/vitest.config.ts` mit `environment: 'happy-dom'`, React Testing Library + `@testing-library/jest-dom`. Mockt `@tauri-apps/api/core invoke` über `vi.mock` mit per-test `mockResolvedValue`. Initial-Coverage: (a) Dashboard ohne Sidecar → `LoadingScreen` visible bis ping resolved; (b) Dashboard mit Sidecar → 4 Cards rendern (sidecar/catalog/vault/agent); (c) DragDrop-Event-Handler triggert `inbox.import` genau einmal pro 200ms-Bucket. **Verifikation:** `cd gui && npm test` grün, mindestens 3 specs. Vorbedingung für jede signierte Bundle-Confidence.
+- [ ] **Phase 8a — macOS Codesigning + Notarization** (4 h, deps: Apple-Dev-Account $99/y, 7h). Sechs Secrets im Repo setzen (`APPLE_CERTIFICATE` base64-PFX, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` z.B. `Developer ID Application: ...`, `APPLE_ID`, `APPLE_PASSWORD` app-specific-password, `APPLE_TEAM_ID`). `tauri-apps/tauri-action@v0` liest sie auto; `tauri.conf.json bundle.macOS.signingIdentity` + `bundle.macOS.entitlements` setzen (für Hardened Runtime). Notarization-Wait im Workflow + staple. `docs/macos-gatekeeper.md` als "deprecated v1.3+" markieren. **Verifikation:** notarisierte DMG öffnet auf frischem macOS ohne `xattr -d com.apple.quarantine`; `spctl --assess --verbose Claude-OS.app` → "accepted source=Notarized Developer ID".
+- [ ] **Phase 8b — Windows Authenticode-Signing** (3 h, deps: OV-Cert-Kauf ~$200/y, 7h). Sectigo oder DigiCert OV-Code-Signing-Cert. PFX-base64 in `WINDOWS_CERTIFICATE` + `WINDOWS_CERTIFICATE_PASSWORD` Secrets. `tauri.conf.json bundle.windows.certificateThumbprint` + `digestAlgorithm: "sha256"` + `timestampUrl: "http://timestamp.digicert.com"`. **Verifikation:** MSI-Install auf frischem Windows zeigt im UAC-Dialog "Verified publisher: <Org>"; SmartScreen-Warning entfällt nach ~Reputation-Ramp-Up (initial evtl. einmal "Run anyway"). EV-Cert würde SmartScreen sofort silenten, ist aber teurer (~$400) — v1.3 startet mit OV.
+- [ ] **Phase 8c — Linux AppImage Self-Update via zsync** (3 h, deps: 7h). `tauri-bundle.yml` linux-job: nach AppImage-Build `zsyncmake` runnen → `Claude-OS-<version>-x86_64.AppImage.zsync` als zusätzlicher Release-Asset. Tauri v2 `bundle.appimage.includeUpdater`-Option prüfen — falls nicht exposed, manuell `linuxdeploy-plugin-appimage` als post-build-Step im Workflow. Neue `docs/linux-updates.md` dokumentiert Update-Flow (User: `appimageupdatetool ./Claude-OS.AppImage`). **Verifikation:** zsync-File im Release; lokal `appimageupdatetool` zieht Diff korrekt zwischen zwei aufeinanderfolgenden Versionen.
+- [ ] **Phase 8d — Nightly Cross-Platform Long-Running E2E** (2 h, deps: 7h). `.github/workflows/nightly.yml` mit cron `0 2 * * *` UTC, Matrix `ubuntu-latest` × `windows-latest` × `macos-latest` × Node 24 × env `RUN_SLOW_TESTS=1`. Job läuft `npm ci → npm run build → npm test` (jetzt mit gated 180s-E2E aus Phase 3e + Sidecar-Restart-E2E aus 6h aktiv). Failures öffnen GitHub-Issue auto via `peter-evans/create-issue-from-file@v5` mit Label `nightly-failure`. Optional Slack-Notify (deferred zu v1.x). **Verifikation:** drei aufeinanderfolgende grüne Nightly-Runs auf allen drei OS bevor 8e taggt.
+- [ ] **Phase 8e — Tag v1.3.0 + Release** (1 h, deps: 8a-8d). Version-Bump 1.2.1 → 1.3.0 in root/gui/tauri parallel (siehe v1.2.0-PR #16-Pattern). All Gates: CI matrix grün, Bundle pipeline grün, signierte Artefakte auf allen drei OS manuell verifiziert, 3-Tage-Nightly grün, je OS ein Smoke-Test im Review-Sektion dokumentiert. `git tag v1.3.0` + push triggert tauri-bundle.yml.
+
+**Test-Kriterium:** macOS DMG öffnet ohne Gatekeeper-Bypass; Windows MSI installiert mit "Verified publisher"; Linux AppImage updated sich via zsync auf nächste Version; Nightly-Run drei Tage grün auf allen OS.
+
+**v1.3-Abweichungen / Risiken (vorab transparent):**
+
+- **Apple-Dev-Account ist external dependency** — 8a blockt bis Account aktiv. Bis dahin: Gatekeeper-Doc bleibt sichtbar, kein DMG-Signing.
+- **OV-Cert-Kauf ist external dependency** — 8b blockt bis PFX in der Hand. Workaround: bleibt unsigniert mit `docs/windows-smartscreen.md`-Hinweis (neu) bis Cert da ist.
+- **AppImageUpdate-Integration kann scheitern wenn Tauri v2 das Feature nicht direkt exponiert** — Fallback ist manuelles `linuxdeploy`-Postprocessing im Workflow oder Plain-zsync ohne integriertes Update-Tool (User muss `appimageupdatetool` selbst installieren). Pre-Spike empfohlen vor 8c-Start.
+- **Nightly-Cost** — 3 OS × ~10 min × 30 Tage ≈ 900 GHA-Minuten/Monat. Bleibt unter 2000-min Free-Tier für private Repos und ist für public unbegrenzt.
+- **EV vs OV Code-Signing** — v1.3 nimmt OV (~$200/y) für sofortigen "Verified publisher"-Label; EV (~$400/y, USB-Hardware-Token) würde SmartScreen-Warning ab Tag 1 silenten. Upgrade auf EV ist v1.x-Entscheidung wenn Reputation-Ramp-Up zu langsam.
+- **macOS-Universal-Build ist schon in 7b drin** (`--target universal-apple-darwin`) — keine extra Arbeit in 8a.
+
+**Parallel-Schiene (NICHT in v1.3, kann unabhängig vorher):**
+- v1.1 (UX-Polish) — `SidecarFailedBanner`-Disabled-Context, Stderr-Forward als Event, Renderer-Smoke (7h überschneidet mit v1.1-Bullet 3 — wird in 7h gemerged)
+- v1.2 (echte Impl) — Chat/Settings/Secrets-Views, pino-roll
+- v1.4 (MCP-Bundle) — separater Track, blockt nicht v1.3
 
 ### v1.4 — MCP-Bundle pro Domain (ADR-0007)
 
