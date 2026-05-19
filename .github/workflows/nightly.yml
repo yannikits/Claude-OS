@@ -14,6 +14,11 @@ concurrency:
   group: nightly-${{ github.ref }}
   cancel-in-progress: false
 
+# Force Node-24 runtime for actions/* until they natively migrate from
+# Node 20 (deprecated 2026-09-16). Mirrors ci.yml + tauri-bundle.yml.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   long-running:
     name: long-running ${{ matrix.os }}
