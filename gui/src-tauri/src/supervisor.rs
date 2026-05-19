@@ -13,6 +13,7 @@ use tokio::time::sleep;
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(30);
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 pub const SIDECAR_FAILED_EVENT: &str = "sidecar://failed";
+pub const SIDECAR_STDERR_EVENT: &str = "sidecar://stderr";
 pub const BACKOFF_LADDER: [Duration; 3] = [
     Duration::from_secs(1),
     Duration::from_secs(4),
@@ -185,7 +186,9 @@ async fn spawn_and_run(app: &AppHandle, state: &Arc<SupervisorState>) -> RpcErro
                     }
                 }
                 CommandEvent::Stderr(bytes) => {
-                    eprintln!("[sidecar.stderr] {}", String::from_utf8_lossy(&bytes).trim());
+                    let line = String::from_utf8_lossy(&bytes).trim().to_string();
+                    eprintln!("[sidecar.stderr] {line}");
+                    let _ = app_for_router.emit(SIDECAR_STDERR_EVENT, json!({ "line": line }));
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!(
@@ -268,5 +271,11 @@ mod tests {
     #[test]
     fn shutdown_grace_is_2_seconds() {
         assert_eq!(SHUTDOWN_GRACE, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn sidecar_event_names_are_stable() {
+        assert_eq!(SIDECAR_FAILED_EVENT, "sidecar://failed");
+        assert_eq!(SIDECAR_STDERR_EVENT, "sidecar://stderr");
     }
 }

@@ -13,6 +13,7 @@ import {
   type SettingsReadResult,
   type VaultStatusResult,
 } from '../lib/rpc';
+import { useSidecarOk } from '../lib/sidecar-status';
 
 function useRpc<T>(fetcher: () => Promise<T>): {
   data: T | null;
@@ -323,6 +324,7 @@ export function SecretsPage() {
   const [loading, setLoading] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const sidecarOk = useSidecarOk();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -406,7 +408,8 @@ export function SecretsPage() {
                       <button
                         type="button"
                         className="btn-danger"
-                        disabled={pendingDelete === s.key}
+                        disabled={pendingDelete === s.key || !sidecarOk}
+                        title={sidecarOk ? undefined : 'Read-Only-Modus — Sidecar nicht erreichbar'}
                         onClick={() => handleDelete(s.key)}
                       >
                         {pendingDelete === s.key ? 'Lösche …' : 'Löschen'}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import {
   importToInbox,
@@ -10,6 +10,7 @@ import {
   type SidecarFailedPayload,
   type WatcherChangeEvent,
 } from './lib/rpc';
+import { SidecarStatusProvider } from './lib/sidecar-status';
 import {
   AgentRunsPage,
   CatalogPage,
@@ -85,6 +86,8 @@ export function App() {
   const [lastInbox, setLastInbox] = useState<WatcherChangeEvent | null>(null);
   const [lastOutbox, setLastOutbox] = useState<WatcherChangeEvent | null>(null);
   const [lastDrop, setLastDrop] = useState<{ count: number; ts: number } | null>(null);
+  const failureRef = useRef<SidecarFailedPayload | null>(null);
+  failureRef.current = failure;
 
   // Poll ping() until sidecar is ready (supervisor spawns the sidecar in
   // setup() but it takes ~1-2s; fixed 500ms grace was a race that left
@@ -140,11 +143,15 @@ export function App() {
     onInboxChanged(setLastInbox).then((u) => unsubs.push(u));
     onOutboxChanged(setLastOutbox).then((u) => unsubs.push(u));
     onFilesDropped(async ({ paths }) => {
+      // Hard-gate against the read-only mode: if the supervisor has emitted
+      // sidecar://failed there's no point firing inbox.import — the RPC
+      // would just error and clutter logs. Drop the event silently and let
+      // the banner explain why nothing happened.
+      if (failureRef.current !== null) return;
       try {
         const r = await importToInbox(paths);
         setLastDrop({ count: r.count, ts: Date.now() });
       } catch (e) {
-        // surfaced via banner-error if sidecar dies; transient errors are non-fatal
         console.error('inbox.import failed:', e);
       }
     }).then((u) => unsubs.push(u));
@@ -156,41 +163,43 @@ export function App() {
   if (showLoading) return <LoadingScreen />;
 
   return (
-    <Router>
-      <div className="app-root">
-        {failure && <SidecarFailedBanner payload={failure} />}
-        {lastDrop && (
-          <div className="banner" role="status" key={lastDrop.ts}>
-            {lastDrop.count} Datei(en) in den Inbox kopiert.
-          </div>
-        )}
-        {(lastInbox || lastOutbox) && (
-          <div className="banner muted" role="status">
-            {lastInbox && (
-              <span>
-                inbox: {lastInbox.event} {lastInbox.path}
-              </span>
-            )}
-            {lastOutbox && (
-              <span>
-                {' '}
-                · outbox: {lastOutbox.event} {lastOutbox.path}
-              </span>
-            )}
-          </div>
-        )}
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="chat" element={<ChatPage />} />
-            <Route path="catalog" element={<CatalogPage />} />
-            <Route path="vault" element={<VaultPage />} />
-            <Route path="agent-runs" element={<AgentRunsPage />} />
-            <Route path="secrets" element={<SecretsPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-          </Route>
-        </Routes>
-      </div>
-    </Router>
+    <SidecarStatusProvider failure={failure}>
+      <Router>
+        <div className="app-root">
+          {failure && <SidecarFailedBanner payload={failure} />}
+          {lastDrop && (
+            <div className="banner" role="status" key={lastDrop.ts}>
+              {lastDrop.count} Datei(en) in den Inbox kopiert.
+            </div>
+          )}
+          {(lastInbox || lastOutbox) && (
+            <div className="banner muted" role="status">
+              {lastInbox && (
+                <span>
+                  inbox: {lastInbox.event} {lastInbox.path}
+                </span>
+              )}
+              {lastOutbox && (
+                <span>
+                  {' '}
+                  · outbox: {lastOutbox.event} {lastOutbox.path}
+                </span>
+              )}
+            </div>
+          )}
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="chat" element={<ChatPage />} />
+              <Route path="catalog" element={<CatalogPage />} />
+              <Route path="vault" element={<VaultPage />} />
+              <Route path="agent-runs" element={<AgentRunsPage />} />
+              <Route path="secrets" element={<SecretsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+        </div>
+      </Router>
+    </SidecarStatusProvider>
   );
 }

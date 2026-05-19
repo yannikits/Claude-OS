@@ -77,5 +77,12 @@ npx tauri icon src-tauri/icons/source.png
 ### Verifikation
 
 - `cargo check` (rustup vorausgesetzt)
-- `cargo test` (5 supervisor-tests + 2 DropDedup-tests)
+- `cargo test` (6 supervisor-tests + 2 DropDedup-tests)
 - Vom Repo-Root: `RUN_SLOW_TESTS=1 npx vitest run tests/sidecar/restart.e2e.test.ts` (real `node dist/sidecar/index.js`, ping → stop → respawn → ping, asserts ≤5s)
+
+## macOS DMG-Installation
+
+Der DMG-Build ist in v1.x **noch nicht signiert/notarisiert** — Gatekeeper
+blockt den ersten Start. Workarounds (xattr-Cleanup, Right-Click→Open) sind
+in [`../docs/macos-gatekeeper.md`](../docs/macos-gatekeeper.md) dokumentiert.
+Signing kommt mit v1.3+ sobald ein Apple-Developer-Account verfügbar ist.
