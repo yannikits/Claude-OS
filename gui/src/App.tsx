@@ -11,6 +11,7 @@ import {
   type WatcherChangeEvent,
 } from './lib/rpc';
 import { SidecarStatusProvider } from './lib/sidecar-status';
+import { StderrDrawer } from './lib/stderr-drawer';
 import {
   AgentRunsPage,
   CatalogPage,
@@ -198,6 +199,7 @@ export function App() {
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Routes>
+          <StderrDrawer />
         </div>
       </Router>
     </SidecarStatusProvider>
