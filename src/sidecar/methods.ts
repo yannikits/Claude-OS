@@ -9,11 +9,14 @@ import { catalogPathsFor, readCatalog, readCatalogLock } from '../domains/catalo
 import { createSecretStore } from '../domains/secrets/index.js';
 import { SecretsLockedError } from '../domains/secrets/types.js';
 import { BusyFlag, loadVaultConfig } from '../domains/vault-sync/index.js';
+import type { ChatSessions } from './chat-sessions.js';
 import type { RpcDispatcher } from './rpc.js';
 
 interface MethodOpts {
   readonly env?: NodeJS.ProcessEnv;
   readonly home?: string;
+  /** Optional ChatSessions instance (v1.2 MVP) — chat.* RPCs only registered when provided. */
+  readonly chatSessions?: ChatSessions;
 }
 
 function rootPath(): string {
@@ -161,6 +164,34 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
     const deleted = await store.delete(params.key);
     return { key: params.key, deleted, backend: store.backend };
   });
+
+  if (opts.chatSessions !== undefined) {
+    const chat = opts.chatSessions;
+    dispatcher.register('chat.spawn', (rawParams: unknown) => {
+      const params = (rawParams ?? {}) as { args?: readonly string[] };
+      const args = Array.isArray(params.args) ? params.args : [];
+      return chat.spawn(args);
+    });
+    dispatcher.register('chat.write', (rawParams: unknown) => {
+      const params = (rawParams ?? {}) as { sessionId?: string; input?: string };
+      if (typeof params.sessionId !== 'string' || params.sessionId.length === 0) {
+        throw new Error('chat.write: params.sessionId must be a non-empty string');
+      }
+      if (typeof params.input !== 'string') {
+        throw new Error('chat.write: params.input must be a string');
+      }
+      chat.write(params.sessionId, params.input);
+      return { ok: true as const };
+    });
+    dispatcher.register('chat.kill', (rawParams: unknown) => {
+      const params = (rawParams ?? {}) as { sessionId?: string };
+      if (typeof params.sessionId !== 'string' || params.sessionId.length === 0) {
+        throw new Error('chat.kill: params.sessionId must be a non-empty string');
+      }
+      chat.kill(params.sessionId);
+      return { ok: true as const };
+    });
+  }
 
   dispatcher.register('agent.list', (rawParams: unknown) => {
     const params = (rawParams ?? {}) as { project?: string; limit?: number };

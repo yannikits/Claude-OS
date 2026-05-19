@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type AgentListResult,
   type CatalogListResult,
+  type ChatExitPayload,
+  type ChatOutputPayload,
+  chatKill,
+  chatSpawn,
+  chatWrite,
   deleteSecret,
   getSettings,
   getVaultStatus,
   listAgentRuns,
   listCatalog,
   listSecrets,
+  onChatExit,
+  onChatOutput,
   ping,
   type SecretsListResult,
   type SettingsReadResult,
@@ -206,21 +213,154 @@ export function AgentRunsPage() {
   );
 }
 
-function Stub({ title, hint }: { title: string; hint: string }) {
-  return (
-    <section className="page">
-      <h1>{title}</h1>
-      <p className="muted">{hint}</p>
-    </section>
-  );
+interface ChatLogEntry {
+  readonly id: number;
+  readonly stream: 'stdout' | 'stderr' | 'meta';
+  readonly text: string;
 }
 
+const MAX_LOG_LINES = 500;
+
 export function ChatPage() {
+  const sidecarOk = useSidecarOk();
+  const [argsText, setArgsText] = useState('--help');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [log, setLog] = useState<ChatLogEntry[]>([]);
+  const [input, setInput] = useState('');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const idCounter = useRef(0);
+  const logRef = useRef<HTMLDivElement | null>(null);
+
+  const append = useCallback((stream: ChatLogEntry['stream'], text: string) => {
+    idCounter.current += 1;
+    const nextId = idCounter.current;
+    setLog((prev) => {
+      const next = [...prev, { id: nextId, stream, text }];
+      return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+    onChatOutput((p: ChatOutputPayload) => {
+      if (p.sessionId !== sessionId) return;
+      append(p.stream, p.chunk);
+    }).then((u) => unsubs.push(u));
+    onChatExit((p: ChatExitPayload) => {
+      if (p.sessionId !== sessionId) return;
+      append('meta', `[exited code=${p.exitCode ?? 'null'} signal=${p.signal ?? 'null'}]\n`);
+      setRunning(false);
+      setSessionId(null);
+    }).then((u) => unsubs.push(u));
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [sessionId, append]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [log]);
+
+  const start = async () => {
+    if (running) return;
+    setError(null);
+    const args = argsText.trim().length === 0 ? [] : argsText.trim().split(/\s+/);
+    setLog([]);
+    idCounter.current = 0;
+    try {
+      const result = await chatSpawn(args);
+      setSessionId(result.sessionId);
+      setRunning(true);
+      append(
+        'meta',
+        `[spawned session ${result.sessionId.slice(0, 8)}… args=${JSON.stringify(args)}]\n`,
+      );
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const send = async () => {
+    if (sessionId === null) return;
+    const payload = `${input}\n`;
+    try {
+      await chatWrite(sessionId, payload);
+      append('meta', `> ${input}\n`);
+      setInput('');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const stop = async () => {
+    if (sessionId === null) return;
+    try {
+      await chatKill(sessionId);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
-    <Stub
-      title="Chat"
-      hint="claude.exe-Wrapper kommt in einer 6f-tail Iteration — der Chat braucht PTY-Streaming (claude-bridge spawn → renderer xterm.js)."
-    />
+    <section className="page">
+      <h1>Chat</h1>
+      <p className="muted">
+        Line-buffered claude-binary streaming. MVP — keine PTY, daher kein interaktiver
+        Passwort-Prompt-Support. Für volle TTY-Features später node-pty + xterm.js (v1.x).
+      </p>
+      {error && <p className="banner banner-error">{error}</p>}
+      <div className="chat-controls">
+        <input
+          type="text"
+          className="chat-args"
+          placeholder="claude args (z.B. --help)"
+          value={argsText}
+          onChange={(e) => setArgsText(e.target.value)}
+          disabled={running}
+        />
+        {running ? (
+          <button type="button" className="btn-danger" onClick={stop} disabled={!sidecarOk}>
+            Stop
+          </button>
+        ) : (
+          <button type="button" className="btn-primary" onClick={start} disabled={!sidecarOk}>
+            Spawn
+          </button>
+        )}
+      </div>
+      <div className="chat-log" ref={logRef} data-testid="chat-log">
+        {log.length === 0 ? (
+          <p className="muted">Noch keine Ausgabe. Klick "Spawn" zum Starten.</p>
+        ) : (
+          log.map((entry) => (
+            <pre key={entry.id} className={`chat-line chat-line-${entry.stream}`}>
+              {entry.text}
+            </pre>
+          ))
+        )}
+      </div>
+      {running && (
+        <div className="chat-input-row">
+          <input
+            type="text"
+            className="chat-input"
+            placeholder="Eingabe zum stdin (Enter senden)"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+          />
+          <button type="button" className="btn-primary" onClick={send}>
+            Senden
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

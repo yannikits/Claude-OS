@@ -197,3 +197,44 @@ export async function onOutboxChanged(
 ): Promise<UnlistenFn> {
   return listen<WatcherChangeEvent>(OUTBOX_CHANGED_EVENT, (e) => handler(e.payload));
 }
+
+// ---------- chat.* (v1.2 MVP) ----------
+
+export const CHAT_OUTPUT_EVENT = 'chat.output';
+export const CHAT_EXIT_EVENT = 'chat.exit';
+
+export interface ChatSpawnResult {
+  sessionId: string;
+}
+
+export interface ChatOutputPayload {
+  sessionId: string;
+  stream: 'stdout' | 'stderr';
+  chunk: string;
+}
+
+export interface ChatExitPayload {
+  sessionId: string;
+  exitCode: number | null;
+  signal: string | null;
+}
+
+export async function chatSpawn(args: readonly string[]): Promise<ChatSpawnResult> {
+  return rpcCall<ChatSpawnResult>('chat.spawn', { args });
+}
+
+export async function chatWrite(sessionId: string, input: string): Promise<{ ok: true }> {
+  return rpcCall<{ ok: true }>('chat.write', { sessionId, input });
+}
+
+export async function chatKill(sessionId: string): Promise<{ ok: true }> {
+  return rpcCall<{ ok: true }>('chat.kill', { sessionId });
+}
+
+export async function onChatOutput(handler: (p: ChatOutputPayload) => void): Promise<UnlistenFn> {
+  return listen<ChatOutputPayload>(CHAT_OUTPUT_EVENT, (e) => handler(e.payload));
+}
+
+export async function onChatExit(handler: (p: ChatExitPayload) => void): Promise<UnlistenFn> {
+  return listen<ChatExitPayload>(CHAT_EXIT_EVENT, (e) => handler(e.payload));
+}
