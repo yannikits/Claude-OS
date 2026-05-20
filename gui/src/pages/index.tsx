@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type AgentListResult,
+  addScheduleEntry,
   type CatalogListResult,
   type ChatExitPayload,
   type ChatOutputPayload,
@@ -18,10 +19,12 @@ import {
   onChatOutput,
   onSchedulerEvent,
   ping,
+  removeScheduleEntry,
   type ScheduleListResult,
   type SchedulerEventPayload,
   type SecretsListResult,
   type SettingsReadResult,
+  setScheduleEnabled,
   type VaultStatusResult,
 } from '../lib/rpc';
 import { useSidecarOk } from '../lib/sidecar-status';
@@ -593,9 +596,102 @@ function formatScheduleEvent(e: SchedulerEventPayload): string {
 }
 
 export function SchedulePage() {
-  const { data, error, loading } = useRpc<ScheduleListResult>(() => listSchedules());
+  const sidecarOk = useSidecarOk();
+  // Manueller Lade-State statt useRpc, weil wir nach Mutations re-fetchen wollen
+  const [data, setData] = useState<ScheduleListResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionPending, setActionPending] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [formId, setFormId] = useState('');
+  const [formCron, setFormCron] = useState('0 8 * * *');
+  const [formCommand, setFormCommand] = useState('');
+  const [formDescription, setFormDescription] = useState('');
   const [logs, setLogs] = useState<ScheduleLogEntry[]>([]);
   const logIdRef = useRef(0);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setActionError(null);
+    try {
+      const result = await listSchedules();
+      setData(result);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // initial load
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const handleAdd = useCallback(
+    async (evt: React.FormEvent) => {
+      evt.preventDefault();
+      if (formId.length === 0 || formCron.length === 0 || formCommand.length === 0) {
+        setActionError('id, cron und command sind Pflicht.');
+        return;
+      }
+      setActionPending(`add:${formId}`);
+      setActionError(null);
+      try {
+        await addScheduleEntry({
+          id: formId,
+          cron: formCron,
+          command: formCommand,
+          ...(formDescription.length === 0 ? {} : { description: formDescription }),
+        });
+        setFormId('');
+        setFormCron('0 8 * * *');
+        setFormCommand('');
+        setFormDescription('');
+        setShowAddForm(false);
+        await reload();
+      } catch (e) {
+        setActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setActionPending(null);
+      }
+    },
+    [formId, formCron, formCommand, formDescription, reload],
+  );
+
+  const handleRemove = useCallback(
+    async (id: string) => {
+      setActionPending(`remove:${id}`);
+      setActionError(null);
+      try {
+        await removeScheduleEntry(id);
+        await reload();
+      } catch (e) {
+        setActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setActionPending(null);
+      }
+    },
+    [reload],
+  );
+
+  const handleToggle = useCallback(
+    async (id: string, nextEnabled: boolean) => {
+      setActionPending(`toggle:${id}`);
+      setActionError(null);
+      try {
+        await setScheduleEnabled(id, nextEnabled);
+        await reload();
+      } catch (e) {
+        setActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setActionPending(null);
+      }
+    },
+    [reload],
+  );
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -629,15 +725,78 @@ export function SchedulePage() {
     <section className="page">
       <h1>Schedule</h1>
       <Status loading={loading} error={error} />
+      {actionError && <p className="banner banner-error">Aktion fehlgeschlagen: {actionError}</p>}
       {data && (
         <>
-          <p className="muted">
-            {data.count} Eintrag {data.count === 1 ? '' : 'e'} — Runner tickt alle 60s.
-          </p>
+          <div className="row" style={{ alignItems: 'center', gap: '8px' }}>
+            <p className="muted" style={{ flex: 1 }}>
+              {data.count} Eintrag {data.count === 1 ? '' : 'e'} — Runner tickt alle 60s.
+            </p>
+            <button
+              type="button"
+              disabled={!sidecarOk || actionPending !== null}
+              title={sidecarOk ? undefined : 'Read-Only-Modus — Sidecar nicht erreichbar'}
+              onClick={() => setShowAddForm((v) => !v)}
+            >
+              {showAddForm ? 'Abbrechen' : '+ Neu'}
+            </button>
+            <button type="button" disabled={loading || actionPending !== null} onClick={reload}>
+              {loading ? 'Lade …' : 'Refresh'}
+            </button>
+          </div>
+          {showAddForm && (
+            <form className="schedule-add-form" onSubmit={handleAdd}>
+              <label>
+                id
+                <input
+                  type="text"
+                  value={formId}
+                  onChange={(e) => setFormId(e.target.value)}
+                  placeholder="morning-sync"
+                  required
+                />
+              </label>
+              <label>
+                cron
+                <input
+                  type="text"
+                  value={formCron}
+                  onChange={(e) => setFormCron(e.target.value)}
+                  placeholder="0 8 * * *"
+                  required
+                />
+              </label>
+              <label>
+                command
+                <input
+                  type="text"
+                  value={formCommand}
+                  onChange={(e) => setFormCommand(e.target.value)}
+                  placeholder="claude-os vault snapshot"
+                  required
+                />
+              </label>
+              <label>
+                description (optional)
+                <input
+                  type="text"
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  placeholder="Backup vor dem Start"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={actionPending !== null || !sidecarOk}
+                title={sidecarOk ? undefined : 'Read-Only-Modus'}
+              >
+                {actionPending?.startsWith('add:') ? 'Lege an …' : 'Hinzufuegen'}
+              </button>
+            </form>
+          )}
           {data.entries.length === 0 ? (
             <p className="muted">
-              Noch keine Schedule-Eintraege. Mit{' '}
-              <code>claude-os schedule add &lt;id&gt; --cron "..." --command "..."</code> anlegen.
+              Noch keine Schedule-Eintraege. Über <code>+ Neu</code> anlegen.
             </p>
           ) : (
             <table className="data-table">
@@ -648,6 +807,7 @@ export function SchedulePage() {
                   <th>command</th>
                   <th>enabled</th>
                   <th>next</th>
+                  <th>Aktionen</th>
                 </tr>
               </thead>
               <tbody>
@@ -660,6 +820,33 @@ export function SchedulePage() {
                     <td className="ellipsis">{s.command}</td>
                     <td>{s.enabled ? 'on' : 'off'}</td>
                     <td>{s.next ?? '—'}</td>
+                    <td className="row" style={{ gap: '4px' }}>
+                      <button
+                        type="button"
+                        disabled={!sidecarOk || actionPending !== null}
+                        title={sidecarOk ? undefined : 'Read-Only-Modus'}
+                        onClick={() => handleToggle(s.id, !s.enabled)}
+                      >
+                        {actionPending === `toggle:${s.id}`
+                          ? '...'
+                          : s.enabled
+                            ? 'Deaktivieren'
+                            : 'Aktivieren'}
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={!sidecarOk || actionPending !== null}
+                        title={sidecarOk ? undefined : 'Read-Only-Modus'}
+                        onClick={() => {
+                          if (window.confirm(`Schedule "${s.id}" wirklich loeschen?`)) {
+                            void handleRemove(s.id);
+                          }
+                        }}
+                      >
+                        {actionPending === `remove:${s.id}` ? '...' : 'Loeschen'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
