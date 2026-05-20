@@ -86,6 +86,59 @@ export async function installCatalogAutoDeps(
   return rpcCall<CatalogInstallAutoDepsResult>('catalog.installAutoDeps', input);
 }
 
+// ---------- mcp.clients.* (v1.7 Phase A+B) ----------
+
+export const MCP_CLIENT_EVENT = 'mcp-client://event';
+
+export type McpProbeKind = 'alive' | 'init-timeout' | 'crashed' | 'protocol-error' | 'spawn-failed';
+
+export interface McpServerEntry {
+  name: string;
+  host: 'claude-desktop' | 'claude-code-user' | 'claude-code-project';
+  sourcePath: string;
+  command: string;
+  args: string[];
+  enabled?: boolean;
+}
+
+export type McpProbeResult =
+  | { kind: 'alive'; toolsCount: number; durationMs: number; protocolVersion: string }
+  | { kind: 'init-timeout'; durationMs: number; message: string }
+  | { kind: 'crashed'; durationMs: number; exitCode: number | null; stderr: string }
+  | { kind: 'protocol-error'; durationMs: number; message: string }
+  | { kind: 'spawn-failed'; durationMs: number; message: string };
+
+export interface McpClientStatusEntry {
+  key: string;
+  entry: McpServerEntry;
+  result: McpProbeResult;
+  probedAt: string;
+}
+
+export interface McpClientsStatusResult {
+  count: number;
+  entries: McpClientStatusEntry[];
+}
+
+export interface McpClientEventPayload {
+  type: 'tick-started' | 'tick-finished' | 'status-changed' | 'skip-overlap';
+  timestamp: string;
+  serverKey?: string;
+  kind?: McpProbeKind;
+  probedCount?: number;
+  message?: string;
+}
+
+export async function getMcpClientsStatus(): Promise<McpClientsStatusResult> {
+  return rpcCall<McpClientsStatusResult>('mcp.clients.status');
+}
+
+export async function onMcpClientEvent(
+  handler: (e: McpClientEventPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<McpClientEventPayload>(MCP_CLIENT_EVENT, (e) => handler(e.payload));
+}
+
 export interface VaultBusyState {
   busy: boolean;
   reason: string;

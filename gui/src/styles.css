@@ -146,6 +146,35 @@ body,
   padding: 8px 12px;
 }
 
+/* MCP-Status-Tags (v1.7 Phase B) */
+.mcp-status {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.mcp-status--alive {
+  background: rgba(76, 175, 80, 0.15);
+  color: #6cd47e;
+}
+.mcp-status--init-timeout {
+  background: rgba(255, 193, 7, 0.18);
+  color: #f0b400;
+}
+.mcp-status--crashed {
+  background: rgba(255, 93, 93, 0.18);
+  color: var(--danger);
+}
+.mcp-status--protocol-error {
+  background: rgba(255, 93, 93, 0.18);
+  color: var(--danger);
+}
+.mcp-status--spawn-failed {
+  background: rgba(138, 147, 164, 0.18);
+  color: var(--muted);
+}
+
 code {
   background: rgba(255, 255, 255, 0.05);
   padding: 0.1em 0.3em;

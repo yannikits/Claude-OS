@@ -17,6 +17,7 @@ import {
   CatalogPage,
   ChatPage,
   Dashboard,
+  McpClientsPage,
   SchedulePage,
   SecretsPage,
   SettingsPage,
@@ -30,6 +31,7 @@ const NAV = [
   { to: '/vault', label: 'Vault' },
   { to: '/agent-runs', label: 'Agent Runs' },
   { to: '/schedule', label: 'Schedule' },
+  { to: '/mcp-clients', label: 'MCP-Clients' },
   { to: '/secrets', label: 'Secrets' },
   { to: '/settings', label: 'Settings' },
 ] as const;
@@ -198,6 +200,7 @@ export function App() {
               <Route path="vault" element={<VaultPage />} />
               <Route path="agent-runs" element={<AgentRunsPage />} />
               <Route path="schedule" element={<SchedulePage />} />
+              <Route path="mcp-clients" element={<McpClientsPage />} />
               <Route path="secrets" element={<SecretsPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
