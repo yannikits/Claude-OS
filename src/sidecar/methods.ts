@@ -11,7 +11,9 @@ import {
   installFromGithubWithAutoDeps,
   readCatalog,
   readCatalogLock,
+  removeCatalogEntry,
   tarballCacheDirFor,
+  UnknownCatalogEntryError,
 } from '../domains/catalog/index.js';
 import type { WatcherHandle } from '../domains/mcp-clients/index.js';
 import {
@@ -58,6 +60,23 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
       lockResolvedAt: lock?.resolvedAt ?? null,
       entries: catalog.entries,
     };
+  });
+
+  dispatcher.register('catalog.removeEntry', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { id?: string };
+    if (typeof params.id !== 'string' || params.id.length === 0) {
+      throw new Error('catalog.removeEntry: params.id muss ein non-empty string sein');
+    }
+    const paths = catalogPathsFor(rootPath());
+    try {
+      const result = removeCatalogEntry(paths.catalogPath, params.id);
+      return { ok: true as const, id: params.id, removedEntry: result.removed };
+    } catch (err) {
+      if (err instanceof UnknownCatalogEntryError) {
+        return { ok: false as const, code: 'unknown-id', id: params.id, message: err.message };
+      }
+      throw err;
+    }
   });
 
   dispatcher.register('catalog.installAutoDeps', async (rawParams: unknown) => {
