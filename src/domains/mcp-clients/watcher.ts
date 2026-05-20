@@ -46,7 +46,8 @@ export interface WatcherEvent {
 export interface WatcherOpts {
   /** Tick-Intervall in ms (Default 60_000). */
   readonly tickMs?: number;
-  /** Probe-Timeout pro Server in ms (Default 5000). */
+  /** Probe-Timeout pro Server in ms (Default 10_000). Heavy MCP-Server wie
+   *  claude-flow brauchen >5s zum Initialisieren. */
   readonly probeTimeoutMs?: number;
   /** Concurrency-Cap fuer parallele Probes (Default 3). */
   readonly concurrency?: number;
@@ -87,7 +88,7 @@ export interface WatcherHandle {
 
 export function startMcpWatcher(opts: WatcherOpts): WatcherHandle {
   const tickMs = opts.tickMs ?? 60_000;
-  const probeTimeoutMs = opts.probeTimeoutMs ?? 5000;
+  const probeTimeoutMs = opts.probeTimeoutMs ?? 10_000;
   const concurrency = opts.concurrency ?? 3;
   const now = opts.now ?? (() => new Date());
   const setTimer = opts.setTimeoutFn ?? ((cb, ms) => setTimeout(cb, ms));

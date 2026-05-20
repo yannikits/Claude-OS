@@ -13,6 +13,23 @@ Format pro Eintrag:
 
 ---
 
+## 2026-05-20 — React useEffect-Closure-Race bei Event-Filtern (v1.5.1 Hotfix)
+
+**Situation:** ChatPage in der GUI (PR #29) registrierte `onChatOutput`/`onChatExit`-Listener im useEffect mit Filter `if (p.sessionId !== sessionId) return;` und Dependency `[sessionId, append]`. Sequenz im User-Test (Screenshot 2026-05-20 22_30_55):
+1. User klickt "Spawn --help"
+2. `chatSpawn()` resolved mit neuem sessionId → `setSessionId(...)`
+3. claude --help exited fast SOFORT
+4. Sidecar emittiert `chat.exit`-Notification
+5. useEffect ist noch nicht re-gerannt (React batches setState) — der ACTIVE listener hat noch `sessionId=null` in seiner Closure → ignoriert das Event
+6. Beim naechsten render rennt useEffect endlich neu — aber das Event ist verloren
+7. UI bleibt im running=true-State mit toter sessionId. Sendeversuch → "unknown sessionId"-Fehler
+
+**Lektion:** Wenn ein Event-Listener seine Closure-Variable als Filter-Kriterium nutzt UND der Listener nicht bei jedem render re-registriert werden soll, ist die `[state]`-Dependency-Variante anfaellig fuer Race-Conditions zwischen `setState` und useEffect-Rerun. Pattern: Listener EINMAL mounten (nur stabile deps) + Ref-basierter Filter (`activeXxxRef.current`) der SYNCHRON nach setXxx ebenfalls aktualisiert wird (auch direkt im start()-Callback, nicht erst im sync-effect).
+
+**Anwendung:** Pattern dokumentiert in `gui/src/pages/index.tsx ChatPage` nach PR #55. Bei neuen Event-Subscribers: pruefen ob der Filter eine Ref braucht statt closure-captured state. Zusaetzlich defensive recovery in der Aufruferseite: wenn Sidecar `unknown sessionId` zurueckgibt, sessionId clearen + running=false setzen (statt Error nur anzuzeigen).
+
+---
+
 ## 2026-05-20 — TimerHarness statt Real-Timer in Sidecar-Service-Tests
 
 **Situation:** Tests fuer Scheduler-Runner (PR #40) und MCP-Watcher (PR #48) brauchten kontrollierbares Tick-Verhalten. Initialer Versuch nutzte `vi.useFakeTimers()` + `vi.advanceTimersByTime` — funktioniert fuer synchronen Code, aber unsere Services sind async (probeServers ist Promise-based, ChildProcess-Events sind nicht in vi-timer-control). Ergebnis: tests sahen Timer-Callbacks feuern, aber die awaits darin landeten nicht im aktuellen Event-Loop-Tick und Assertions schlugen leer.

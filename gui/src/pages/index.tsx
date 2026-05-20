@@ -478,6 +478,12 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const idCounter = useRef(0);
   const logRef = useRef<HTMLDivElement | null>(null);
+  // Ref-basierter Event-Filter: useEffect mountet die Listener nur 1x.
+  // Bei jedem setSessionId/setRunning wird die ref aktualisiert, sodass die
+  // Listener-Closure auf den LATEST Wert prueft — fixed eine Race wo
+  // chat.exit zwischen spawn-resolve und useEffect-rerun verloren ging
+  // (PR #55, getestet im Screenshot vom 2026-05-20).
+  const activeSessionIdRef = useRef<string | null>(null);
 
   const append = useCallback((stream: ChatLogEntry['stream'], text: string) => {
     idCounter.current += 1;
@@ -488,14 +494,17 @@ export function ChatPage() {
     });
   }, []);
 
+  // Listener werden NUR 1x registriert. Filtering passiert ueber die Ref —
+  // die jedes Mal wenn setSessionId fired automatisch durch das andere
+  // useEffect unten aktualisiert wird.
   useEffect(() => {
     const unsubs: Array<() => void> = [];
     onChatOutput((p: ChatOutputPayload) => {
-      if (p.sessionId !== sessionId) return;
+      if (p.sessionId !== activeSessionIdRef.current) return;
       append(p.stream, p.chunk);
     }).then((u) => unsubs.push(u));
     onChatExit((p: ChatExitPayload) => {
-      if (p.sessionId !== sessionId) return;
+      if (p.sessionId !== activeSessionIdRef.current) return;
       append('meta', `[exited code=${p.exitCode ?? 'null'} signal=${p.signal ?? 'null'}]\n`);
       setRunning(false);
       setSessionId(null);
@@ -503,7 +512,12 @@ export function ChatPage() {
     return () => {
       for (const u of unsubs) u();
     };
-  }, [sessionId, append]);
+  }, [append]);
+
+  // Sync the ref jedes Mal wenn sessionId ändert
+  useEffect(() => {
+    activeSessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -517,6 +531,9 @@ export function ChatPage() {
     idCounter.current = 0;
     try {
       const result = await chatSpawn(args);
+      // Ref SOFORT setzen damit ein eintreffender chat.exit/output Event
+      // vor dem naechsten render bereits den richtigen Filter sieht.
+      activeSessionIdRef.current = result.sessionId;
       setSessionId(result.sessionId);
       setRunning(true);
       append(
@@ -536,7 +553,16 @@ export function ChatPage() {
       append('meta', `> ${input}\n`);
       setInput('');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      // Wenn der Sidecar die Session nicht mehr kennt (z. B. weil sie
+      // gerade exited ist und das Event bei uns noch nicht angekommen
+      // ist), tote sessionId clearen.
+      if (/unknown sessionId/i.test(msg)) {
+        setSessionId(null);
+        setRunning(false);
+        append('meta', '[session bereits beendet — sessionId geclearet]\n');
+      }
     }
   };
 
@@ -545,7 +571,12 @@ export function ChatPage() {
     try {
       await chatKill(sessionId);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      if (/unknown sessionId/i.test(msg)) {
+        setSessionId(null);
+        setRunning(false);
+      }
     }
   };
 
