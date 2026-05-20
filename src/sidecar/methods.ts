@@ -353,6 +353,23 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
       }));
       return { count: entries.length, entries };
     });
+    dispatcher.register('mcp.clients.reprobe', async (rawParams: unknown) => {
+      const params = (rawParams ?? {}) as { serverKey?: string };
+      if (typeof params.serverKey !== 'string' || params.serverKey.length === 0) {
+        throw new Error('mcp.clients.reprobe: params.serverKey muss ein non-empty string sein');
+      }
+      const result = await watcher.reprobe(params.serverKey);
+      if (result === null) {
+        return { ok: false as const, code: 'unknown-server', serverKey: params.serverKey };
+      }
+      return {
+        ok: true as const,
+        key: params.serverKey,
+        entry: result.entry,
+        result: result.result,
+        probedAt: result.probedAt,
+      };
+    });
   }
 
   dispatcher.register('schedule.list', () => {

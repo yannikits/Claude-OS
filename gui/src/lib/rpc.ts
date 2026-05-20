@@ -133,6 +133,14 @@ export async function getMcpClientsStatus(): Promise<McpClientsStatusResult> {
   return rpcCall<McpClientsStatusResult>('mcp.clients.status');
 }
 
+export type McpReprobeResult =
+  | { ok: true; key: string; entry: McpServerEntry; result: McpProbeResult; probedAt: string }
+  | { ok: false; code: 'unknown-server'; serverKey: string };
+
+export async function reprobeMcpClient(serverKey: string): Promise<McpReprobeResult> {
+  return rpcCall<McpReprobeResult>('mcp.clients.reprobe', { serverKey });
+}
+
 export async function onMcpClientEvent(
   handler: (e: McpClientEventPayload) => void,
 ): Promise<UnlistenFn> {
