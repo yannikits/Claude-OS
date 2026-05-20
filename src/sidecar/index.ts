@@ -57,11 +57,22 @@ logger.info('sidecar: scheduler runner started (tick 60s)');
 // Claude Desktop / Claude Code konfigurierten MCP-Server live und
 // emittiert status-changed-Events bei Veraenderungen. Status-Cache
 // ist via `mcp.clients.status`-RPC abrufbar.
+//
+// Probe-Timeout via env-Var konfigurierbar (CLAUDE_OS_MCP_PROBE_TIMEOUT_MS).
+// Default 15_000ms — claude-flow + aehnliche heavy MCP-Server brauchen
+// 5-15s zum Initialisieren ihrer HNSW-Indizes etc.
+const probeTimeoutFromEnv = Number.parseInt(process.env.CLAUDE_OS_MCP_PROBE_TIMEOUT_MS ?? '', 10);
+const probeTimeoutMs =
+  Number.isFinite(probeTimeoutFromEnv) && probeTimeoutFromEnv > 0 ? probeTimeoutFromEnv : 15_000;
 const mcpWatcherHandle = startMcpWatcher({
   emit: (event) => emitNotification('mcp-client://event', event),
   projectCwd: resolveRoot({}).path,
+  probeTimeoutMs,
 });
-logger.info('sidecar: mcp watcher started (tick 60s)');
+logger.info(
+  { probeTimeoutMs },
+  'sidecar: mcp watcher started (tick 60s, probe-timeout configurable)',
+);
 
 dispatcher.register('shutdown', () => {
   queueMicrotask(async () => {

@@ -484,6 +484,7 @@ export function ChatPage() {
   // chat.exit zwischen spawn-resolve und useEffect-rerun verloren ging
   // (PR #55, getestet im Screenshot vom 2026-05-20).
   const activeSessionIdRef = useRef<string | null>(null);
+  const listenersReadyRef = useRef<Promise<unknown> | null>(null);
 
   const append = useCallback((stream: ChatLogEntry['stream'], text: string) => {
     idCounter.current += 1;
@@ -497,19 +498,36 @@ export function ChatPage() {
   // Listener werden NUR 1x registriert. Filtering passiert ueber die Ref —
   // die jedes Mal wenn setSessionId fired automatisch durch das andere
   // useEffect unten aktualisiert wird.
+  //
+  // Wichtig: Tauri's `listen()` ist async und braucht eine Iteration bis
+  // der Listener wirklich beim Event-Bus registriert ist. listenersReadyRef
+  // signalisiert wenn beide listen()-Promises resolved sind, damit start()
+  // davor warten kann — sonst koennten chat.exit-Events fuer sehr kurze
+  // Spawns (`claude --help`) verloren gehen.
   useEffect(() => {
     const unsubs: Array<() => void> = [];
-    onChatOutput((p: ChatOutputPayload) => {
-      if (p.sessionId !== activeSessionIdRef.current) return;
-      append(p.stream, p.chunk);
-    }).then((u) => unsubs.push(u));
-    onChatExit((p: ChatExitPayload) => {
-      if (p.sessionId !== activeSessionIdRef.current) return;
-      append('meta', `[exited code=${p.exitCode ?? 'null'} signal=${p.signal ?? 'null'}]\n`);
-      setRunning(false);
-      setSessionId(null);
-    }).then((u) => unsubs.push(u));
+    let cancelled = false;
+    const ready = Promise.all([
+      onChatOutput((p: ChatOutputPayload) => {
+        if (p.sessionId !== activeSessionIdRef.current) return;
+        append(p.stream, p.chunk);
+      }),
+      onChatExit((p: ChatExitPayload) => {
+        if (p.sessionId !== activeSessionIdRef.current) return;
+        append('meta', `[exited code=${p.exitCode ?? 'null'} signal=${p.signal ?? 'null'}]\n`);
+        setRunning(false);
+        setSessionId(null);
+      }),
+    ]).then((subs) => {
+      if (cancelled) {
+        for (const u of subs) u();
+        return;
+      }
+      unsubs.push(...subs);
+    });
+    listenersReadyRef.current = ready;
     return () => {
+      cancelled = true;
       for (const u of unsubs) u();
     };
   }, [append]);
@@ -530,6 +548,12 @@ export function ChatPage() {
     setLog([]);
     idCounter.current = 0;
     try {
+      // Warten bis die Tauri-listen()-Promises resolved sind — sonst koennten
+      // chat.exit-Events fuer sehr kurze Spawns wie `claude --help` verloren
+      // gehen weil der Listener noch nicht beim event-bus registriert ist.
+      if (listenersReadyRef.current !== null) {
+        await listenersReadyRef.current;
+      }
       const result = await chatSpawn(args);
       // Ref SOFORT setzen damit ein eintreffender chat.exit/output Event
       // vor dem naechsten render bereits den richtigen Filter sieht.
@@ -580,6 +604,21 @@ export function ChatPage() {
     }
   };
 
+  /**
+   * Reset-Button: clearet LOKAL den GUI-State ohne RPC. Escape-Hatch falls die
+   * Sidecar-Notification (chat.exit) verloren ging und die UI im running=true
+   * haengt. Pragmatischer Workaround fuer Race-Conditions in der Event-
+   * Lieferung.
+   */
+  const reset = () => {
+    activeSessionIdRef.current = null;
+    setSessionId(null);
+    setRunning(false);
+    setError(null);
+    setInput('');
+    append('meta', '[lokal: state geclearet via Reset]\n');
+  };
+
   return (
     <section className="page">
       <h1>Chat</h1>
@@ -606,6 +645,13 @@ export function ChatPage() {
             Spawn
           </button>
         )}
+        <button
+          type="button"
+          onClick={reset}
+          title="Lokal: GUI-State clearen ohne RPC (Escape-Hatch wenn die UI haengt)"
+        >
+          Reset
+        </button>
       </div>
       <div className="chat-log" ref={logRef} data-testid="chat-log">
         {log.length === 0 ? (
