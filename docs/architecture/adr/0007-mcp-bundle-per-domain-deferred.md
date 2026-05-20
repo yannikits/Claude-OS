@@ -1,6 +1,6 @@
-# ADR-0007 — MCP-Bundle pro Domain (Deferred to v1.1)
+# ADR-0007 — MCP-Bundle pro Domain (Deferred to v2+)
 
-**Status:** Akzeptiert (Deferred to v1.1)
+**Status:** Akzeptiert (Deferred). v1.4 hat stattdessen den Single-Server-Bridge-Ansatz gewählt — siehe [ADR-0016](0016-mcp-single-server-bridge.md). Per-Domain-Bundles bleiben Material für v2+ falls ein konkreter Multi-Tenant- oder Per-Domain-Scope-Use-Case auftaucht.
 **Datum:** 2026-05-15
 **Bedingt durch:** Pattern-Beobachtung in `levnikolaevich/claude-code-skills`
 

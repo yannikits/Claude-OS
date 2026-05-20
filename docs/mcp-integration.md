@@ -6,8 +6,9 @@ die claude-os Domain-Funktionen als Tools nutzen — vault-status checken,
 agent-runs listen, settings lesen, files in die inbox importieren, ohne
 dass du dafür CLI-Befehle tippen musst.
 
-Per [ADR-0007](architecture/adr/0007-mcp-bundle-pro-domain.md) ist das
-Domain-Code transport-agnostisch: dieselben Handler die der Tauri-Sidecar
+Per [ADR-0016](architecture/adr/0016-mcp-single-server-bridge.md) (Single-Server-Bridge
+über den Sidecar-`RpcDispatcher`, ADR-0007 für Per-Domain-Bundles bleibt v1.x-deferred)
+ist der Domain-Code transport-agnostisch: dieselben Handler die der Tauri-Sidecar
 über NDJSON-stdio serviert, sind auch via MCP-stdio erreichbar.
 
 ## Verfügbare Tools
