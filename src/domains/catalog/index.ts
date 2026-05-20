@@ -5,6 +5,11 @@
  */
 
 export {
+  type BindingInput,
+  type BindingResult,
+  resolveBindings,
+} from './binding-resolver.js';
+export {
   type CleanResult,
   cleanTarballCache,
   DEFAULT_TARBALL_RETENTION_MS,
@@ -114,3 +119,10 @@ export {
   TarballInstallError,
   tarballCacheDirFor,
 } from './tarball-installer.js';
+export {
+  type ManifestReadResult,
+  NO_MANIFEST,
+  NO_MANIFEST_REASON,
+  type ReadOpts as ManifestReadOpts,
+  readPluginManifestFromTarball,
+} from './tarball-manifest-reader.js';
