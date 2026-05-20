@@ -10,6 +10,7 @@ import {
   chatSpawn,
   chatWrite,
   deleteSecret,
+  getMcpClientsStatus,
   getSettings,
   getVaultStatus,
   installCatalogAutoDeps,
@@ -17,8 +18,10 @@ import {
   listCatalog,
   listSchedules,
   listSecrets,
+  type McpClientsStatusResult,
   onChatExit,
   onChatOutput,
+  onMcpClientEvent,
   onSchedulerEvent,
   ping,
   removeScheduleEntry,
@@ -1018,6 +1021,110 @@ export function SchedulePage() {
             ))}
           </tbody>
         </table>
+      )}
+    </section>
+  );
+}
+
+// ============================================================================
+// McpClientsPage (v1.7 Phase B) — Live-Status der konfigurierten MCP-Server
+// ============================================================================
+
+export function McpClientsPage() {
+  const [data, setData] = useState<McpClientsStatusResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getMcpClientsStatus();
+      setData(result);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+    let unlisten: (() => void) | null = null;
+    onMcpClientEvent((evt) => {
+      // Auto-Refresh nur bei status-changed oder tick-finished;
+      // tick-started/skip-overlap sind reines progress feedback.
+      if (evt.type === 'status-changed' || evt.type === 'tick-finished') {
+        void reload();
+      }
+    })
+      .then((un) => {
+        unlisten = un;
+      })
+      .catch(() => {
+        /* listen failed — log will show via status banner */
+      });
+    return () => {
+      if (unlisten !== null) unlisten();
+    };
+  }, [reload]);
+
+  return (
+    <section className="page">
+      <h1>MCP-Clients</h1>
+      <Status loading={loading} error={error} />
+      {data && (
+        <>
+          <div className="row" style={{ alignItems: 'center', gap: '8px' }}>
+            <p className="muted" style={{ flex: 1 }}>
+              {data.count} MCP-Server live geprobt — Watcher tickt alle 60s.
+            </p>
+            <button type="button" disabled={loading} onClick={reload}>
+              {loading ? 'Lade …' : 'Refresh'}
+            </button>
+          </div>
+          {data.entries.length === 0 ? (
+            <p className="muted">
+              Noch keine MCP-Server entdeckt. Der Watcher tickt alle 60s; sobald die Configs
+              eintreffen werden sie hier auftauchen.
+            </p>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Server</th>
+                  <th>Host</th>
+                  <th>Status</th>
+                  <th>Details</th>
+                  <th>Probed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.entries.map((s) => (
+                  <tr key={s.key}>
+                    <td>{s.entry.name}</td>
+                    <td className="muted">{s.entry.host}</td>
+                    <td>
+                      <span className={`mcp-status mcp-status--${s.result.kind}`}>
+                        {s.result.kind}
+                      </span>
+                    </td>
+                    <td className="ellipsis">
+                      {s.result.kind === 'alive'
+                        ? `${s.result.toolsCount} Tools · ${s.result.durationMs}ms · ${s.result.protocolVersion}`
+                        : 'message' in s.result
+                          ? s.result.message
+                          : s.result.kind === 'crashed'
+                            ? `exit=${s.result.exitCode ?? '?'} stderr=${s.result.stderr.slice(0, 80)}`
+                            : ''}
+                    </td>
+                    <td className="muted">{s.probedAt}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
       )}
     </section>
   );
