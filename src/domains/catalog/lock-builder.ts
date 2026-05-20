@@ -12,8 +12,15 @@
  *   - marketplace: skipped with a warning (needs the resolved
  *              github:* coordinate from the registry — Phase 5n).
  *
- * Bindings stay empty until the full capability resolver integration
- * (Phase 5n) reads each entry's plugin.json + runs `resolveCapabilities`.
+ * Bindings (Phase 5o): for each `kind: 'plugin'` entry the cached
+ * tarball is peeked for `plugin.json`. All successfully read manifests
+ * are aggregated into a single `Catalog`, then `resolveCapabilities`
+ * runs per plugin to compute the lock's `bindings` array. Resolver
+ * errors emit warnings and degrade gracefully (the entry stays in the
+ * lock with `bindings: []` rather than crashing the whole build).
+ *
+ * Skill and mcp entries remain binding-less by construction — they are
+ * leaves in the capability graph (no requires/provides) per ADR-0010.
  *
  * Returns `{ lock, warnings }` so the CLI can both write the lock and
  * surface the skipped/failed entries.
@@ -23,8 +30,15 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CatalogConfig, CatalogLock, CatalogLockEntry } from './schema.js';
+import { type BindingInput, resolveBindings } from './binding-resolver.js';
+import type { PluginManifest } from './capability-resolver.js';
+import type { CatalogConfig, CatalogEntry, CatalogLock, CatalogLockEntry } from './schema.js';
 import { githubTarballUrl, parseSource, SourceParseError } from './source-resolver.js';
+import {
+  type ManifestReadResult,
+  NO_MANIFEST_REASON,
+  readPluginManifestFromTarball,
+} from './tarball-manifest-reader.js';
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -43,6 +57,11 @@ export interface LockBuilderOpts {
   readonly fetch?: FetchFn;
   /** Injectable clock for tests. Defaults to `() => new Date().toISOString()`. */
   readonly nowIso?: () => string;
+  /**
+   * Injectable manifest reader for tests. Defaults to the tarball-peek
+   * implementation in `tarball-manifest-reader.ts`.
+   */
+  readonly readManifest?: (tarballPath: string) => Promise<ManifestReadResult>;
 }
 
 export interface LockBuilderResult {
@@ -84,6 +103,12 @@ async function fetchAndCacheTarball(
   return sha256;
 }
 
+interface FetchedEntry {
+  readonly entry: CatalogEntry;
+  readonly sha256: string;
+  readonly resolvedRef: string;
+}
+
 export async function lockCatalog(opts: LockBuilderOpts): Promise<LockBuilderResult> {
   const fetchImpl = opts.fetch ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') {
@@ -92,8 +117,10 @@ export async function lockCatalog(opts: LockBuilderOpts): Promise<LockBuilderRes
     );
   }
   const nowIso = opts.nowIso ?? (() => new Date().toISOString());
+  const readManifest = opts.readManifest ?? readPluginManifestFromTarball;
 
-  const entries: CatalogLockEntry[] = [];
+  // ---- Pass 1: fetch+cache every github tarball, skip non-github. ----
+  const fetched: FetchedEntry[] = [];
   const warnings: string[] = [];
 
   for (const entry of opts.catalog.entries) {
@@ -130,15 +157,52 @@ export async function lockCatalog(opts: LockBuilderOpts): Promise<LockBuilderRes
       );
       continue;
     }
-    const resolvedRef = parsed.ref ?? 'HEAD';
-    entries.push({
-      id: entry.id,
-      source: entry.source,
-      sha256,
-      resolvedRef,
-      bindings: [],
-    });
+    fetched.push({ entry, sha256, resolvedRef: parsed.ref ?? 'HEAD' });
   }
+
+  // ---- Pass 2: peek plugin.json out of every plugin-kind tarball. ----
+  const bindingInputs: BindingInput[] = [];
+  const manifestById = new Map<string, PluginManifest>();
+  for (const f of fetched) {
+    if (f.entry.kind !== 'plugin') continue;
+    const tarballPath = join(opts.cacheDir, `${f.sha256}.tar.gz`);
+    let manifestResult: ManifestReadResult;
+    try {
+      manifestResult = await readManifest(tarballPath);
+    } catch (err) {
+      warnings.push(
+        `${f.entry.id}: manifest read errored: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
+    if (manifestResult.ok === false) {
+      // A genuinely missing plugin.json is v1-reality for the long tail
+      // of plugins that pre-date ADR-0010 manifests — keep silent.
+      // Malformed manifests (parse/schema failures) are surfaced so the
+      // author can fix them.
+      if (manifestResult.reason !== NO_MANIFEST_REASON) {
+        warnings.push(`${f.entry.id}: ${manifestResult.reason}`);
+      }
+      continue;
+    }
+    bindingInputs.push({ catalogId: f.entry.id, manifest: manifestResult.manifest });
+    manifestById.set(f.entry.id, manifestResult.manifest);
+  }
+
+  // ---- Pass 3: resolve bindings against the aggregate catalog. ----
+  const bindingResults = resolveBindings(bindingInputs);
+  for (const result of bindingResults.values()) {
+    if (result.warning !== undefined) warnings.push(result.warning);
+  }
+
+  // ---- Pass 4: emit lock entries with their (possibly empty) bindings. ----
+  const entries: CatalogLockEntry[] = fetched.map((f) => ({
+    id: f.entry.id,
+    source: f.entry.source,
+    sha256: f.sha256,
+    resolvedRef: f.resolvedRef,
+    bindings: [...(bindingResults.get(f.entry.id)?.bindings ?? [])],
+  }));
 
   return {
     lock: {
