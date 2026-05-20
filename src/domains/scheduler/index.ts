@@ -10,6 +10,11 @@
  */
 export { nextFire, type ParsedCron, parseCron } from './cron-parser.js';
 export {
+  type RunnerOpts,
+  type SchedulerEvent,
+  startScheduler,
+} from './runner.js';
+export {
   addSchedule,
   readSchedules,
   removeSchedule,
