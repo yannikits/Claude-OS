@@ -227,9 +227,55 @@ async function actAutoDeps(globals: GlobalOpts, raw: string, opts: InstallOpts):
     if (mergedEntries.some((m) => m.id === e.id)) continue;
     mergedEntries.push(e);
   }
-  writeCatalog(catalogPaths.catalogPath, { version: 1, entries: mergedEntries });
+  const newCatalog = { version: 1 as const, entries: mergedEntries };
+  writeCatalog(catalogPaths.catalogPath, newCatalog);
   printLine(`     catalog.json aktualisiert: ${catalogPaths.catalogPath}`);
-  printLine(`     Hinweis: \`claude-os catalog lock && claude-os catalog sync\` fuer FS-Install.`);
+
+  // ---- Phase 5r: Lock + Sync direkt mitlaufen lassen ----
+  // Bisher musste der User `catalog lock && catalog sync` separat
+  // aufrufen. Das ist Bullshit-UX wenn --auto-deps das ganze Plan-
+  // Resultat schon ermittelt hat. Wir lassen lockCatalog + applyLock
+  // direkt mitlaufen damit der Install end-to-end vollendet ist.
+  let newLock: Awaited<ReturnType<typeof lockCatalog>>;
+  try {
+    newLock = await lockCatalog({ catalog: newCatalog, cacheDir });
+  } catch (err) {
+    printErr(
+      `[FAIL] Lock-Build nach Catalog-Update fehlgeschlagen: ${err instanceof LockBuilderError ? err.message : String(err)}`,
+    );
+    printLine(
+      '     catalog.json wurde geschrieben — manuell `catalog lock && catalog sync` versuchen.',
+    );
+    process.exit(7);
+  }
+  if (newLock.warnings.length > 0) {
+    printLine('     Lock-Build Warnings:');
+    for (const w of newLock.warnings) printLine(`       ! ${w}`);
+  }
+  writeCatalogLock(catalogPaths.lockPath, newLock.lock);
+  printLine(`     catalog.lock.json geschrieben: ${catalogPaths.lockPath}`);
+
+  let applyResult: Awaited<ReturnType<typeof applyLock>>;
+  try {
+    applyResult = await applyLock({
+      root: root.path,
+      catalog: newCatalog,
+      lock: newLock.lock,
+      cacheDir,
+    });
+  } catch (err) {
+    printErr(
+      `[FAIL] Sync nach Catalog-Update fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    process.exit(8);
+  }
+  printLine(
+    `     Sync abgeschlossen: ${applyResult.applied.length} installiert, ${applyResult.skipped.length} skipped, ${applyResult.errors.length} fehlgeschlagen`,
+  );
+  if (applyResult.errors.length > 0) {
+    for (const e of applyResult.errors) printLine(`       ! ${e.id}: ${e.message}`);
+    process.exit(9);
+  }
 }
 
 async function actInstall(globals: GlobalOpts, raw: string, opts: InstallOpts = {}): Promise<void> {

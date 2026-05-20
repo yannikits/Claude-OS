@@ -1,9 +1,8 @@
 # Spec — `--auto-deps`-Flag für `catalog install`
 
-**Status:** Draft (Spec-Only, Impl wartet auf PR #32 Merge)
+**Status:** Umgesetzt in Phase 5p (PR #39, Domain-Resolver), Phase 5q (PR #43, CLI-Wire) und Phase 5r (end-to-end Install inkl. lockCatalog + applyLock).
 **Datum:** 2026-05-20
 **Voraussetzung:** Phase 5o (Plugin-Binding-Resolution, PR #32) gemerged.
-**Folge-Phase:** "Phase 5p" oder direkt v1.5 — finaler Name beim Impl.
 
 ## 1. Ziel
 
