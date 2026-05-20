@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { resolveRoot } from '../core/environment/index.js';
+import { resolveMachinePaths } from '../core/paths/index.js';
+import { startScheduler } from '../domains/scheduler/index.js';
 import { ChatSessions } from './chat-sessions.js';
 import { createSidecarLogger } from './logger.js';
 import { registerMethods } from './methods.js';
@@ -40,10 +42,21 @@ try {
   );
 }
 
+// Scheduler-Runner als Hintergrund-Service starten. Tickt alle 60s
+// gegen <dataDir>/schedules.json und feuert faellige Eintraege.
+// Pro SchedulerEvent landet eine `schedule://event`-Notification beim
+// Tauri-Supervisor, der sie als Tauri-Event an den Renderer weiterleitet.
+const schedulerHandle = startScheduler({
+  dataDir: resolveMachinePaths().dataDir,
+  emit: (event) => emitNotification('schedule://event', event),
+});
+logger.info('sidecar: scheduler runner started (tick 60s)');
+
 dispatcher.register('shutdown', () => {
   queueMicrotask(async () => {
     logger.info('sidecar: shutdown requested via RPC');
     await chatSessions.shutdownAll();
+    await schedulerHandle.stop();
     await watchers?.close();
     process.exit(0);
   });
@@ -55,6 +68,7 @@ registerMethods(dispatcher, { chatSessions });
 await runRpcServer({ dispatcher });
 
 await chatSessions.shutdownAll();
+await schedulerHandle.stop();
 await watchers?.close();
 logger.info('sidecar: RPC channel closed, exiting');
 process.exit(0);

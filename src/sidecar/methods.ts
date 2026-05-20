@@ -6,6 +6,12 @@ import { resolveMachinePaths } from '../core/paths/index.js';
 import { AgentRunsRepository, agentRunsIndexPathFor } from '../domains/agent-runs/index.js';
 import { ProfileManager } from '../domains/auth/index.js';
 import { catalogPathsFor, readCatalog, readCatalogLock } from '../domains/catalog/index.js';
+import {
+  nextFire,
+  parseCron,
+  readSchedules,
+  type ScheduleEntry,
+} from '../domains/scheduler/index.js';
 import { createSecretStore } from '../domains/secrets/index.js';
 import { SecretsLockedError } from '../domains/secrets/types.js';
 import { BusyFlag, loadVaultConfig } from '../domains/vault-sync/index.js';
@@ -192,6 +198,22 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
       return { ok: true as const };
     });
   }
+
+  dispatcher.register('schedule.list', () => {
+    const machine = resolveMachinePaths();
+    const store = readSchedules(machine.dataDir);
+    const enriched = store.entries.map((entry: ScheduleEntry) => {
+      let next: string | null = null;
+      try {
+        const fire = nextFire(parseCron(entry.cron));
+        next = fire === null ? null : fire.toISOString();
+      } catch {
+        next = null;
+      }
+      return { ...entry, next };
+    });
+    return { count: enriched.length, entries: enriched };
+  });
 
   dispatcher.register('agent.list', (rawParams: unknown) => {
     const params = (rawParams ?? {}) as { project?: string; limit?: number };

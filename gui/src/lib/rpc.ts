@@ -238,3 +238,44 @@ export async function onChatOutput(handler: (p: ChatOutputPayload) => void): Pro
 export async function onChatExit(handler: (p: ChatExitPayload) => void): Promise<UnlistenFn> {
   return listen<ChatExitPayload>(CHAT_EXIT_EVENT, (e) => handler(e.payload));
 }
+
+// ---------- schedule.* (v1.5 Phase 3) ----------
+
+export const SCHEDULE_EVENT = 'schedule://event';
+
+export interface ScheduleEntry {
+  id: string;
+  cron: string;
+  command: string;
+  createdAt: string;
+  enabled: boolean;
+  description?: string;
+  /** Naechste Feuer-Zeit als ISO-8601, oder null wenn nicht erreichbar. */
+  next: string | null;
+}
+
+export interface ScheduleListResult {
+  count: number;
+  entries: ScheduleEntry[];
+}
+
+export interface SchedulerEventPayload {
+  type: 'fire' | 'skip-overlap' | 'output' | 'exit' | 'parse-error';
+  entryId: string;
+  timestamp: string;
+  stream?: 'stdout' | 'stderr';
+  line?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  message?: string;
+}
+
+export async function listSchedules(): Promise<ScheduleListResult> {
+  return rpcCall<ScheduleListResult>('schedule.list');
+}
+
+export async function onSchedulerEvent(
+  handler: (e: SchedulerEventPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<SchedulerEventPayload>(SCHEDULE_EVENT, (e) => handler(e.payload));
+}
