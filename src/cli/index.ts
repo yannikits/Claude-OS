@@ -15,6 +15,7 @@ import { registerAuthCommand } from './commands/auth.js';
 import { registerCatalogCommand } from './commands/catalog.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerMcpCommand } from './commands/mcp.js';
+import { registerScheduleCommand } from './commands/schedule.js';
 import { registerSecretsCommand } from './commands/secrets.js';
 import { registerUpdateCommand } from './commands/update.js';
 import { registerVaultCommand } from './commands/vault.js';
@@ -38,6 +39,7 @@ registerAgentCommand(program);
 registerAuthCommand(program);
 registerAiCommand(program);
 registerMcpCommand(program);
+registerScheduleCommand(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));
