@@ -24,6 +24,7 @@ import {
   onMcpClientEvent,
   onSchedulerEvent,
   ping,
+  removeCatalogEntry,
   removeScheduleEntry,
   reprobeMcpClient,
   type ScheduleListResult,
@@ -124,6 +125,7 @@ export function CatalogPage() {
   const [formRegistry, setFormRegistry] = useState('');
   const [installing, setInstalling] = useState(false);
   const [installResult, setInstallResult] = useState<CatalogInstallAutoDepsResult | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -137,6 +139,24 @@ export function CatalogPage() {
       setLoading(false);
     }
   }, []);
+
+  const handleRemove = useCallback(
+    async (id: string) => {
+      setRemovingId(id);
+      try {
+        const result = await removeCatalogEntry(id);
+        if (!result.ok) {
+          setError(`catalog.removeEntry: ${result.message}`);
+        }
+        await reload();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setRemovingId(null);
+      }
+    },
+    [reload],
+  );
 
   useEffect(() => {
     void reload();
@@ -269,6 +289,7 @@ export function CatalogPage() {
                   <th>scope</th>
                   <th>enabled</th>
                   <th>source</th>
+                  <th>Aktion</th>
                 </tr>
               </thead>
               <tbody>
@@ -279,6 +300,25 @@ export function CatalogPage() {
                     <td>{e.scope}</td>
                     <td>{e.enabled ? 'yes' : 'no'}</td>
                     <td className="ellipsis">{e.source}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={!sidecarOk || removingId !== null || installing}
+                        title={
+                          sidecarOk
+                            ? 'Entry aus catalog.json entfernen (FS-Files bleiben)'
+                            : 'Read-Only-Modus'
+                        }
+                        onClick={() => {
+                          if (window.confirm(`Catalog-Entry "${e.id}" wirklich entfernen?`)) {
+                            void handleRemove(e.id);
+                          }
+                        }}
+                      >
+                        {removingId === e.id ? '...' : 'Loeschen'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

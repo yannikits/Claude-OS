@@ -86,6 +86,14 @@ export async function installCatalogAutoDeps(
   return rpcCall<CatalogInstallAutoDepsResult>('catalog.installAutoDeps', input);
 }
 
+export type CatalogRemoveResult =
+  | { ok: true; id: string; removedEntry: CatalogEntry }
+  | { ok: false; code: 'unknown-id'; id: string; message: string };
+
+export async function removeCatalogEntry(id: string): Promise<CatalogRemoveResult> {
+  return rpcCall<CatalogRemoveResult>('catalog.removeEntry', { id });
+}
+
 // ---------- mcp.clients.* (v1.7 Phase A+B) ----------
 
 export const MCP_CLIENT_EVENT = 'mcp-client://event';
