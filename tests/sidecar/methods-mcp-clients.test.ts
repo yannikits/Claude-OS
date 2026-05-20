@@ -37,10 +37,18 @@ function makeEntry(name: string): McpServerEntry {
   };
 }
 
-function fakeWatcher(snapshot: Map<string, WatcherStatusEntry>): WatcherHandle {
+function fakeWatcher(
+  snapshot: Map<string, WatcherStatusEntry>,
+  reprobeImpl?: (k: string) => Promise<WatcherStatusEntry | null>,
+): WatcherHandle {
   return {
     snapshot: () => snapshot,
     stop: async () => {},
+    reprobe:
+      reprobeImpl ??
+      (async (key: string) => {
+        return snapshot.get(key) ?? null;
+      }),
   };
 }
 
@@ -83,5 +91,60 @@ describe('mcp.clients.status RPC', () => {
     const d = new RpcDispatcher();
     registerMethods(d, {});
     await expect(d.invoke('mcp.clients.status', {})).rejects.toThrow(/MethodNotFound/);
+  });
+});
+
+describe('mcp.clients.reprobe RPC', () => {
+  it('triggered reprobe und gibt den neuen StatusEntry zurueck', async () => {
+    const snapshot = new Map<string, WatcherStatusEntry>();
+    snapshot.set('claude-desktop:alpha', {
+      entry: makeEntry('alpha'),
+      result: { kind: 'crashed', durationMs: 5, exitCode: 1, stderr: 'old' },
+      probedAt: '2026-05-20T10:00:00.000Z',
+    });
+    const reprobeImpl = async (key: string) => {
+      const prev = snapshot.get(key);
+      if (prev === undefined) return null;
+      // simulate reprobe that finds alive now
+      const next: WatcherStatusEntry = {
+        entry: prev.entry,
+        result: { kind: 'alive', toolsCount: 2, durationMs: 7, protocolVersion: '2024-11-05' },
+        probedAt: '2026-05-20T11:00:00.000Z',
+      };
+      snapshot.set(key, next);
+      return next;
+    };
+    const d = new RpcDispatcher();
+    registerMethods(d, { mcpWatcher: fakeWatcher(snapshot, reprobeImpl) });
+    const result = (await d.invoke('mcp.clients.reprobe', {
+      serverKey: 'claude-desktop:alpha',
+    })) as {
+      ok: boolean;
+      key?: string;
+      result?: { kind: string };
+    };
+    expect(result.ok).toBe(true);
+    expect(result.key).toBe('claude-desktop:alpha');
+    expect(result.result?.kind).toBe('alive');
+  });
+
+  it('liefert ok:false mit unknown-server-Code fuer nicht-existente serverKey', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d, { mcpWatcher: fakeWatcher(new Map()) });
+    const result = (await d.invoke('mcp.clients.reprobe', { serverKey: 'nope' })) as {
+      ok: boolean;
+      code?: string;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('unknown-server');
+  });
+
+  it('wirft bei fehlendem oder leerem serverKey', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d, { mcpWatcher: fakeWatcher(new Map()) });
+    await expect(d.invoke('mcp.clients.reprobe', { serverKey: '' })).rejects.toThrow(
+      /non-empty string/,
+    );
+    await expect(d.invoke('mcp.clients.reprobe', {})).rejects.toThrow(/non-empty string/);
   });
 });

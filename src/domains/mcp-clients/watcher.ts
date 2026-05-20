@@ -77,6 +77,12 @@ export interface WatcherHandle {
   stop: () => Promise<void>;
   /** Aktueller Snapshot des Status-Cache (Server-Key -> Status). */
   snapshot: () => ReadonlyMap<string, WatcherStatusEntry>;
+  /**
+   * Triggered ein sofortiges Re-Probe fuer einen einzelnen Server statt
+   * auf den naechsten Tick zu warten. Returnt den neuen StatusEntry
+   * (oder null wenn der serverKey nicht im aktuellen Cache ist).
+   */
+  reprobe: (serverKey: string) => Promise<WatcherStatusEntry | null>;
 }
 
 export function startMcpWatcher(opts: WatcherOpts): WatcherHandle {
@@ -171,8 +177,35 @@ export function startMcpWatcher(opts: WatcherOpts): WatcherHandle {
     await inFlightSettled;
   }
 
+  async function reprobe(serverKey: string): Promise<WatcherStatusEntry | null> {
+    const prev = cache.get(serverKey);
+    if (prev === undefined) return null;
+    const results = await probeImpl([prev.entry], {
+      timeoutMs: probeTimeoutMs,
+      concurrency: 1,
+    });
+    const first = results[0];
+    if (first === undefined) return null;
+    const nextEntry: WatcherStatusEntry = {
+      entry: first.entry,
+      result: first.result,
+      probedAt: now().toISOString(),
+    };
+    cache.set(serverKey, nextEntry);
+    if (prev.result.kind !== first.result.kind) {
+      opts.emit({
+        type: 'status-changed',
+        timestamp: nextEntry.probedAt,
+        serverKey,
+        kind: first.result.kind,
+      });
+    }
+    return nextEntry;
+  }
+
   return {
     stop,
     snapshot: () => new Map(cache),
+    reprobe,
   };
 }

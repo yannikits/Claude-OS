@@ -25,6 +25,7 @@ import {
   onSchedulerEvent,
   ping,
   removeScheduleEntry,
+  reprobeMcpClient,
   type ScheduleListResult,
   type SchedulerEventPayload,
   type SecretsListResult,
@@ -1031,9 +1032,11 @@ export function SchedulePage() {
 // ============================================================================
 
 export function McpClientsPage() {
+  const sidecarOk = useSidecarOk();
   const [data, setData] = useState<McpClientsStatusResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reprobing, setReprobing] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -1047,6 +1050,21 @@ export function McpClientsPage() {
       setLoading(false);
     }
   }, []);
+
+  const handleReprobe = useCallback(
+    async (serverKey: string) => {
+      setReprobing(serverKey);
+      try {
+        await reprobeMcpClient(serverKey);
+        await reload();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setReprobing(null);
+      }
+    },
+    [reload],
+  );
 
   useEffect(() => {
     void reload();
@@ -1097,6 +1115,7 @@ export function McpClientsPage() {
                   <th>Status</th>
                   <th>Details</th>
                   <th>Probed</th>
+                  <th>Aktion</th>
                 </tr>
               </thead>
               <tbody>
@@ -1119,6 +1138,20 @@ export function McpClientsPage() {
                             : ''}
                     </td>
                     <td className="muted">{s.probedAt}</td>
+                    <td>
+                      <button
+                        type="button"
+                        disabled={!sidecarOk || reprobing !== null}
+                        title={
+                          sidecarOk
+                            ? 'Sofort neu proben statt auf Watcher-Tick warten'
+                            : 'Read-Only-Modus'
+                        }
+                        onClick={() => handleReprobe(s.key)}
+                      >
+                        {reprobing === s.key ? 'Probe …' : 'Re-Probe'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

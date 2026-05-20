@@ -142,6 +142,49 @@ describe('startMcpWatcher', () => {
     await handle.stop();
   });
 
+  it('reprobe(serverKey) triggered Re-Probe und emittiert status-changed wenn kind sich aendert', async () => {
+    const harness = new TimerHarness();
+    let probeKind: ProbeResult['kind'] = 'alive';
+    const probe = vi.fn(async (entries: readonly McpServerEntry[]) =>
+      entries.map((e) => ({
+        entry: e,
+        result:
+          probeKind === 'alive'
+            ? ({ kind: 'alive', toolsCount: 1, durationMs: 5, protocolVersion: 'X' } as ProbeResult)
+            : ({ kind: 'crashed', durationMs: 5, exitCode: 2, stderr: 'oops' } as ProbeResult),
+      })),
+    );
+    const handle = startMcpWatcher({
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      discover: () => ({ servers: [makeEntry('delta')] }),
+      probe,
+    });
+    await harness.fire(); // Initial-Tick populated den Cache mit 'alive'
+    const key = 'claude-desktop:delta';
+    probeKind = 'crashed';
+    const result = await handle.reprobe(key);
+    expect(result?.result.kind).toBe('crashed');
+    expect(events.filter((e) => e.type === 'status-changed').length).toBe(2);
+    await handle.stop();
+  });
+
+  it('reprobe(unknownKey) liefert null statt zu throwen', async () => {
+    const harness = new TimerHarness();
+    const handle = startMcpWatcher({
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      discover: () => ({ servers: [] }),
+      probe: async () => [],
+    });
+    await harness.fire();
+    const result = await handle.reprobe('not-in-cache');
+    expect(result).toBeNull();
+    await handle.stop();
+  });
+
   it('entfernt Server aus Cache wenn sie nicht mehr entdeckt werden', async () => {
     const harness = new TimerHarness();
     let discovered = [makeEntry('to-be-removed')];
