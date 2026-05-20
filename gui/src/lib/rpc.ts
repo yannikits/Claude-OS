@@ -52,6 +52,40 @@ export async function listCatalog(): Promise<CatalogListResult> {
   return rpcCall<CatalogListResult>('catalog.list');
 }
 
+export interface CatalogInstallAutoDepsInput {
+  source: string;
+  registryPath: string;
+}
+
+export interface CatalogInstallAutoDepsSuccess {
+  ok: true;
+  target: { id: string; version: string };
+  newEntries: CatalogEntry[];
+  iterations: number;
+  catalogPath: string;
+  lockPath: string;
+  lockWarnings: string[];
+  applied: number;
+  skipped: number;
+  errors: { id: string; message: string }[];
+}
+
+export interface CatalogInstallAutoDepsFailure {
+  ok: false;
+  code: string;
+  message: string;
+}
+
+export type CatalogInstallAutoDepsResult =
+  | CatalogInstallAutoDepsSuccess
+  | CatalogInstallAutoDepsFailure;
+
+export async function installCatalogAutoDeps(
+  input: CatalogInstallAutoDepsInput,
+): Promise<CatalogInstallAutoDepsResult> {
+  return rpcCall<CatalogInstallAutoDepsResult>('catalog.installAutoDeps', input);
+}
+
 export interface VaultBusyState {
   busy: boolean;
   reason: string;
