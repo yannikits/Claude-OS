@@ -29,3 +29,10 @@ export {
   type McpServerStatus,
   type ServerStatusKind,
 } from './types.js';
+export {
+  startMcpWatcher,
+  type WatcherEvent,
+  type WatcherHandle,
+  type WatcherOpts,
+  type WatcherStatusEntry,
+} from './watcher.js';

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { resolveRoot } from '../core/environment/index.js';
 import { resolveMachinePaths } from '../core/paths/index.js';
+import { startMcpWatcher } from '../domains/mcp-clients/index.js';
 import { startScheduler } from '../domains/scheduler/index.js';
 import { ChatSessions } from './chat-sessions.js';
 import { createSidecarLogger } from './logger.js';
@@ -52,23 +53,35 @@ const schedulerHandle = startScheduler({
 });
 logger.info('sidecar: scheduler runner started (tick 60s)');
 
+// MCP-Watcher als Hintergrund-Service starten. Probt alle 60s die in
+// Claude Desktop / Claude Code konfigurierten MCP-Server live und
+// emittiert status-changed-Events bei Veraenderungen. Status-Cache
+// ist via `mcp.clients.status`-RPC abrufbar.
+const mcpWatcherHandle = startMcpWatcher({
+  emit: (event) => emitNotification('mcp-client://event', event),
+  projectCwd: resolveRoot({}).path,
+});
+logger.info('sidecar: mcp watcher started (tick 60s)');
+
 dispatcher.register('shutdown', () => {
   queueMicrotask(async () => {
     logger.info('sidecar: shutdown requested via RPC');
     await chatSessions.shutdownAll();
     await schedulerHandle.stop();
+    await mcpWatcherHandle.stop();
     await watchers?.close();
     process.exit(0);
   });
   return { ok: true };
 });
 
-registerMethods(dispatcher, { chatSessions });
+registerMethods(dispatcher, { chatSessions, mcpWatcher: mcpWatcherHandle });
 
 await runRpcServer({ dispatcher });
 
 await chatSessions.shutdownAll();
 await schedulerHandle.stop();
+await mcpWatcherHandle.stop();
 await watchers?.close();
 logger.info('sidecar: RPC channel closed, exiting');
 process.exit(0);

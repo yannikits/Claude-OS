@@ -13,6 +13,7 @@ import {
   readCatalogLock,
   tarballCacheDirFor,
 } from '../domains/catalog/index.js';
+import type { WatcherHandle } from '../domains/mcp-clients/index.js';
 import {
   addSchedule,
   CronParseError,
@@ -36,6 +37,8 @@ interface MethodOpts {
   readonly home?: string;
   /** Optional ChatSessions instance (v1.2 MVP) — chat.* RPCs only registered when provided. */
   readonly chatSessions?: ChatSessions;
+  /** Optional MCP-Watcher handle (v1.7) — mcp.clients.status only registered when provided. */
+  readonly mcpWatcher?: WatcherHandle;
 }
 
 function rootPath(): string {
@@ -337,6 +340,20 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
     }
     return { id: params.id, enabled: params.enabled };
   });
+
+  if (opts.mcpWatcher !== undefined) {
+    const watcher = opts.mcpWatcher;
+    dispatcher.register('mcp.clients.status', () => {
+      const snapshot = watcher.snapshot();
+      const entries = Array.from(snapshot.entries()).map(([key, status]) => ({
+        key,
+        entry: status.entry,
+        result: status.result,
+        probedAt: status.probedAt,
+      }));
+      return { count: entries.length, entries };
+    });
+  }
 
   dispatcher.register('schedule.list', () => {
     const machine = resolveMachinePaths();
