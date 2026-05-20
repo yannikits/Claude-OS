@@ -12,10 +12,14 @@ import {
   getVaultStatus,
   listAgentRuns,
   listCatalog,
+  listSchedules,
   listSecrets,
   onChatExit,
   onChatOutput,
+  onSchedulerEvent,
   ping,
+  type ScheduleListResult,
+  type SchedulerEventPayload,
   type SecretsListResult,
   type SettingsReadResult,
   type VaultStatusResult,
@@ -561,6 +565,137 @@ export function SecretsPage() {
             </table>
           )}
         </>
+      )}
+    </section>
+  );
+}
+
+// ============================================================================
+// SchedulePage (v1.5 Phase 3) — Schedule-Liste + Live-Event-Stream
+// ============================================================================
+
+interface ScheduleLogEntry {
+  readonly id: number;
+  readonly timestamp: string;
+  readonly entryId: string;
+  readonly kind: SchedulerEventPayload['type'];
+  readonly summary: string;
+}
+
+const MAX_SCHEDULE_LOG = 300;
+
+function formatScheduleEvent(e: SchedulerEventPayload): string {
+  if (e.type === 'output') return `[${e.stream ?? '?'}] ${e.line ?? ''}`;
+  if (e.type === 'fire') return 'fire';
+  if (e.type === 'skip-overlap') return `skip-overlap: ${e.message ?? ''}`;
+  if (e.type === 'exit') return `exit code=${e.exitCode ?? '?'} signal=${e.signal ?? '-'}`;
+  return `parse-error: ${e.message ?? ''}`;
+}
+
+export function SchedulePage() {
+  const { data, error, loading } = useRpc<ScheduleListResult>(() => listSchedules());
+  const [logs, setLogs] = useState<ScheduleLogEntry[]>([]);
+  const logIdRef = useRef(0);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    onSchedulerEvent((evt) => {
+      logIdRef.current += 1;
+      const entry: ScheduleLogEntry = {
+        id: logIdRef.current,
+        timestamp: evt.timestamp,
+        entryId: evt.entryId,
+        kind: evt.type,
+        summary: formatScheduleEvent(evt),
+      };
+      setLogs((prev) => {
+        const next = [...prev, entry];
+        return next.length > MAX_SCHEDULE_LOG ? next.slice(-MAX_SCHEDULE_LOG) : next;
+      });
+    })
+      .then((un) => {
+        unlisten = un;
+      })
+      .catch(() => {
+        // listen kann beim Cold-Start fehlschlagen wenn Tauri noch nicht ready ist —
+        // der Status-Card zeigt das.
+      });
+    return () => {
+      if (unlisten !== null) unlisten();
+    };
+  }, []);
+
+  return (
+    <section className="page">
+      <h1>Schedule</h1>
+      <Status loading={loading} error={error} />
+      {data && (
+        <>
+          <p className="muted">
+            {data.count} Eintrag {data.count === 1 ? '' : 'e'} — Runner tickt alle 60s.
+          </p>
+          {data.entries.length === 0 ? (
+            <p className="muted">
+              Noch keine Schedule-Eintraege. Mit{' '}
+              <code>claude-os schedule add &lt;id&gt; --cron "..." --command "..."</code> anlegen.
+            </p>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>id</th>
+                  <th>cron</th>
+                  <th>command</th>
+                  <th>enabled</th>
+                  <th>next</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.entries.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.id}</td>
+                    <td>
+                      <code>{s.cron}</code>
+                    </td>
+                    <td className="ellipsis">{s.command}</td>
+                    <td>{s.enabled ? 'on' : 'off'}</td>
+                    <td>{s.next ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+      <h2 style={{ marginTop: '1.5rem' }}>Live-Events</h2>
+      {logs.length === 0 ? (
+        <p className="muted">
+          (noch keine Events — der Runner emittiert <code>fire</code> / <code>output</code> /{' '}
+          <code>exit</code> wenn Tasks feuern)
+        </p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>timestamp</th>
+              <th>entry</th>
+              <th>type</th>
+              <th>detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...logs].reverse().map((log) => (
+              <tr key={log.id}>
+                <td>{log.timestamp}</td>
+                <td>{log.entryId}</td>
+                <td>
+                  <span className={`schedule-tag schedule-tag--${log.kind}`}>{log.kind}</span>
+                </td>
+                <td className="ellipsis">{log.summary}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </section>
   );
