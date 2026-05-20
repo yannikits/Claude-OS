@@ -89,6 +89,11 @@ POSIX äquivalent — `./claude-os` statt `.\claude-os.cmd`, `export CLAUDE_OS_R
 | `claude-os agent list\|show\|replay` | ready | Agent-Run-Browser (replay = print-only in v1, full re-spawn staged) |
 | `claude-os auth status\|login\|profile create\|use\|list\|delete` | ready | Anthropic-CLI-Auth + Multi-Profile via `$ANTHROPIC_CONFIG_DIR`-Sandboxing |
 | `claude-os catalog install\|resolve\|list\|enable\|disable\|uninstall\|lock\|sync\|update [<id>]` | ready | Vollständige Catalog-Pipeline: github-Tarball-Install + Capability-Resolution-Dry-Run, catalog.json/lock.json schema-validiert (TypeBox + assertValid), Mutation-Subcommands real (atomic write + UnknownCatalogEntryError), `lock` (fetch+sha256+cache, marketplace/local skip mit warning), `sync` (extract enabled-entries nach `<root>/config/{skills\|plugins\|mcp}/<id>`), `update [<id>]` (full re-lock oder single-entry merge). |
+| `claude-os catalog install <source> --auto-deps --registry <path>` | ready (v1.5) | End-to-End-Install mit transitiver Marketplace-Auflösung: fetch target → peek plugin.json → resolve requires gegen Registry → writeCatalog + lockCatalog + applyLock in einem Schritt. Siehe ADR-0020. |
+| `claude-os schedule add/list/remove/enable/disable` | ready (v1.5) | Zeit-basierte Tasks (cron-Expression). Sidecar tickt alle 60s und feuert fällige Commands; Live-Output landet als `schedule://event` Tauri-Notification. Siehe ADR-0019. |
+| `claude-os mcp clients list/probe` | ready (v1.6) | Discovery + Static-Status-Check + Live-Spawn-Probe für MCP-Server aus Claude Desktop / Claude Code. Im Sidecar läuft zusätzlich ein Watcher der alle 60s reprobt und Status-Changes als `mcp-client://event` emittiert. |
+| `claude-os migrate --from-portable <path>` | ready (v1.5) | Automatisierte Migration von claude-portable v0.x → claude-os v1: robocopy-equivalent recursive copy mit Overlap-Protection, idempotent. Siehe docs/migration-from-portable.md. |
+| `claude-os mcp serve` | ready (v1.4) | claude-os als MCP-Server für Claude Desktop / Claude Code (Tools-API über stdio). Siehe ADR-0016. |
 
 Globale Flags: `--root <path>` (statt `$CLAUDE_OS_ROOT`), `--json`, `-v/--verbose`.
 
@@ -121,16 +126,30 @@ Der Vault-Status auf der zweiten Maschine wird durch den Cloud-Sync-Client gepul
 - **`vault-sync-state.json`** — Persistent Busy-Flag (Crash-Recovery)
 - **`secrets.enc`** — AES-256-GCM Fallback wenn OS-Keychain nicht verfügbar
 
-## Tauri-GUI (Phase 6)
+## Tauri-GUI (Phase 6 + v1.5/v1.7 Erweiterungen)
 
 Desktop-App-Shell mit Claude-Desktop-Look-and-Feel (per [ADR-0001](docs/architecture/adr/0001-gui-framework-tauri.md) / [ADR-0006](docs/architecture/adr/0006-sidecar-architecture.md)).
+
+**GUI-Tabs:**
+
+- **Dashboard** — Status-Cards (Sidecar / Catalog / Vault / Agent Runs)
+- **Chat** — Line-buffered claude-Spawn mit Stop/Spawn-Buttons (ADR-0017)
+- **Catalog** — `+ Install` Form mit Auto-Deps-Toggle + Plugin-Liste (ADR-0020)
+- **Vault** — Conflict-Mode + Busy-State + Schedule-Config
+- **Agent Runs** — Letzte 50 Runs aus dem JSONL-Store
+- **Schedule** — Cron-Tasks anlegen/togglen/loeschen mit Live-Event-Feed (ADR-0019)
+- **MCP-Clients** — Live-Status aller in Claude Desktop / Claude Code konfigurierten MCP-Server (color-coded alive/init-timeout/crashed/protocol-error/spawn-failed)
+- **Secrets** — Keys-only-Liste (Values niemals in der GUI)
+- **Settings** — Read-only Config-Snapshot
 
 ```
 +-------------------------------------+
 |  Tauri Window (WebView)             |
 |  React 19 + Vite + react-router     |
-|  Views: Dashboard / Catalog /       |
-|         Vault / AgentRuns / +3 stubs|
+|  9 Tabs: Dashboard / Chat /         |
+|         Catalog / Vault / AgentRuns |
+|         Schedule / MCP-Clients /    |
+|         Secrets / Settings          |
 +----------------+--------------------+
                  | invoke("rpc_call") +
                  | listen("...://...")
@@ -149,11 +168,16 @@ Desktop-App-Shell mit Claude-Desktop-Look-and-Feel (per [ADR-0001](docs/architec
 |  Node Sidecar (claude-os-sidecar    |
 |                -<TARGET_TRIPLE>.exe)|
 |  - RpcDispatcher                    |
-|  - Domain methods (catalog.list /   |
-|    vault.status / agent.list /      |
-|    inbox.import)                    |
+|  - Domain methods (catalog.list +   |
+|    .installAutoDeps / vault.status /|
+|    agent.list / inbox.import /      |
+|    schedule.list/add/remove + ... / |
+|    mcp.clients.status / chat.*)     |
 |  - chokidar watcher                 |
 |    (inbox/ + outbox/)               |
+|  - Background services (ADR-0019):  |
+|    - Scheduler-Runner (60s tick)    |
+|    - MCP-Watcher (60s tick + probe) |
 +-------------------------------------+
 ```
 
@@ -183,7 +207,10 @@ Voraussetzung: Rust-Toolchain via [rustup](https://rustup.rs/) + plattformspezif
 - [`gui/README.md`](gui/README.md) — Tauri-Shell + Sidecar build
 - [`tasks/todo.md`](tasks/todo.md) — Phase-Tracker, Reviews, Deferrals, v1.x Roadmap
 - [`tasks/lessons.md`](tasks/lessons.md) — cross-session pattern-Sammlung
-- [`docs/architecture/adr/`](docs/architecture/adr/) — 14 ADRs (siehe unten)
+- [`docs/specs/auto-deps-flag.md`](docs/specs/auto-deps-flag.md) — Spec für `catalog install --auto-deps` (Phase 5p/5q/5r)
+- [`docs/integration-plan-cowork-os.md`](docs/integration-plan-cowork-os.md) — Cowork-OS-Video-Analyse + Feature-Roadmap (#1 + #3 shipped)
+- [`docs/troubleshooting/stop-hook-hang.md`](docs/troubleshooting/stop-hook-hang.md) — Diagnose-Doc + Script für Claude-Code Stop-Hook-Hänger
+- [`docs/architecture/adr/`](docs/architecture/adr/) — 20 ADRs (siehe unten)
 
 ## Architektur-Entscheidungen
 
@@ -196,6 +223,12 @@ Alle wesentlichen Design-Entscheidungen sind in [`docs/architecture/adr/`](docs/
 - [ADR-0005 — Selective-Merge-Update-Pattern](docs/architecture/adr/0005-selective-merge-update-pattern.md)
 - [ADR-0008 — Git-Backend simple-git](docs/architecture/adr/0008-git-backend-simple-git.md)
 - [ADR-0013 — Logging mit pino](docs/architecture/adr/0013-logging-pino.md)
+- [ADR-0015 — Plugin-Binding-Resolution (Phase 5o)](docs/architecture/adr/0015-plugin-binding-resolution.md)
+- [ADR-0016 — MCP-Single-Server-Bridge (v1.4)](docs/architecture/adr/0016-mcp-single-server-bridge.md)
+- [ADR-0017 — Chat-View-MVP über line-buffered child_process (v1.2)](docs/architecture/adr/0017-chat-view-mvp-line-buffered.md)
+- [ADR-0018 — AppImage Self-Update via zsync (v1.3)](docs/architecture/adr/0018-appimage-zsync-self-update.md)
+- [ADR-0019 — Sidecar Background-Services-Pattern (v1.5/v1.7)](docs/architecture/adr/0019-sidecar-background-services.md)
+- [ADR-0020 — Auto-Deps Fixed-Point-Resolution (v1.5)](docs/architecture/adr/0020-auto-deps-fixed-point-resolution.md)
 
 ## v1-Abweichungen (bekannt + transparent)
 

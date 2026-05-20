@@ -13,6 +13,46 @@ Format pro Eintrag:
 
 ---
 
+## 2026-05-20 — TimerHarness statt Real-Timer in Sidecar-Service-Tests
+
+**Situation:** Tests fuer Scheduler-Runner (PR #40) und MCP-Watcher (PR #48) brauchten kontrollierbares Tick-Verhalten. Initialer Versuch nutzte `vi.useFakeTimers()` + `vi.advanceTimersByTime` — funktioniert fuer synchronen Code, aber unsere Services sind async (probeServers ist Promise-based, ChildProcess-Events sind nicht in vi-timer-control). Ergebnis: tests sahen Timer-Callbacks feuern, aber die awaits darin landeten nicht im aktuellen Event-Loop-Tick und Assertions schlugen leer.
+
+**Lektion:** Fuer Background-Services mit async Tick-Bodies braucht es einen eigenen **TimerHarness** der `setTimeoutFn`/`clearTimeoutFn` als Opts injectet bekommt. Test-Code captured den `cb`-Callback und kann ihn manuell feuern (`harness.fire()`), waehrend echte microtasks normal laufen. Das gibt deterministische Test-Time OHNE die async-Mechanik der Domain zu brechen.
+
+**Anwendung:** Jeder Service-Test der einen Tick-Loop testet bekommt das TimerHarness-Pattern. Pattern dokumentiert in `tests/domains/scheduler/runner.test.ts` und `tests/domains/mcp-clients/watcher.test.ts` — beim Bau neuer Services 1:1 kopieren.
+
+---
+
+## 2026-05-20 — Reverse-Shutdown-Order im Sidecar-Lifecycle
+
+**Situation:** Erster Shutdown-Pfad in `src/sidecar/index.ts` rief alle stop()-Methoden in Start-Reihenfolge auf: chatSessions, watchers, scheduler, mcpWatcher. Bei einem Shutdown-mit-aktivem-Tick passierte: watchers.close() lief, dann scheduler.stop(), aber der Scheduler-Tick hatte zu dem Zeitpunkt evtl. schon einen child-process gespawnt der ueber chokidar-Events Files schreiben wollte — und chokidar war bereits dicht. Resultat: stderr-Spam, gelegentlich orphan-Processes.
+
+**Lektion:** Shutdown-Reihenfolge spiegelt Start-Reihenfolge VERKEHRT. Spaeter-gestartete Services werden ZUERST gestoppt. Das stellt sicher dass kein "downstream" Service auf ein bereits-gestopptes "upstream" Service zugreift. Konkret: scheduler/mcpWatcher stoppen BEVOR die inbox/outbox-watchers schliessen, weil ein Scheduler-Tick koennte chokidar-Events ausloesen.
+
+**Anwendung:** Bei jedem Sidecar-Service hinzufuegen: Position im Shutdown-Block ist invers zur Position im Startup-Block. ADR-0019 dokumentiert das als Pattern-Constraint.
+
+---
+
+## 2026-05-20 — useRpc-Hook ist nur fuer Read-Only-Views; Mutations brauchen manuellen useState
+
+**Situation:** GUI-SchedulePage und CatalogPage brauchten Add/Remove/Toggle-Buttons. Erster Versuch nutzte das existing `useRpc<T>(fetcher)`-Hook fuer den Initial-Load. Aber nach einer Mutation (z. B. addScheduleEntry) wollte die UI reload — useRpc fired nur einmal pro Mount, kein expliziter Refetch-Trigger.
+
+**Lektion:** `useRpc` ist explizit ein read-only-Hook (initial fetch, kein refresh-Method). Sobald eine Page Mutations hat, ist es einfacher manuellen `useState` + `useCallback` reload zu nutzen statt useRpc um eine refresh-Funktion zu erweitern. Vorteil: keine Race-Conditions zwischen useEffect-Cleanup und manuellen refetch.
+
+**Anwendung:** Pattern dokumentiert in `gui/src/pages/index.tsx SchedulePage` und `CatalogPage`. Neue read-only-Pages koennen useRpc nutzen; mutation-Pages bauen eigene `reload` + State-Trio (data/error/loading) manuell.
+
+---
+
+## 2026-05-20 — EventBus-Fake fuer GUI-Tests die Tauri-Events brauchen
+
+**Situation:** Tests fuer GUI-Views die auf `schedule://event` / `mcp-client://event` reagieren mussten irgendwie Event-Payloads injizieren. `@tauri-apps/api/event listen` ist eine async-Funktion die einen UnlistenFn zurueckgibt — die einfache vi.mock-`async () => () => {}` reicht fuer "ignoriere events", aber nicht um events INJEZIEREN zu koennen.
+
+**Lektion:** Tauri-Event-Mock per `Map<string, Set<Handler>>`-EventBus. `listen(event, handler)` registriert in der Map, returnt eine Unsubscribe-Closure. Test-Helper `emit(event, payload)` iteriert die Set und ruft alle Handler. Damit kann der Test die EXAKTE Sequenz von Tauri-Events steuern die der Sidecar normalerweise emittieren wuerde.
+
+**Anwendung:** Pattern in `gui/tests/schedule.test.tsx` und `mcp-clients.test.tsx`. Bei neuen Event-Stream-Views dieses Mock-Modul kopieren statt das skeletale `async () => () => {}`-Mock zu uebernehmen.
+
+---
+
 ## 2026-05-20 — Discriminated-Union-Sentinel statt Type-Narrowing-Wrestling
 
 **Situation:** Phase 5o lockBuilder musste zwei Sub-States des `ManifestReadResult`-Fail-Branches unterscheiden: "kein plugin.json" (silent) vs. "plugin.json malformed" (warn). Erster Versuch verglich gegen `NO_MANIFEST.reason` — TypeScript-Build failed mit TS2339, weil `NO_MANIFEST` als ganze Union getypt war und die Property `reason` nicht ohne `ok === false`-Narrowing ableitbar.
