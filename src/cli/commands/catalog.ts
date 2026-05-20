@@ -17,28 +17,37 @@ import type { Command } from 'commander';
 import { RootNotFoundError, resolveRoot } from '../../core/environment/index.js';
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import {
+  AutoDepsAmbiguousProviderError,
+  AutoDepsError,
+  AutoDepsMissingProviderError,
   applyLock,
   type Catalog,
   type CatalogEntry,
   type CatalogLock,
   catalogPathsFor,
+  createMarketplaceProviderLookup,
+  fileLoader,
   githubTarballUrl,
   InvalidCatalogError,
   installFromTarball,
   LockBuilderError,
   lockCatalog,
+  MarketplaceRegistry,
   mergeLockEntry,
   type PluginManifest,
   parseSource,
   readCatalog,
   readCatalogLock,
+  readPluginManifestFromTarball,
   removeCatalogEntry,
+  resolveAutoDeps,
   resolveCapabilities,
   SourceParseError,
   setCatalogEntryEnabled,
   TarballInstallError,
   tarballCacheDirFor,
   UnknownCatalogEntryError,
+  writeCatalog,
   writeCatalogLock,
 } from '../../domains/catalog/index.js';
 
@@ -61,7 +70,173 @@ function printErr(line: string): void {
   console.error(line);
 }
 
-async function actInstall(globals: GlobalOpts, raw: string): Promise<void> {
+interface InstallOpts {
+  readonly autoDeps?: boolean;
+  readonly registry?: string;
+}
+
+async function actAutoDeps(globals: GlobalOpts, raw: string, opts: InstallOpts): Promise<void> {
+  if (opts.registry === undefined) {
+    printErr(
+      'catalog install --auto-deps: braucht --registry <pfad-zur-marketplace-registry.json>',
+    );
+    process.exit(2);
+  }
+  let parsed: ReturnType<typeof parseSource>;
+  try {
+    parsed = parseSource(raw);
+  } catch (err) {
+    printErr(`catalog install: ${err instanceof SourceParseError ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  if (parsed.kind !== 'github') {
+    printErr(
+      'catalog install --auto-deps: nur github: Sources unterstuetzt (marketplace/local: deferred zu v1.6)',
+    );
+    process.exit(2);
+  }
+  let root: ReturnType<typeof resolveRoot>;
+  try {
+    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
+  } catch (err) {
+    if (err instanceof RootNotFoundError) {
+      printErr(`catalog install: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  const machine = resolveMachinePaths();
+  const cacheDir = tarballCacheDirFor(machine.dataRoot);
+
+  // Target-Tarball fetchen via lockCatalog-Hilfsfunktion-Pattern: wir
+  // bauen einen einzelnen-Eintrags-Lock fuer den Target damit das
+  // Tarball gecached wird und das Manifest peekbar ist.
+  const stubCatalog: import('../../domains/catalog/index.js').CatalogConfig = {
+    version: 1,
+    entries: [
+      {
+        id: `auto-deps-target-${parsed.owner}-${parsed.repo}`,
+        kind: 'plugin',
+        source: raw,
+        enabled: true,
+        scope: 'user',
+      },
+    ],
+  };
+  let stubLock: Awaited<ReturnType<typeof lockCatalog>>;
+  try {
+    stubLock = await lockCatalog({ catalog: stubCatalog, cacheDir });
+  } catch (err) {
+    printErr(
+      `catalog install --auto-deps: Target-Fetch fehlgeschlagen: ${err instanceof LockBuilderError ? err.message : String(err)}`,
+    );
+    process.exit(1);
+  }
+  const targetLockEntry = stubLock.lock.entries[0];
+  if (targetLockEntry === undefined) {
+    printErr(
+      `catalog install --auto-deps: Target-Tarball konnte nicht fetched werden (${stubLock.warnings.join('; ')})`,
+    );
+    process.exit(1);
+  }
+  const targetTarball = join(cacheDir, `${targetLockEntry.sha256}.tar.gz`);
+  const targetManifestRead = await readPluginManifestFromTarball(targetTarball);
+  if (targetManifestRead.ok === false) {
+    printErr(
+      `catalog install --auto-deps: Target hat kein lesbares plugin.json (${targetManifestRead.reason})`,
+    );
+    process.exit(1);
+  }
+  const targetManifest = targetManifestRead.manifest;
+
+  // Registry laden und Provider-Lookup bauen
+  const registry = new MarketplaceRegistry({ load: fileLoader(opts.registry) });
+  const providerLookup = createMarketplaceProviderLookup({
+    registry,
+    cacheDir,
+  });
+
+  // Bestehenden Catalog laden um existierende Manifests zu sammeln
+  const catalogPaths = catalogPathsFor(root.path);
+  const existingCatalog = readCatalog(catalogPaths.catalogPath);
+  const existingManifests = new Map<string, PluginManifest>();
+  existingManifests.set(targetManifest.id, targetManifest);
+
+  let resolution: Awaited<ReturnType<typeof resolveAutoDeps>>;
+  try {
+    resolution = await resolveAutoDeps({
+      catalog: existingCatalog,
+      existingManifests,
+      lookupProvider: providerLookup,
+    });
+  } catch (err) {
+    if (err instanceof AutoDepsMissingProviderError) {
+      printErr(
+        `[FAIL] auto-deps: kein Marketplace-Provider fuer Capability "${err.capability}" (required by "${err.requiredBy}")`,
+      );
+      process.exit(4);
+    }
+    if (err instanceof AutoDepsAmbiguousProviderError) {
+      printErr(
+        `[FAIL] auto-deps: mehrdeutige Provider fuer "${err.capability}" — Kandidaten: ${err.candidates.join(', ')}`,
+      );
+      process.exit(6);
+    }
+    if (err instanceof AutoDepsError) {
+      printErr(`[FAIL] auto-deps: ${err.message}`);
+      process.exit(5);
+    }
+    throw err;
+  }
+
+  // Plan-Output: was waere neu installiert?
+  if (globals.json === true) {
+    printJson({
+      target: { id: targetManifest.id, source: raw },
+      newEntries: resolution.newEntries,
+      iterations: resolution.iterations,
+    });
+    return;
+  }
+  printLine(`[OK] auto-deps fuer ${targetManifest.id}@${targetManifest.version} aufgeloest`);
+  printLine(`     Iterationen bis Fixpoint: ${resolution.iterations}`);
+  if (resolution.newEntries.length === 0) {
+    printLine('     Keine zusaetzlichen Provider noetig — Target ist autark.');
+    return;
+  }
+  printLine(`     Neue Catalog-Eintraege (${resolution.newEntries.length}):`);
+  for (const entry of resolution.newEntries) {
+    printLine(`       + ${entry.id}  (${entry.kind}, ${entry.scope})  source=${entry.source}`);
+  }
+
+  // Catalog persistieren — Target + alle neuen Entries
+  const targetEntry: CatalogEntry = {
+    id: targetManifest.id,
+    kind: 'plugin',
+    source: raw,
+    enabled: true,
+    scope: 'user',
+  };
+  const mergedEntries: CatalogEntry[] = [];
+  for (const e of existingCatalog.entries) {
+    if (e.id === targetEntry.id) continue;
+    mergedEntries.push(e);
+  }
+  mergedEntries.push(targetEntry);
+  for (const e of resolution.newEntries) {
+    if (mergedEntries.some((m) => m.id === e.id)) continue;
+    mergedEntries.push(e);
+  }
+  writeCatalog(catalogPaths.catalogPath, { version: 1, entries: mergedEntries });
+  printLine(`     catalog.json aktualisiert: ${catalogPaths.catalogPath}`);
+  printLine(`     Hinweis: \`claude-os catalog lock && claude-os catalog sync\` fuer FS-Install.`);
+}
+
+async function actInstall(globals: GlobalOpts, raw: string, opts: InstallOpts = {}): Promise<void> {
+  if (opts.autoDeps === true) {
+    await actAutoDeps(globals, raw, opts);
+    return;
+  }
   let parsed: ReturnType<typeof parseSource>;
   try {
     parsed = parseSource(raw);
@@ -505,10 +680,17 @@ export function registerCatalogCommand(program: Command): void {
   catalog
     .command('install <source>')
     .description('Install a plugin from github:owner/repo source (marketplace + local staged)')
-    .action(async (source: string, _opts: unknown, command: Command) => {
-      const globals = command.optsWithGlobals<GlobalOpts>();
-      await actInstall(globals, source);
-    });
+    .option('--auto-deps', 'Resolve transitive marketplace-Anforderungen automatisch')
+    .option(
+      '--registry <path>',
+      'Pfad zur marketplace-registry.json (Pflicht zusammen mit --auto-deps)',
+    )
+    .action(
+      async (source: string, opts: { autoDeps?: boolean; registry?: string }, command: Command) => {
+        const globals = command.optsWithGlobals<GlobalOpts>();
+        await actInstall(globals, source, opts);
+      },
+    );
 
   catalog
     .command('resolve <manifestFile>')

@@ -73,6 +73,11 @@ export {
   lockCatalog,
 } from './lock-builder.js';
 export {
+  clearMarketplaceProviderCache,
+  createMarketplaceProviderLookup,
+  type MarketplaceProviderLookupOpts,
+} from './marketplace-provider-lookup.js';
+export {
   fileLoader,
   type MarketplaceEntry,
   type MarketplacePlugin,
