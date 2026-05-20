@@ -138,6 +138,14 @@ body,
   border-bottom: 1px solid var(--danger);
 }
 
+.banner-ok {
+  background: rgba(76, 175, 80, 0.12);
+  color: #6cd47e;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
 code {
   background: rgba(255, 255, 255, 0.05);
   padding: 0.1em 0.3em;

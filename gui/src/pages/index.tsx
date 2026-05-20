@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type AgentListResult,
   addScheduleEntry,
+  type CatalogInstallAutoDepsResult,
   type CatalogListResult,
   type ChatExitPayload,
   type ChatOutputPayload,
@@ -11,6 +12,7 @@ import {
   deleteSecret,
   getSettings,
   getVaultStatus,
+  installCatalogAutoDeps,
   listAgentRuns,
   listCatalog,
   listSchedules,
@@ -109,18 +111,151 @@ export function Dashboard() {
 }
 
 export function CatalogPage() {
-  const { data, error, loading } = useRpc<CatalogListResult>(() => listCatalog());
+  const sidecarOk = useSidecarOk();
+  const [data, setData] = useState<CatalogListResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showInstallForm, setShowInstallForm] = useState(false);
+  const [formSource, setFormSource] = useState('');
+  const [formRegistry, setFormRegistry] = useState('');
+  const [installing, setInstalling] = useState(false);
+  const [installResult, setInstallResult] = useState<CatalogInstallAutoDepsResult | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await listCatalog();
+      setData(result);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const handleInstall = useCallback(
+    async (evt: React.FormEvent) => {
+      evt.preventDefault();
+      if (formSource.length === 0 || formRegistry.length === 0) return;
+      setInstalling(true);
+      setInstallResult(null);
+      try {
+        const result = await installCatalogAutoDeps({
+          source: formSource,
+          registryPath: formRegistry,
+        });
+        setInstallResult(result);
+        if (result.ok) {
+          setFormSource('');
+          setShowInstallForm(false);
+          await reload();
+        }
+      } catch (e) {
+        setInstallResult({
+          ok: false,
+          code: 'rpc-error',
+          message: e instanceof Error ? e.message : String(e),
+        });
+      } finally {
+        setInstalling(false);
+      }
+    },
+    [formSource, formRegistry, reload],
+  );
+
   return (
     <section className="page">
       <h1>Catalog</h1>
       <Status loading={loading} error={error} />
       {data && (
         <>
-          <p className="muted">
-            {data.catalogPath} · resolved {data.lockResolvedAt ?? '(nie gelockt)'}
-          </p>
+          <div className="row" style={{ alignItems: 'center', gap: '8px' }}>
+            <p className="muted" style={{ flex: 1 }}>
+              {data.catalogPath} · resolved {data.lockResolvedAt ?? '(nie gelockt)'}
+            </p>
+            <button
+              type="button"
+              disabled={!sidecarOk || installing}
+              title={sidecarOk ? undefined : 'Read-Only-Modus — Sidecar nicht erreichbar'}
+              onClick={() => setShowInstallForm((v) => !v)}
+            >
+              {showInstallForm ? 'Abbrechen' : '+ Install'}
+            </button>
+            <button type="button" disabled={loading || installing} onClick={reload}>
+              {loading ? 'Lade …' : 'Refresh'}
+            </button>
+          </div>
+          {showInstallForm && (
+            <form className="schedule-add-form" onSubmit={handleInstall}>
+              <label>
+                source (github:owner/repo)
+                <input
+                  type="text"
+                  value={formSource}
+                  onChange={(e) => setFormSource(e.target.value)}
+                  placeholder="github:acme/my-plugin"
+                  required
+                />
+              </label>
+              <label>
+                registry path (marketplace-registry.json)
+                <input
+                  type="text"
+                  value={formRegistry}
+                  onChange={(e) => setFormRegistry(e.target.value)}
+                  placeholder="C:\path\to\marketplace.json"
+                  required
+                />
+              </label>
+              <button type="submit" disabled={installing || !sidecarOk}>
+                {installing ? 'Installiere …' : 'Install mit Auto-Deps'}
+              </button>
+            </form>
+          )}
+          {installResult && (
+            <div
+              className={installResult.ok ? 'banner banner-ok' : 'banner banner-error'}
+              style={{ marginBottom: '12px' }}
+            >
+              {installResult.ok ? (
+                <>
+                  <strong>
+                    [OK] {installResult.target.id}@{installResult.target.version} installiert
+                  </strong>
+                  <p style={{ margin: '4px 0 0' }}>
+                    {installResult.iterations} Iteration{installResult.iterations === 1 ? '' : 'en'}{' '}
+                    bis Fixpoint · {installResult.newEntries.length} neue Catalog-Eintrag(e) ·{' '}
+                    {installResult.applied} extrahiert ({installResult.skipped} skipped,{' '}
+                    {installResult.errors.length} fehlgeschlagen)
+                  </p>
+                  {installResult.lockWarnings.length > 0 && (
+                    <ul style={{ margin: '4px 0 0', paddingLeft: '20px' }}>
+                      {installResult.lockWarnings.map((w) => (
+                        <li key={w} className="muted">
+                          {w}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <>
+                  <strong>[FAIL] {installResult.code}</strong>
+                  <p style={{ margin: '4px 0 0' }}>{installResult.message}</p>
+                </>
+              )}
+            </div>
+          )}
           {data.entries.length === 0 ? (
-            <p className="muted">Keine Einträge.</p>
+            <p className="muted">
+              Keine Einträge. Über <code>+ Install</code> oder via{' '}
+              <code>claude-os catalog install</code> anlegen.
+            </p>
           ) : (
             <table className="data-table">
               <thead>

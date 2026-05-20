@@ -5,7 +5,14 @@ import { resolveRoot } from '../core/environment/index.js';
 import { resolveMachinePaths } from '../core/paths/index.js';
 import { AgentRunsRepository, agentRunsIndexPathFor } from '../domains/agent-runs/index.js';
 import { ProfileManager } from '../domains/auth/index.js';
-import { catalogPathsFor, readCatalog, readCatalogLock } from '../domains/catalog/index.js';
+import {
+  AutoDepsInstallError,
+  catalogPathsFor,
+  installFromGithubWithAutoDeps,
+  readCatalog,
+  readCatalogLock,
+  tarballCacheDirFor,
+} from '../domains/catalog/index.js';
 import {
   addSchedule,
   CronParseError,
@@ -48,6 +55,46 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
       lockResolvedAt: lock?.resolvedAt ?? null,
       entries: catalog.entries,
     };
+  });
+
+  dispatcher.register('catalog.installAutoDeps', async (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { source?: string; registryPath?: string };
+    if (typeof params.source !== 'string' || params.source.length === 0) {
+      throw new Error('catalog.installAutoDeps: params.source muss ein non-empty string sein');
+    }
+    if (typeof params.registryPath !== 'string' || params.registryPath.length === 0) {
+      throw new Error(
+        'catalog.installAutoDeps: params.registryPath muss ein non-empty string sein',
+      );
+    }
+    const root = rootPath();
+    const machine = resolveMachinePaths();
+    const cacheDir = tarballCacheDirFor(machine.dataRoot);
+    try {
+      const result = await installFromGithubWithAutoDeps({
+        source: params.source,
+        registryPath: params.registryPath,
+        root,
+        cacheDir,
+      });
+      return {
+        ok: true as const,
+        target: { id: result.targetManifest.id, version: result.targetManifest.version },
+        newEntries: result.newEntries,
+        iterations: result.iterations,
+        catalogPath: result.catalogPath,
+        lockPath: result.lockPath,
+        lockWarnings: result.lockWarnings,
+        applied: result.applyResult.applied.length,
+        skipped: result.applyResult.skipped.length,
+        errors: result.applyResult.errors,
+      };
+    } catch (err) {
+      if (err instanceof AutoDepsInstallError) {
+        return { ok: false as const, code: err.code, message: err.message };
+      }
+      throw err;
+    }
   });
 
   dispatcher.register('vault.status', () => {

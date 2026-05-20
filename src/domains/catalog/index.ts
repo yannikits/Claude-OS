@@ -5,6 +5,12 @@
  */
 
 export {
+  AutoDepsInstallError,
+  type AutoDepsInstallOpts,
+  type AutoDepsInstallResult,
+  installFromGithubWithAutoDeps,
+} from './auto-deps-install.js';
+export {
   AmbiguousProviderError as AutoDepsAmbiguousProviderError,
   AutoDepsError,
   type AutoDepsResolution,
