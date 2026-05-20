@@ -65,16 +65,45 @@ describe('copyTree — happy path', () => {
     expect(existsSync(join(dst, 'a.log'))).toBe(false);
   });
 
-  it('ist idempotent — zweimaliger Lauf produziert identisches Ziel', async () => {
+  it('verweigert Default das Überschreiben einer bestehenden Ziel-Datei', async () => {
+    const src = join(workDir, 'src');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, 'a.txt'), 'V2', 'utf8');
+    const dst = join(workDir, 'dst');
+    mkdirSync(dst, { recursive: true });
+    writeFileSync(join(dst, 'a.txt'), 'EXISTING', 'utf8');
+    await expect(copyTree({ source: src, destination: dst, exclude: [] })).rejects.toThrow();
+    expect(readFileSync(join(dst, 'a.txt'), 'utf8')).toBe('EXISTING');
+  });
+
+  it('überschreibt mit overwrite:true und ist dann idempotent', async () => {
     const src = join(workDir, 'src');
     mkdirSync(src, { recursive: true });
     writeFileSync(join(src, 'a.txt'), 'V1', 'utf8');
-
     const dst = join(workDir, 'dst');
     await copyTree({ source: src, destination: dst, exclude: [] });
-    const stats2 = await copyTree({ source: src, destination: dst, exclude: [] });
-
+    const stats2 = await copyTree({
+      source: src,
+      destination: dst,
+      exclude: [],
+      overwrite: true,
+    });
     expect(stats2.filesCopied).toBe(1);
     expect(readFileSync(join(dst, 'a.txt'), 'utf8')).toBe('V1');
+  });
+
+  it('matcht Glob-Patterns auch case-insensitiv für Subtrees mit unterschiedlicher Case', async () => {
+    const src = join(workDir, 'src');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, 'keep.txt'), 'k', 'utf8');
+    mkdirSync(join(src, 'CACHE'), { recursive: true });
+    writeFileSync(join(src, 'CACHE', 'noisy.log'), 'big', 'utf8');
+    const dst = join(workDir, 'dst');
+    // Exclude in lower case — sollte auf Windows die CACHE/ ebenfalls erwischen.
+    await copyTree({ source: src, destination: dst, exclude: ['cache', 'cache/**'] });
+    expect(existsSync(join(dst, 'keep.txt'))).toBe(true);
+    if (process.platform === 'win32') {
+      expect(existsSync(join(dst, 'CACHE'))).toBe(false);
+    }
   });
 });

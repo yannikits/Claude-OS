@@ -1,3 +1,4 @@
+import * as fsModule from 'node:fs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -104,6 +105,72 @@ describe('executePlan — execute', () => {
     const plan = buildMigrationPlan({ sourceRoot: source, targetRoot: target });
     const result = await executePlan({ plan, force: true });
     expect(result.success).toBe(true);
+  });
+
+  it('verbietet Source == Target (Selbst-Migration)', () => {
+    const source = makePortable({});
+    expect(() => buildMigrationPlan({ sourceRoot: source, targetRoot: source })).toThrow(
+      MigrationError,
+    );
+  });
+
+  it('verbietet Target innerhalb von Source', () => {
+    const source = makePortable({});
+    const target = join(source, 'nested');
+    expect(() => buildMigrationPlan({ sourceRoot: source, targetRoot: target })).toThrow(
+      /innerhalb der Quelle/,
+    );
+  });
+
+  it('verbietet Source innerhalb von Target', () => {
+    const target = mkdtempSync(join(workDir, 'target-outer-'));
+    const innerSource = join(target, 'inner');
+    // Source-Layout in innerSource erstellen (innerSource liegt INNERHALB target).
+    const fs = fsModule;
+    fs.mkdirSync(join(innerSource, 'vault'), { recursive: true });
+    fs.writeFileSync(join(innerSource, 'vault', 'note.md'), '# n', 'utf8');
+    fs.mkdirSync(join(innerSource, 'config'), { recursive: true });
+    fs.writeFileSync(join(innerSource, 'start.bat'), '@echo off', 'utf8');
+    expect(() => buildMigrationPlan({ sourceRoot: innerSource, targetRoot: target })).toThrow(
+      /innerhalb des Ziels/,
+    );
+  });
+
+  it('TOCTOU-Schutz: re-check Marker zum Execute-Zeitpunkt', async () => {
+    const source = makePortable({});
+    const target = mkdtempSync(join(workDir, 'target-'));
+    const plan = buildMigrationPlan({ sourceRoot: source, targetRoot: target });
+    // Nach Plan-Bau ist der Marker NICHT da. Jetzt landet er drin.
+    writeFileSync(join(target, '.claude-os-root'), '{}', 'utf8');
+    await expect(executePlan({ plan })).rejects.toThrow(MigrationError);
+  });
+
+  it('default verlustfrei — verweigert Überschreiben existierender Ziel-Dateien', async () => {
+    const source = makePortable({});
+    const target = mkdtempSync(join(workDir, 'target-'));
+    const existing = join(target, 'vault');
+    // Existierendes Vault-File am Ziel mit anderem Inhalt
+    const fs = fsModule;
+    fs.mkdirSync(existing, { recursive: true });
+    fs.writeFileSync(join(existing, 'note.md'), 'PRE-EXISTING', 'utf8');
+    const plan = buildMigrationPlan({ sourceRoot: source, targetRoot: target });
+    const result = await executePlan({ plan });
+    // Erwartung: vault-copy schlägt fehl, success=false
+    expect(result.success).toBe(false);
+    expect(fs.readFileSync(join(existing, 'note.md'), 'utf8')).toBe('PRE-EXISTING');
+  });
+
+  it('--overwrite überschreibt explizit', async () => {
+    const source = makePortable({});
+    const target = mkdtempSync(join(workDir, 'target-'));
+    const existing = join(target, 'vault');
+    const fs = fsModule;
+    fs.mkdirSync(existing, { recursive: true });
+    fs.writeFileSync(join(existing, 'note.md'), 'OLD', 'utf8');
+    const plan = buildMigrationPlan({ sourceRoot: source, targetRoot: target });
+    const result = await executePlan({ plan, overwrite: true });
+    expect(result.success).toBe(true);
+    expect(fs.readFileSync(join(existing, 'note.md'), 'utf8')).toBe('# note');
   });
 
   it('produziert Hinweis-Result für migrate-git-metadata (nicht automatisch ausgeführt)', async () => {

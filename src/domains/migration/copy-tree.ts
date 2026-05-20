@@ -5,36 +5,65 @@
  * mit eigenem filter-Callback der die Exclude-Patterns prüft. Das
  * funktioniert auf Windows, macOS und Linux einheitlich.
  *
- * Verlustfreiheit: das Ziel-Layout ist 1:1 die Quelle, bis auf die
- * exkludierten Sub-Trees. Symlinks werden NICHT folge-kopiert (würde
- * Cycle-Risiken einführen) — sie werden als Links erhalten.
- *
- * Idempotenz: ein zweiter Lauf auf das gleiche Ziel überschreibt
- * unveränderte Dateien (mtime + Größe identisch) nicht — `force: true`
- * nur wenn Inhalt unterschiedlich ist. Konsequenz: zweimal mig­rieren
- * ist semantisch identisch.
+ * Sicherheits-Defaults (nach Codex-Adversarial-Review 2026-05-20):
+ *  - `overwrite: false` als Default: bestehende Dateien am Ziel werden
+ *    NICHT überschrieben; Kopien gehen nur an neue Pfade. Mit
+ *    `overwrite: true` lässt sich der alte Modus zurückholen.
+ *  - Symlinks werden NICHT dereferenziert (`fs.cp(...,
+ *    {verbatimSymlinks: true})`) — sie bleiben Links und folgen
+ *    nicht in fremde Verzeichnisse.
+ *  - Quell- und Zielpfad werden in `runner.ts` auf Overlap geprüft
+ *    BEVOR `copyTree` aufgerufen wird (siehe `assertNoOverlap`).
+ *  - Exclude-Matching ist auf Windows case-insensitiv (sonst sind
+ *    `.GIT` oder `Cache` Bypasses für `.git` / `cache`).
  *
  * @module @domains/migration/copy-tree
  */
 import { cp, stat } from 'node:fs/promises';
+import { platform } from 'node:os';
 import { relative, sep } from 'node:path';
 
-/** Glob-ähnlicher Matcher — unterstützt `*` und absoluten Trailing-Slash. */
+const IS_WINDOWS = platform() === 'win32';
+const REGEX_SPECIALS = '.+?^()|[]\\';
+
+/** Wandelt ein Glob-Pattern in ein Regex um. `*` matched alles
+ *  außer `/`, `**` matched cross-segment. Andere Regex-Specials
+ *  werden korrekt escaped. */
+function globToRegex(pat: string): RegExp {
+  let body = '';
+  let i = 0;
+  while (i < pat.length) {
+    const ch = pat[i] ?? '';
+    if (ch === '*' && pat[i + 1] === '*') {
+      body += '.*';
+      i += 2;
+    } else if (ch === '*') {
+      body += '[^/]*';
+      i += 1;
+    } else if (REGEX_SPECIALS.includes(ch)) {
+      body += `\\${ch}`;
+      i += 1;
+    } else {
+      body += ch;
+      i += 1;
+    }
+  }
+  return new RegExp(`^${body}$`);
+}
+
+/**
+ * Glob-ähnlicher Matcher — unterstützt `*` (matched alles ohne /),
+ * `**` (matched über mehrere Pfad-Segmente) und Subtree-Prefix-Match.
+ * Auf Windows case-insensitiv (FS ist es auch).
+ */
 function matchesAny(relPath: string, patterns: readonly string[]): boolean {
-  const normalised = relPath.split(sep).join('/');
+  const normalised = (IS_WINDOWS ? relPath.toLowerCase() : relPath).split(sep).join('/');
   for (const raw of patterns) {
-    const pat = raw.replace(/\\/g, '/').replace(/\/$/, '');
+    let pat = raw.replace(/\\/g, '/').replace(/\/$/, '');
+    if (IS_WINDOWS) pat = pat.toLowerCase();
     if (normalised === pat) return true;
     if (normalised.startsWith(`${pat}/`)) return true;
-    if (pat.includes('*')) {
-      const regex = new RegExp(
-        `^${pat
-          .split('*')
-          .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-          .join('.*')}$`,
-      );
-      if (regex.test(normalised)) return true;
-    }
+    if (pat.includes('*') && globToRegex(pat).test(normalised)) return true;
   }
   return false;
 }
@@ -43,6 +72,12 @@ export interface CopyTreeOpts {
   readonly source: string;
   readonly destination: string;
   readonly exclude: readonly string[];
+  /**
+   * Wenn `false` (Default), schlägt `copyTree` fehl falls Ziel-Dateien
+   * bereits existieren würden (verlustfreies Default). Mit `true`
+   * werden bestehende Dateien überschrieben — nur explizit setzen.
+   */
+  readonly overwrite?: boolean;
 }
 
 export interface CopyTreeStats {
@@ -53,12 +88,14 @@ export interface CopyTreeStats {
 }
 
 /**
- * Kopiert `source/` rekursiv nach `destination/` und gibt eine
- * Statistik zurück (filesCopied / bytesCopied / filesSkipped /
- * excludedPaths). Bestehende Dateien am Ziel werden überschrieben.
+ * Kopiert `source/` rekursiv nach `destination/`. Bestehende Dateien
+ * am Ziel werden bei `overwrite: false` (Default) NICHT überschrieben —
+ * fs.cp wirft dann auf ersten Treffer und der Caller bekommt den
+ * Fehler propagiert. Caller kann `overwrite: true` setzen wenn explizit
+ * gewollt.
  */
 export async function copyTree(opts: CopyTreeOpts): Promise<CopyTreeStats> {
-  const { source, destination, exclude } = opts;
+  const { source, destination, exclude, overwrite = false } = opts;
   let filesCopied = 0;
   let bytesCopied = 0;
   let filesSkipped = 0;
@@ -66,9 +103,10 @@ export async function copyTree(opts: CopyTreeOpts): Promise<CopyTreeStats> {
 
   await cp(source, destination, {
     recursive: true,
-    force: true,
-    errorOnExist: false,
+    force: overwrite,
+    errorOnExist: !overwrite,
     preserveTimestamps: true,
+    verbatimSymlinks: true,
     filter: (sourcePath) => {
       const rel = relative(source, sourcePath);
       if (rel === '' || rel === '.') return true;

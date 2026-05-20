@@ -13,7 +13,7 @@
  * @module @domains/migration/secrets-collector
  */
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 
 export interface EnvScanResult {
   readonly keys: readonly string[];
@@ -22,6 +22,22 @@ export interface EnvScanResult {
 }
 
 const KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+
+/**
+ * Path-Traversal-Guard: stellt sicher dass `relPath` nach Resolve
+ * unter `root` bleibt. Verhindert dass ein vorgeschobener `..`-Pfad
+ * Files außerhalb der Quelle liest.
+ */
+function isUnderRoot(root: string, relPath: string): boolean {
+  const abs = resolve(root, relPath);
+  const rel = relative(root, abs);
+  if (rel === '' || rel === '.') return true;
+  if (rel.startsWith('..')) return false;
+  // Plattform-unabhängig: relativ darf nicht mit / oder \ beginnen und
+  // nicht absolut sein.
+  if (rel.startsWith(sep) || rel.startsWith('/')) return false;
+  return true;
+}
 
 /**
  * Scannt eine Liste von .env-File-Pfaden (relativ zu `root`) und
@@ -39,6 +55,13 @@ export function scanEnvFiles(root: string, relPaths: readonly string[]): EnvScan
   const unknownLines: { source: string; line: string }[] = [];
 
   for (const relPath of relPaths) {
+    if (!isUnderRoot(root, relPath)) {
+      unknownLines.push({
+        source: relPath,
+        line: '(path-traversal versucht — übersprungen)',
+      });
+      continue;
+    }
     const abs = join(root, relPath);
     let content: string;
     try {

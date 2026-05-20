@@ -34,6 +34,7 @@ interface MigrateOpts {
   readonly execute?: boolean;
   readonly dryRun?: boolean;
   readonly force?: boolean;
+  readonly overwrite?: boolean;
 }
 
 function printJson(payload: unknown): void {
@@ -98,10 +99,14 @@ export function registerMigrateCommand(program: Command): void {
       '--target <path>',
       'Zielroot für die Migration (default: aufgelöster claude-os-Root aus $CLAUDE_OS_ROOT)',
     )
-    .option('--plan', 'Nur den Plan ausgeben, keine FS-Mutationen')
+    .option('--plan', 'Nur den Plan ausgeben, keine FS-Mutationen (impliziert kein Execute)')
     .option('--execute', 'Plan ausführen')
     .option('--dry-run', 'Mit --execute kombiniert: nur loggen was passiert wäre')
     .option('--force', 'Auch ausführen wenn Target bereits einen .claude-os-root-Marker hat')
+    .option(
+      '--overwrite',
+      'Bestehende Ziel-Dateien überschreiben (Default: verlustfrei, errored auf Konflikt)',
+    )
     .action(async (opts: MigrateOpts, command) => {
       const globalOpts = command.optsWithGlobals() as GlobalOpts;
       const targetRoot = opts.target ?? resolveRoot({ explicit: globalOpts.root }).path;
@@ -110,25 +115,34 @@ export function registerMigrateCommand(program: Command): void {
       try {
         const plan = buildMigrationPlan({ sourceRoot, targetRoot });
 
-        if (opts.plan === true || opts.execute !== true) {
+        // `--plan` ist die stärkere Variante von Dry-Run: keine
+        // Mutationen, auch wenn `--execute` zusätzlich gesetzt ist.
+        const planOnly = opts.plan === true || opts.execute !== true;
+
+        if (planOnly) {
           if (globalOpts.json === true) {
             printJson({ plan });
           } else {
             renderPlan(plan);
-            if (opts.execute !== true) {
-              printLine('');
+            printLine('');
+            if (opts.plan === true && opts.execute === true) {
+              printLine(
+                '(--plan überschreibt --execute. Mit nur --execute (ohne --plan) ausführen.)',
+              );
+            } else {
               printLine(
                 '(Plan-Only-Modus. Mit --execute ausführen. --dry-run zeigt was passieren würde.)',
               );
             }
           }
-          if (opts.execute !== true) return;
+          return;
         }
 
         const result = await executePlan({
           plan,
           force: opts.force === true,
           dryRun: opts.dryRun === true,
+          overwrite: opts.overwrite === true,
         });
         if (globalOpts.json === true) {
           printJson({ plan, result });

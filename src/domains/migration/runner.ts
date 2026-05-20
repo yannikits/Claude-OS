@@ -21,8 +21,12 @@
  *
  * @module @domains/migration/runner
  */
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { platform } from 'node:os';
+import { dirname, join, resolve, sep } from 'node:path';
+
+const IS_WINDOWS = platform() === 'win32';
+
 import { type CopyTreeStats, copyTree } from './copy-tree.js';
 import { discoverPortable } from './portable-discovery.js';
 import { scanEnvFiles } from './secrets-collector.js';
@@ -54,12 +58,72 @@ const VAULT_EXCLUDE: readonly string[] = ['.git', '.git/**'];
 
 const ROOT_MARKER = '.claude-os-root';
 
+/**
+ * Resolved einen Pfad konsistent über existente und nicht-existente
+ * Inputs: bei existierendem Pfad via `realpathSync.native` (löst
+ * Symlinks UND Windows-8.3-Shortnames); bei nicht-existentem Pfad
+ * wandert man die Hierarchie hoch bis zum ersten existenten Vorfahren,
+ * resolved den, und hängt die Rest-Segmente an. So vergleichen wir
+ * immer canonical forms gegen canonical forms.
+ */
+function safeResolve(p: string): string {
+  const abs = resolve(p);
+  if (existsSync(abs)) {
+    try {
+      return realpathSync.native(abs);
+    } catch {
+      return abs;
+    }
+  }
+  let parent = dirname(abs);
+  let suffix = abs.slice(parent.length);
+  while (parent !== dirname(parent) && !existsSync(parent)) {
+    suffix = parent.slice(dirname(parent).length) + suffix;
+    parent = dirname(parent);
+  }
+  try {
+    return realpathSync.native(parent) + suffix;
+  } catch {
+    return abs;
+  }
+}
+
+function caseNorm(p: string): string {
+  return IS_WINDOWS ? p.toLowerCase() : p;
+}
+
+/**
+ * Verbietet Source/Target-Overlap (gleicher Pfad, einer im anderen
+ * verschachtelt) — verhindert Selbst-Überschreiben oder rekursive
+ * Endlos-Kopien.
+ */
+function assertNoOverlap(sourceRoot: string, targetRoot: string): void {
+  const src = caseNorm(safeResolve(sourceRoot));
+  const dst = caseNorm(safeResolve(targetRoot));
+  if (src === dst) {
+    throw new MigrationError(`Quelle und Ziel sind identisch (${src}). Migration verboten.`);
+  }
+  const srcNorm = src.endsWith(sep) ? src : src + sep;
+  const dstNorm = dst.endsWith(sep) ? dst : dst + sep;
+  if (dstNorm.startsWith(srcNorm)) {
+    throw new MigrationError(
+      `Ziel ${dst} liegt innerhalb der Quelle ${src}. Würde Selbst-Kopie auslösen.`,
+    );
+  }
+  if (srcNorm.startsWith(dstNorm)) {
+    throw new MigrationError(
+      `Quelle ${src} liegt innerhalb des Ziels ${dst}. Würde Daten überschreiben.`,
+    );
+  }
+}
+
 export interface BuildPlanOpts {
   readonly sourceRoot: string;
   readonly targetRoot: string;
 }
 
 export function buildMigrationPlan(opts: BuildPlanOpts): MigrationPlan {
+  assertNoOverlap(opts.sourceRoot, opts.targetRoot);
   const source = discoverPortable(opts.sourceRoot);
   const targetAlreadyMigrated = existsSync(join(opts.targetRoot, ROOT_MARKER));
   const steps: PlanStep[] = [];
@@ -131,18 +195,33 @@ export interface ExecutePlanOpts {
   readonly force?: boolean;
   /** Wenn `true`, werden die Plan-Steps nur durchlaufen aber nicht ausgeführt. */
   readonly dryRun?: boolean;
+  /**
+   * Wenn `true`, dürfen bestehende Ziel-Dateien überschrieben werden.
+   * Default `false` (verlustfreies Default per Codex-Adversarial-Review).
+   */
+  readonly overwrite?: boolean;
 }
 
 export async function executePlan(opts: ExecutePlanOpts): Promise<MigrationResult> {
-  const { plan, force = false, dryRun = false } = opts;
-  if (plan.targetAlreadyMigrated && !force) {
+  const { plan, force = false, dryRun = false, overwrite = false } = opts;
+
+  // Re-check marker zum Execute-Zeitpunkt — Plan-Bau war evtl. vor
+  // Minuten, in der Zwischenzeit könnte jemand das Target initialisiert
+  // haben (TOCTOU-Schutz aus Codex-Review).
+  const markerExistsNow = existsSync(join(plan.target, ROOT_MARKER));
+  if (markerExistsNow && !force) {
     throw new MigrationError(
       `Ziel ${plan.target} ist bereits migriert (.claude-os-root vorhanden). --force erforderlich für Re-Migration.`,
     );
   }
+
+  // Re-Check Overlap auch zum Execute-Zeitpunkt (Symlinks könnten sich
+  // geändert haben).
+  assertNoOverlap(plan.source.root, plan.target);
+
   const results: StepResult[] = [];
   for (const step of plan.steps) {
-    results.push(await runStep(step, dryRun));
+    results.push(await runStep(step, dryRun, overwrite));
   }
   const success = results.every((r) => r.status !== 'failed');
   return {
@@ -153,7 +232,7 @@ export async function executePlan(opts: ExecutePlanOpts): Promise<MigrationResul
   };
 }
 
-async function runStep(step: PlanStep, dryRun: boolean): Promise<StepResult> {
+async function runStep(step: PlanStep, dryRun: boolean, overwrite: boolean): Promise<StepResult> {
   if (dryRun) {
     return {
       step,
@@ -168,6 +247,7 @@ async function runStep(step: PlanStep, dryRun: boolean): Promise<StepResult> {
           source: step.source,
           destination: step.destination,
           exclude: step.exclude,
+          overwrite,
         });
         return {
           step,
