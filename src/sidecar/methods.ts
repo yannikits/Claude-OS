@@ -7,10 +7,16 @@ import { AgentRunsRepository, agentRunsIndexPathFor } from '../domains/agent-run
 import { ProfileManager } from '../domains/auth/index.js';
 import { catalogPathsFor, readCatalog, readCatalogLock } from '../domains/catalog/index.js';
 import {
+  addSchedule,
+  CronParseError,
   nextFire,
   parseCron,
   readSchedules,
+  removeSchedule,
   type ScheduleEntry,
+  ScheduleError,
+  setEnabled as setScheduleEnabled,
+  writeSchedules,
 } from '../domains/scheduler/index.js';
 import { createSecretStore } from '../domains/secrets/index.js';
 import { SecretsLockedError } from '../domains/secrets/types.js';
@@ -198,6 +204,92 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
       return { ok: true as const };
     });
   }
+
+  dispatcher.register('schedule.add', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as {
+      id?: string;
+      cron?: string;
+      command?: string;
+      description?: string;
+      disabled?: boolean;
+    };
+    if (typeof params.id !== 'string' || params.id.length === 0) {
+      throw new Error('schedule.add: params.id muss ein non-empty string sein');
+    }
+    if (typeof params.cron !== 'string' || params.cron.length === 0) {
+      throw new Error('schedule.add: params.cron muss ein non-empty string sein');
+    }
+    if (typeof params.command !== 'string' || params.command.length === 0) {
+      throw new Error('schedule.add: params.command muss ein non-empty string sein');
+    }
+    try {
+      parseCron(params.cron);
+    } catch (err) {
+      if (err instanceof CronParseError) {
+        throw new Error(`schedule.add: cron invalid — ${err.message}`);
+      }
+      throw err;
+    }
+    const machine = resolveMachinePaths();
+    const store = readSchedules(machine.dataDir);
+    const entry: ScheduleEntry = {
+      id: params.id,
+      cron: params.cron,
+      command: params.command,
+      createdAt: new Date().toISOString(),
+      enabled: params.disabled !== true,
+      ...(params.description === undefined ? {} : { description: params.description }),
+    };
+    try {
+      writeSchedules(machine.dataDir, addSchedule(store, entry));
+    } catch (err) {
+      if (err instanceof ScheduleError) {
+        throw new Error(`schedule.add: ${err.message}`);
+      }
+      throw err;
+    }
+    return { entry };
+  });
+
+  dispatcher.register('schedule.remove', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { id?: string };
+    if (typeof params.id !== 'string' || params.id.length === 0) {
+      throw new Error('schedule.remove: params.id muss ein non-empty string sein');
+    }
+    const machine = resolveMachinePaths();
+    try {
+      writeSchedules(machine.dataDir, removeSchedule(readSchedules(machine.dataDir), params.id));
+    } catch (err) {
+      if (err instanceof ScheduleError) {
+        throw new Error(`schedule.remove: ${err.message}`);
+      }
+      throw err;
+    }
+    return { id: params.id, removed: true };
+  });
+
+  dispatcher.register('schedule.setEnabled', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { id?: string; enabled?: boolean };
+    if (typeof params.id !== 'string' || params.id.length === 0) {
+      throw new Error('schedule.setEnabled: params.id muss ein non-empty string sein');
+    }
+    if (typeof params.enabled !== 'boolean') {
+      throw new Error('schedule.setEnabled: params.enabled muss boolean sein');
+    }
+    const machine = resolveMachinePaths();
+    try {
+      writeSchedules(
+        machine.dataDir,
+        setScheduleEnabled(readSchedules(machine.dataDir), params.id, params.enabled),
+      );
+    } catch (err) {
+      if (err instanceof ScheduleError) {
+        throw new Error(`schedule.setEnabled: ${err.message}`);
+      }
+      throw err;
+    }
+    return { id: params.id, enabled: params.enabled };
+  });
 
   dispatcher.register('schedule.list', () => {
     const machine = resolveMachinePaths();

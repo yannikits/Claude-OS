@@ -250,8 +250,10 @@ export interface ScheduleEntry {
   createdAt: string;
   enabled: boolean;
   description?: string;
-  /** Naechste Feuer-Zeit als ISO-8601, oder null wenn nicht erreichbar. */
-  next: string | null;
+  /** Naechste Feuer-Zeit als ISO-8601, oder null wenn nicht erreichbar.
+   *  Nur aus schedule.list enriched zurueckgegeben — bei schedule.add/remove
+   *  fehlt das Feld. */
+  next?: string | null;
 }
 
 export interface ScheduleListResult {
@@ -270,8 +272,35 @@ export interface SchedulerEventPayload {
   message?: string;
 }
 
+export interface ScheduleAddInput {
+  id: string;
+  cron: string;
+  command: string;
+  description?: string;
+  disabled?: boolean;
+}
+
+export interface ScheduleAddResult {
+  entry: ScheduleEntry;
+}
+
 export async function listSchedules(): Promise<ScheduleListResult> {
   return rpcCall<ScheduleListResult>('schedule.list');
+}
+
+export async function addScheduleEntry(input: ScheduleAddInput): Promise<ScheduleAddResult> {
+  return rpcCall<ScheduleAddResult>('schedule.add', input);
+}
+
+export async function removeScheduleEntry(id: string): Promise<{ id: string; removed: boolean }> {
+  return rpcCall<{ id: string; removed: boolean }>('schedule.remove', { id });
+}
+
+export async function setScheduleEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<{ id: string; enabled: boolean }> {
+  return rpcCall<{ id: string; enabled: boolean }>('schedule.setEnabled', { id, enabled });
 }
 
 export async function onSchedulerEvent(

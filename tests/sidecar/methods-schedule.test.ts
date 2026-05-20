@@ -87,3 +87,87 @@ describe('schedule.list RPC', () => {
     expect(result.entries[0]?.next).toBeNull();
   });
 });
+
+describe('schedule.add / remove / setEnabled RPCs', () => {
+  let tmpRoot: string;
+  let tmpData: string;
+  let envBackup: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'claude-os-sched-mut-root-'));
+    tmpData = mkdtempSync(join(tmpdir(), 'claude-os-sched-mut-data-'));
+    mkdirSync(join(tmpData, 'data'), { recursive: true });
+    writeFileSync(join(tmpRoot, '.claude-os-root'), '');
+    envBackup = { ...process.env };
+    process.env.CLAUDE_OS_ROOT = tmpRoot;
+    process.env.CLAUDE_OS_DATA_DIR = tmpData;
+  });
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true });
+    rmSync(tmpData, { recursive: true, force: true });
+    process.env = envBackup;
+  });
+
+  it('schedule.add legt einen Entry an', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d);
+    const result = (await d.invoke('schedule.add', {
+      id: 'morning',
+      cron: '0 8 * * *',
+      command: 'echo hi',
+    })) as { entry: { id: string; cron: string; enabled: boolean } };
+    expect(result.entry.id).toBe('morning');
+    expect(result.entry.cron).toBe('0 8 * * *');
+    expect(result.entry.enabled).toBe(true);
+  });
+
+  it('schedule.add wirft bei ungueltigem cron', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d);
+    await expect(
+      d.invoke('schedule.add', { id: 'x', cron: 'nope', command: 'echo' }),
+    ).rejects.toThrow(/cron invalid/);
+  });
+
+  it('schedule.add wirft bei dupliziertem id', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d);
+    await d.invoke('schedule.add', { id: 'dup', cron: '* * * * *', command: 'echo' });
+    await expect(
+      d.invoke('schedule.add', { id: 'dup', cron: '* * * * *', command: 'echo' }),
+    ).rejects.toThrow(/existiert bereits/);
+  });
+
+  it('schedule.remove entfernt einen Entry', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d);
+    await d.invoke('schedule.add', { id: 'r', cron: '* * * * *', command: 'echo' });
+    const result = (await d.invoke('schedule.remove', { id: 'r' })) as {
+      id: string;
+      removed: boolean;
+    };
+    expect(result.removed).toBe(true);
+    const list = (await d.invoke('schedule.list', {})) as { count: number };
+    expect(list.count).toBe(0);
+  });
+
+  it('schedule.setEnabled togglet enabled-state', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d);
+    await d.invoke('schedule.add', { id: 't', cron: '* * * * *', command: 'echo' });
+    await d.invoke('schedule.setEnabled', { id: 't', enabled: false });
+    const list = (await d.invoke('schedule.list', {})) as {
+      entries: { id: string; enabled: boolean }[];
+    };
+    expect(list.entries[0]?.enabled).toBe(false);
+  });
+
+  it('schedule.setEnabled wirft bei unbekanntem id', async () => {
+    const d = new RpcDispatcher();
+    registerMethods(d);
+    await expect(d.invoke('schedule.setEnabled', { id: 'nope', enabled: true })).rejects.toThrow(
+      /existiert nicht/,
+    );
+  });
+});
