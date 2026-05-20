@@ -13,6 +13,36 @@ Format pro Eintrag:
 
 ---
 
+## 2026-05-20 — Discriminated-Union-Sentinel statt Type-Narrowing-Wrestling
+
+**Situation:** Phase 5o lockBuilder musste zwei Sub-States des `ManifestReadResult`-Fail-Branches unterscheiden: "kein plugin.json" (silent) vs. "plugin.json malformed" (warn). Erster Versuch verglich gegen `NO_MANIFEST.reason` — TypeScript-Build failed mit TS2339, weil `NO_MANIFEST` als ganze Union getypt war und die Property `reason` nicht ohne `ok === false`-Narrowing ableitbar.
+
+**Lektion:** Wenn Code von außerhalb der Discriminated-Union einen Failure-Reason matchen muss, einen **separat exportierten Sentinel-String-Constant** publizieren statt vom Objekt-Constant zu projizieren. `export const NO_MANIFEST_REASON = '...'` ist erstens immer dem Compiler sichtbar, zweitens dokumentiert sich selbst, drittens kann das Objekt-Constant zur API-Ergonomie behalten werden.
+
+**Anwendung:** Jede Domain mit `{ok: true | false}`-Result-Pattern, wo Caller auf bestimmte Fail-Reasons reagieren müssen ohne erst `ok === false` zu narrowen. Auch nützlich für Test-Assertions die nicht durch das Narrowing-Boilerplate wollen.
+
+---
+
+## 2026-05-20 — tar v7 onentry braucht 'data'-Listener nicht .resume()
+
+**Situation:** Beim Implementieren des Tarball-Manifest-Peek hatte ich initial einen Reflex `entry.resume()` + danach `entry.on('data', ...)` zu rufen — basierend auf Node-Stream-Idiomen. Resultat: leere Chunks, weil `.resume()` den Stream startet, bevor der Listener angemeldet ist.
+
+**Lektion:** In `tar v7`s `onentry`-Callback: wenn ich Entry-Daten WILL, registriere ich `entry.on('data', ...)` und `entry.on('end', ...)` — das **schaltet automatisch in flow mode** und ich darf KEIN `.resume()` aufrufen. Wenn ich die Entry-Daten NICHT will, MUSS ich `entry.resume()` aufrufen, sonst hängt der Tar-Stream weil Backpressure greift.
+
+**Anwendung:** Generell beim Konsumieren von Node-Streams mit selektivem Interesse pro Entry: erst entscheiden ob das Entry konsumiert wird; bei "ja" Listener attachen (kein .resume()); bei "nein" .resume() rufen. Mischen ist der Bug-Mode.
+
+---
+
+## 2026-05-20 — GitHub Desktop zeigt bei Pre-Commit-Hook-Failure nur den PATH
+
+**Situation:** User hat versucht, fünf staged Files (darunter `.graphify_step_ast.py` und `graphify-out/graph.json` mit ~1,7 Mio. Zeilen) via GitHub Desktop zu committen. Der Husky-Pre-Commit-Hook (`npx lint-staged` → `biome check --staged`) scheiterte. GitHub Desktop's "Commit failed"-Dialog zeigte als gesamten Output nur eine einzelne Zeile mit dem komplett ausgegebenen `PATH`-Environment — keine biome-Fehlermeldung, keine `lint-staged`-Zusammenfassung, kein konkreter File-Hinweis.
+
+**Lektion:** GitHub Desktop captured Pre-Commit-Hook-Failures unter Windows oft nur teilweise — wenn der Hook ohne strukturierten stderr-Output bricht (z. B. weil biome auf einer Datei oberhalb `files.maxSize` ohne klares Diagnostic abstürzt, oder weil cmd.exe das Output abschneidet), bleibt im UI nur was der Shell beim Crash dumped, häufig `PATH`. Das macht den eigentlichen Fehler unsichtbar. Mitigations: (a) `biome.json files.maxSize` defensiv setzen damit klare Diagnostics auch bei großen Dateien kommen, (b) generated/scratch-Verzeichnisse (`graphify-out/`, `three-brain-out/`) explizit in `biome.json files.includes` als `!**/dir` ausschließen UND in `.gitignore`, (c) bei Diagnose-Bedarf nicht GitHub Desktop, sondern `git commit` aus der Shell für ehrliches stderr.
+
+**Anwendung:** Wenn GitHub Desktop einen "Commit failed"-Dialog ohne klare Fehlermeldung zeigt, sofort über die Shell wiederholen — der echte Output ist dort. Generell: Pre-Commit-Hook-Konfiguration muss so robust sein, dass selbst beim Failure ein lesbarer Fehler-Pfad existiert. Für Skill-Output-Verzeichnisse die im Repo-Root landen können (`graphify-out/`, `three-brain-out/`) gehören sowohl `.gitignore` als auch biome's `files.includes`-Negation als Defense-in-Depth.
+
+---
+
 ## 2026-05-15 — /grill-me Wert vs. Implementations-Reflex
 
 **Situation:** Im /grill-me wurde B4 = Electron mit Argument "Rust-Toolchain auf 3 Maschinen ist Wartungslast" entschieden. Researcher-Spike anschließend widerlegte das Argument (Rust ist nur Build-Zeit-Dep des Maintainers, Nutzer bekommen reines Binary).

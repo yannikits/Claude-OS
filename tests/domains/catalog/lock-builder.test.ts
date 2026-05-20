@@ -6,6 +6,7 @@ import {
   type CatalogConfig,
   LockBuilderError,
   lockCatalog,
+  type ManifestReadResult,
 } from '../../../src/domains/catalog/index.js';
 
 let cacheDir: string;
@@ -244,6 +245,219 @@ describe('lockCatalog — empty catalog', () => {
       nowIso: () => '2026-05-17T08:30:00Z',
     });
     expect(result.lock).toEqual({ version: 1, resolvedAt: '2026-05-17T08:30:00Z', entries: [] });
+    expect(result.warnings).toEqual([]);
+  });
+});
+
+describe('lockCatalog — plugin binding resolution (Phase 5o)', () => {
+  const dependentCatalog: CatalogConfig = {
+    version: 1,
+    entries: [
+      {
+        id: 'mcp-foo',
+        kind: 'plugin',
+        source: 'github:acme/mcp-foo@v1.0.0',
+        enabled: true,
+        scope: 'user',
+      },
+      {
+        id: 'skill-user',
+        kind: 'plugin',
+        source: 'github:acme/skill-user@v2.1.0',
+        enabled: true,
+        scope: 'user',
+      },
+    ],
+  };
+
+  it('populates bindings for plugins whose requires are satisfied by sibling plugins', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(tarballResponse('mcp-foo-bytes-v1'))
+      .mockResolvedValueOnce(tarballResponse('skill-user-bytes-v2'));
+
+    // Manifest reader is injected — first call returns mcp-foo manifest,
+    // second returns skill-user manifest. The order matches fetch order
+    // because the lock builder reads manifests in the same loop order.
+    const readerCalls: string[] = [];
+    const readManifest = vi.fn(async (tarballPath: string): Promise<ManifestReadResult> => {
+      readerCalls.push(tarballPath);
+      if (readerCalls.length === 1) {
+        return {
+          ok: true,
+          manifest: {
+            id: 'mcp-foo',
+            version: '1.0.0',
+            provides: ['mcp:foo>=1.0.0'],
+          },
+        };
+      }
+      return {
+        ok: true,
+        manifest: {
+          id: 'skill-user',
+          version: '2.1.0',
+          requires: ['mcp:foo>=1.0.0'],
+        },
+      };
+    });
+
+    const result = await lockCatalog({
+      catalog: dependentCatalog,
+      cacheDir,
+      fetch: fetchSpy,
+      readManifest,
+      nowIso: () => '2026-05-17T08:30:00Z',
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(readManifest).toHaveBeenCalledTimes(2);
+
+    const skillUser = result.lock.entries.find((e) => e.id === 'skill-user');
+    expect(skillUser?.bindings).toEqual([{ capability: 'mcp:foo>=1.0.0', providedBy: 'mcp-foo' }]);
+    const mcpFoo = result.lock.entries.find((e) => e.id === 'mcp-foo');
+    expect(mcpFoo?.bindings).toEqual([]);
+  });
+
+  it('keeps the lock entry with bindings:[] and stays silent when the manifest is simply missing', async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce(tarballResponse('opaque-tarball'));
+    const readManifest = vi.fn(
+      async (): Promise<ManifestReadResult> => ({
+        ok: false,
+        reason: 'tarball does not contain a plugin.json entry',
+      }),
+    );
+    const catalog: CatalogConfig = {
+      version: 1,
+      entries: [
+        {
+          id: 'no-manifest-plugin',
+          kind: 'plugin',
+          source: 'github:acme/no-manifest@v1',
+          enabled: true,
+          scope: 'user',
+        },
+      ],
+    };
+    const result = await lockCatalog({
+      catalog,
+      cacheDir,
+      fetch: fetchSpy,
+      readManifest,
+      nowIso: () => '2026-05-17T08:30:00Z',
+    });
+    expect(result.lock.entries.map((e) => e.id)).toEqual(['no-manifest-plugin']);
+    expect(result.lock.entries[0]?.bindings).toEqual([]);
+    // NO_MANIFEST is silent — pre-ADR-0010 plugins are still legal in v1.
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('surfaces a warning when the plugin.json is present but malformed', async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce(tarballResponse('opaque-tarball'));
+    const readManifest = vi.fn(
+      async (): Promise<ManifestReadResult> => ({
+        ok: false,
+        reason: 'plugin.json failed to parse: Unexpected token',
+      }),
+    );
+    const catalog: CatalogConfig = {
+      version: 1,
+      entries: [
+        {
+          id: 'bad-manifest',
+          kind: 'plugin',
+          source: 'github:acme/bad-manifest@v1',
+          enabled: true,
+          scope: 'user',
+        },
+      ],
+    };
+    const result = await lockCatalog({
+      catalog,
+      cacheDir,
+      fetch: fetchSpy,
+      readManifest,
+      nowIso: () => '2026-05-17T08:30:00Z',
+    });
+    expect(result.lock.entries[0]?.bindings).toEqual([]);
+    expect(
+      result.warnings.some((w) => w.includes('bad-manifest') && w.includes('plugin.json')),
+    ).toBe(true);
+  });
+
+  it('emits a binding-resolution warning when a require cannot be satisfied', async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce(tarballResponse('lonely'));
+    const readManifest = vi.fn(
+      async (): Promise<ManifestReadResult> => ({
+        ok: true,
+        manifest: {
+          id: 'lonely',
+          version: '1.0.0',
+          requires: ['mcp:does-not-exist>=1.0.0'],
+        },
+      }),
+    );
+    const catalog: CatalogConfig = {
+      version: 1,
+      entries: [
+        {
+          id: 'lonely',
+          kind: 'plugin',
+          source: 'github:acme/lonely@v1',
+          enabled: true,
+          scope: 'user',
+        },
+      ],
+    };
+    const result = await lockCatalog({
+      catalog,
+      cacheDir,
+      fetch: fetchSpy,
+      readManifest,
+      nowIso: () => '2026-05-17T08:30:00Z',
+    });
+    expect(result.lock.entries).toHaveLength(1);
+    expect(result.lock.entries[0]?.bindings).toEqual([]);
+    expect(
+      result.warnings.some((w) => w.includes('lonely') && w.includes('binding resolution failed')),
+    ).toBe(true);
+  });
+
+  it('does not invoke the manifest reader for skill / mcp entries (leaves)', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(tarballResponse('skill-bytes'))
+      .mockResolvedValueOnce(tarballResponse('mcp-bytes'));
+    const readManifest = vi.fn();
+    const catalog: CatalogConfig = {
+      version: 1,
+      entries: [
+        {
+          id: 'just-a-skill',
+          kind: 'skill',
+          source: 'github:acme/just-a-skill@v1',
+          enabled: true,
+          scope: 'user',
+        },
+        {
+          id: 'just-an-mcp',
+          kind: 'mcp',
+          source: 'github:acme/just-an-mcp@v1',
+          enabled: true,
+          scope: 'user',
+        },
+      ],
+    };
+    const result = await lockCatalog({
+      catalog,
+      cacheDir,
+      fetch: fetchSpy,
+      readManifest,
+      nowIso: () => '2026-05-17T08:30:00Z',
+    });
+    expect(readManifest).not.toHaveBeenCalled();
+    expect(result.lock.entries).toHaveLength(2);
+    for (const entry of result.lock.entries) expect(entry.bindings).toEqual([]);
     expect(result.warnings).toEqual([]);
   });
 });

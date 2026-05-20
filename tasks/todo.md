@@ -231,15 +231,9 @@ v1.0.0 ist GA. Diese Liste sammelt die natürlichen nächsten Schritte für kün
 
 ### v1.2 — echte Impl statt Stubs (mittleres Aufwand)
 
-<<<<<<< HEAD
-- [ ] **Chat-View** mit PTY-Streaming. Aktuell stub mit Hint. Architekturentscheidung: claude.exe-Spawn via existierender `domains/claude-bridge` + Pipe nach `xterm.js` im Renderer. Tauri-Side neuer RPC: `chat.spawn(args) -> sessionId`, `chat.write(sessionId, input)`, Tauri-Event `chat.output` mit chunk-data. Achtung: `child.stdin`/`stdout` von tauri-plugin-shell ist line-buffered, für TTY-Streaming brauchts wahrscheinlich `node-pty` als Dependency.
+- [x] **Chat-View** (MVP) — implementiert 2026-05-19 (PR #29). **Bewusste v1.2-Vereinfachung: line-buffered child_process statt PTY** (node-pty native-build-pain ist v1.x). Neue `src/sidecar/chat-sessions.ts` `ChatSessions` Klasse mit `spawn(args) → {sessionId}` / `write(sessionId, input)` / `kill(sessionId)` (SIGTERM mit 2s SIGKILL-Fallback). Notification-Emitter pipes `chat.output` / `chat.exit` als JSON-RPC-Notifications zum Tauri-Supervisor, der sie als Tauri-Events re-emittiert. `MAX_SESSIONS=8` ring-guard. Windows `.cmd`/`.bat` detection setzt `shell: true` (CVE-2024-27980 mitigation). Renderer `ChatPage` mit args-Input, Spawn/Stop, 500-Line-Ring-Buffer (stdout/stderr/meta-coloring), stdin-Enter-to-Send. +4 Tests. **Limitations dokumentiert**: keine TTY-detection (interaktive Password-Prompts), keine ANSI-Cursor-Control, line-buffered. Full xterm.js + node-pty bleibt v1.x.
 - [x] **Secrets.list RPC** + UI — shipped 2026-05-18 in PRs #15 (Secrets-View) + #17 (locked-state UI + backend env value). `src/sidecar/methods.ts` registriert `secrets.list` (Keys + backend, niemals Values) und `secrets.delete`. `gui/src/pages/index.tsx SecretsPage` rendert Liste mit Delete-Button + Confirm-Dialog + Backend-Locked-Banner. v1.1 (PR #22) ergänzte `useSidecarOk()`-Disabled-State. Set/Update bleiben CLI-only (Value-in-Renderer-RAM vermeiden).
 - [x] **Settings-View** wired — shipped 2026-05-18 in PR #14. `settings.read` RPC liefert `{anthropic: {resolvedConfigDir, envOverride, activeProfile, availableProfiles, credentialsFile}, secrets: {backend, envOverride}, claudeCodeSettings: [{scope, name, path, exists, mtime, size}]}` read-only. UI rendert als kv-Listen + Tabelle. Mutation deferred bleibt v1.x.
-=======
-- [x] **Chat-View** (MVP) — implementiert 2026-05-19. **Bewusste v1.2-Vereinfachung: line-buffered child_process statt PTY** (node-pty native-build-pain ist v1.x). Neue `src/sidecar/chat-sessions.ts` `ChatSessions` Klasse mit `spawn(args) → {sessionId}` / `write(sessionId, input)` / `kill(sessionId)` (SIGTERM mit 2s SIGKILL-Fallback). Notification-Emitter pipes `chat.output` / `chat.exit` als JSON-RPC-Notifications zum Tauri-Supervisor, der sie als Tauri-Events re-emittiert. `MAX_SESSIONS=8` ring-guard. Windows `.cmd`/`.bat` detection setzt `shell: true` (CVE-2024-27980 mitigation). Renderer `ChatPage` mit args-Input, Spawn/Stop, 500-Line-Ring-Buffer (stdout/stderr/meta-coloring), stdin-Enter-to-Send. +4 Tests. **Limitations dokumentiert**: keine TTY-detection (interaktive Password-Prompts), keine ANSI-Cursor-Control, line-buffered. Full xterm.js + node-pty bleibt v1.x.
-- [ ] **Secrets.list RPC** + UI. Sidecar exportiert via existierende `SecretsStore`-Façade nur Keys (niemals Values). UI: einfache Liste + "Delete"-Button. Set/Update bleibt CLI-only (vermeidet Value-in-Renderer-RAM).
-- [ ] **Settings-View** wired. `settings.local.json` + `$ANTHROPIC_CONFIG_DIR` als read-only Anzeige im UI. Mutation bleibt CLI-only erst (siehe stub-Hint).
->>>>>>> 9eb51e6 (docs(todo): mark v1.2 Chat-View MVP as shipped)
 - [x] **pino-roll per-day rotation** für Sidecar-Logs — implementiert 2026-05-19. Neue `src/sidecar/logger.ts` exportiert `createSidecarLogger({logsDir?, level?, stderrOnly?})` → `Promise<SidecarLogger>`. Pipes pino in `multistream([{stream: process.stderr}, {stream: pinoRoll(...)}])` damit der Tauri-Supervisor weiterhin alle Lines via `sidecar://stderr`-Event sieht UND Persistenz nach `<logsDir>/sidecar.YYYY-MM-DD.log` (10 MB size-cap als Secondary-Guardrail, Daily-Rotation). LogsDir-Resolution: opts → `$CLAUDE_OS_LOGS_DIR` → `resolveMachinePaths().logsDir`. Bei pino-roll-Failure (Permissions, Disk full): graceful Fallback auf stderr-only mit Warn-Log. `src/sidecar/index.ts` wired Logger früh; Lifecycle-Events (logger-ready, watchers-running, shutdown-via-rpc, exit) jetzt strukturiert geloggt statt `process.stderr.write`. +3 Tests gegen tmpdir, +1 type shim `src/types/pino-roll.d.ts` (pino-roll v4 hat noch keine offiziellen Types).
 
 ### v1.3 — Cross-Platform-Härtung (20 h, M, deps: v1.0 GA)
@@ -278,7 +272,7 @@ v1.0.0 ist GA. Diese Liste sammelt die natürlichen nächsten Schritte für kün
 
 ### v1.5+ — Plugin-Echo + Bestands-User-Sync
 
-- [ ] **Plugin-binding-Resolution** in `lockCatalog`. Aktuell `bindings: []` als v1-Simplification (Phase 5o Deferral). Capability-Resolver-Integration bringt echte `requires`/`provides`-Graphen-Auflösung pro Lock. Braucht Plugin-Manifest-Reader entweder via Tarball-Peek oder Post-Sync re-scan.
+- [x] **Plugin-binding-Resolution** in `lockCatalog` — implementiert 2026-05-20 als Phase 5o. Neue `src/domains/catalog/tarball-manifest-reader.ts` streamt cached `.tar.gz` via `tar.list({onentry})`, sucht `plugin.json` unter dem GitHub-Wrapper-Dir (`stripComponents: 1`), TypeBox-validated (id/version/optional requires/provides). Neue `src/domains/catalog/binding-resolver.ts` aggregiert alle Plugin-Manifests in einen `Catalog` und ruft `resolveCapabilities` pro Entry → mapped `ResolutionBinding[]` → `CatalogLockBinding[]` (capability-asc-sorted für Determinismus). `lockCatalog` jetzt 4-pass: fetch → manifest-peek → resolve → emit; Skill/MCP-Entries bleiben binding-leer (Leaves, ADR-0010). Per-Entry-Resolver-Errors degradieren graceful (`bindings: []` + Warning). NO_MANIFEST stillgeschwiegen (v1-Reality für pre-ADR-0010 Plugins); nur Malformierungen warnen. **+19 Tests** (6 binding-resolver, 8 tarball-manifest-reader, 5 lock-builder), 576/576 grün.
 - [ ] **`--auto-deps`-Flag für catalog install**. Transitive marketplace-resolution. v1 erfordert manuelle Pre-Install der Provider.
 - [ ] **Skill-Pack-Import** als bundled marketplace. Aktuell `github:`-Source als Workaround.
 - [ ] **claude-portable v0.x Auto-Migrate** als CLI-Subcommand statt nur Doc. `claude-os migrate --from-portable E:\claude-portable` läuft die 7 Schritte aus `docs/migration-from-portable.md` automatisch ab. Inkl. robocopy + doctor --migrate-git-metadata + secrets-prompt-Loop.
@@ -415,3 +409,69 @@ v1.0.0 ist GA. Diese Liste sammelt die natürlichen nächsten Schritte für kün
 - `npm test` → 88/88 grün (+21 neue Tests: 13 paths + 8 migrator)
 - `npm run build` → dist/ populated
 - Real Smoke: `node dist/cli/index.js doctor --migrate-git-metadata --json` retourniert `no-git-dir` korrekt (kein vault/ im claude-portable repo), externalGitDir resolved nach `%APPDATA%\claude-os\git-metadata\vault.git`
+
+---
+
+## Session 2026-05-20 — Auftrag aus Downloads/claude-code-auftrag.md
+
+**Quelle:** `C:\Users\reapertakashi\Downloads\claude-code-auftrag.md`
+**Rolle (per Auftrag):** Senior Developer, autonome Entscheidungen.
+**Ziel:** Vier offene PRs verifizieren + ADRs nachziehen + Auto-Migrate + Auto-Deps-Spec + Stop-Hook-Bug fixen + Cowork-OS-Video integrieren + GitHub-Desktop-Fehler beheben.
+
+### Auftrag 1a — PR-Verifikation (Stand 2026-05-20 ~01:08 lokal)
+
+Alle vier offenen PRs basieren auf `main@d46ba58` (current HEAD). CI ist nach Repo-Public-Switch durchgelaufen.
+
+| PR | Branch | Head | Base | CI | Mergeable | State | Notes |
+|---|---|---|---|---|---|---|---|
+| #31 | `chore/repo-cleanup` | `2b27e5e` | `main@d46ba58` | grün (5/5) | MERGEABLE | CLEAN | Räumt 16 paste-artefakt-Files + `--version/`-Dir; ignored `graphify-out/` + `.graphify_step_ast.py`; löst Merge-Konflikt in v1.2-Section. |
+| #32 | `feat/v1.5-plugin-binding-resolution` | `6d86f71` | `main@d46ba58` | grün (5/5 nach Re-Run) | MERGEABLE | CLEAN | Phase 5o (Plugin-Binding-Resolution). +19 Tests. Erster Run zeigte Windows-Flakiness in `update-orchestrator/skills-repo.test.ts:42` + `vault-sync/conflict-policy.test.ts:79` (EPERM auf tmpdir-Cleanup, pre-existing Issue) — Re-Run grün, kein Bezug zu Phase 5o. |
+| #33 | `docs/phase-5o-adr-lessons` | `c117488` | `main@d46ba58` | grün (5/5) | MERGEABLE | CLEAN | ADR-0015 + 2 lessons.md-Einträge (Discriminated-Union-Sentinel; tar v7 onentry flow-mode). |
+| #34 | `docs/adr-0016-mcp-single-server` | `d53fea3` | `main@d46ba58` | grün (5/5) | MERGEABLE | CLEAN | ADR-0016 für v1.4 MCP-Single-Server-Bridge + ADR-0007-Status-Update + Dead-Link-Fix in `docs/mcp-integration.md`. |
+
+**Konflikt-Risiko untereinander:**
+- #31 (.gitignore + todo.md v1.2-Section + 16 Dateilöschungen) vs. #32 (touches `src/domains/catalog/*` + todo.md v1.5+-Section) — **kein Konflikt** (verschiedene todo.md-Bereiche).
+- #32 vs. #33 (`docs/architecture/adr/0015-...md` + `tasks/lessons.md` Append) — **kein Konflikt**.
+- #33 vs. #34 (`docs/architecture/adr/0016-...md` + ADR-0007-Header-Update + `docs/mcp-integration.md`) — **kein Konflikt**.
+- #31 vs. #34 (todo.md v1.2 vs. ADR-Files) — **kein Konflikt**.
+
+**Empfohlene Merge-Reihenfolge:** #31 → #32 → #33 → #34 (cleanup first; Impl vor Docs).
+
+### Auftrag 1b — ADRs nachziehen
+
+Auftrag spezifizierte Nummern 0012/0013 — sind bereits belegt (TypeBox / Pino). Senior-Call: nächste freie Nummern 0017/0018. Pfad gemäß Repo-Konvention `docs/architecture/adr/` (nicht `docs/adr/`).
+
+- [ ] **ADR-0017 — v1.2 Chat-View-MVP** (PR #29): line-buffered `child_process` statt `node-pty`.
+- [ ] **ADR-0018 — v1.3 AppImage-zsync** (PR #21): standalone-zsync, `bundle.appimage.includeUpdater` nicht verwendet.
+
+### Auftrag 1c — Auto-Migrate CLI-Subcommand
+
+- [ ] Eigener Branch `feat/v1.5-auto-migrate` (unabhängig von PR #32).
+- [ ] `claude-os migrate --from-portable <path>` automatisiert 7 Schritte aus `docs/migration-from-portable.md`.
+- [ ] Verlustfrei: unbekannte Felder geloggt, nicht verworfen.
+- [ ] Tests: pro v0.x-Variante, Roundtrip, Idempotenz, kaputte Config (kontrollierter Abbruch), unbekannte Felder.
+- [ ] Risk-Path `**/migrations/**` → Codex-Review nach Impl (Three-Brain-Skill-Mandate).
+
+### Auftrag 1d — `--auto-deps`-Flag (Spec only bis PR #32 mergt)
+
+- [ ] `docs/specs/auto-deps-flag.md`: gewünschtes Verhalten, Edge-Cases, CLI-Signatur, Fehler bei zyklischen Deps, Test-Matrix.
+
+### Auftrag 2 — "Running stop hooks… 3/4" Hänger
+
+- [ ] Investigation: Anthropic-Claude-Code-Harness-internal (nicht patchbar) ODER lokale husky pre-commit?
+- [ ] Fix mit Regression-Test + Stress-Test (≥20 Läufe) wenn lokal.
+- [ ] Vorher/Nachher-Logfile in Review-Sektion.
+
+### Auftrag 3 — Cowork-OS-Video analysieren + integrieren
+
+- [ ] Gemini-Analyse läuft (Job `bzwfdyill`, Output in `three-brain-out/2026-05-20-cowork-os/`).
+- [ ] Integrationsplan in `docs/integration-plan-cowork-os.md` mit Akzeptanzkriterien pro Feature.
+- [ ] Sinnvolle Teile in v1 implementieren, Rest mit Begründung deferred.
+
+### Auftrag 4 — GitHub-Desktop-Commit-Failure-Root-Cause
+
+Screenshot-Befund: 5 staged Files inkl. `.graphify_step_ast.py` + `graphify-out/*` (graph.json ≈ 1.7M Zeilen). Husky-Pre-Commit-Hook gab nur einen PATH-Dump aus statt strukturierter Fehlermeldung → GitHub Desktop zeigt nur den PATH. PR #31 ignored bereits diese Files → erster Trigger weg. Aber Root-Cause tiefer: husky/lint-staged Konfiguration nicht robust gegen Riesendateien.
+
+- [ ] Husky-Hook auf Robustheit prüfen (`.husky/pre-commit` + `.lintstagedrc.cjs`).
+- [ ] `biome check` mit `--no-errors-on-unmatched` + Glob ist OK — Frage ist warum nur PATH ausgegeben wird.
+- [ ] Verifikation: simuliere Commit mit Großdatei in Staging → klare Meldung, kein Hänger.
