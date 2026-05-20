@@ -5,6 +5,18 @@
  */
 
 export {
+  AmbiguousProviderError as AutoDepsAmbiguousProviderError,
+  AutoDepsError,
+  type AutoDepsResolution,
+  CyclicAutoDepsError,
+  type MarketplaceCandidate,
+  MissingProviderError as AutoDepsMissingProviderError,
+  manifestReaderFromMap,
+  type ProviderLookup,
+  type ResolveAutoDepsOpts,
+  resolveAutoDeps,
+} from './auto-deps-resolver.js';
+export {
   type BindingInput,
   type BindingResult,
   resolveBindings,
