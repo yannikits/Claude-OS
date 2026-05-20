@@ -11,10 +11,12 @@
 // Aufruf:  node scripts/check-stop-hooks.mjs
 // Exit-Code: 0 wenn alle Hooks OK sind, 1 wenn mind. ein Risk-Hook gefunden wurde.
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// biome-ignore-all lint/suspicious/noConsole: CLI-Tool — console-Output ist gewollt.
 
 const CLAUDE_DIR = join(homedir(), '.claude');
 
@@ -89,10 +91,16 @@ function classifyCommand(cmd) {
   // cmd.exe-Aufruf?
   const isCmdInvoke = /^\s*cmd\s+\/c\b/i.test(cmd);
   if (isWindows && posixVar && !isCmdInvoke) {
-    return { risk: 'high', reason: 'POSIX-Env-Var in direktem Command — Windows expandiert das nicht' };
+    return {
+      risk: 'high',
+      reason: 'POSIX-Env-Var in direktem Command — Windows expandiert das nicht',
+    };
   }
   if (isWindows && posixVar && isCmdInvoke) {
-    return { risk: 'medium', reason: 'POSIX-Env-Var in cmd /c — cmd.exe expandiert $VAR ebenfalls nicht' };
+    return {
+      risk: 'medium',
+      reason: 'POSIX-Env-Var in cmd /c — cmd.exe expandiert $VAR ebenfalls nicht',
+    };
   }
   // Einfache Echo-Commands sind OK
   if (/^\s*echo\b/.test(cmd)) {
@@ -130,7 +138,8 @@ function main() {
               : '[OK]';
       if (klass.risk === 'high' || klass.risk === 'medium') risks++;
       const tmo = hook.timeout ?? '(default)';
-      const onErr = hook.continueOnError === true ? 'continueOnError=true' : 'continueOnError=false';
+      const onErr =
+        hook.continueOnError === true ? 'continueOnError=true' : 'continueOnError=false';
       console.log(`  ${marker}  timeout=${tmo}  ${onErr}`);
       console.log(`    cmd: ${hook.command}`);
       console.log(`    why: ${klass.reason}`);
