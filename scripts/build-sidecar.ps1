@@ -20,11 +20,29 @@ try {
     } else {
         $rustcVer = & rustc -Vv 2>$null
         if ($LASTEXITCODE -ne 0) {
-            throw "rustc not found; install rustup first (winget install Rustlang.Rustup), or set SIDECAR_TRIPLE env-var"
+            # Rust nicht installiert — Fallback auf platform-based Default.
+            # Sidecar-Build allein braucht Rust nicht, aber tauri:build danach
+            # schon. Wir warnen + machen weiter mit dem haeufigsten Triple
+            # pro Plattform, damit der sidecar-Build standalone laeuft.
+            Write-Host "  WARN: rustc nicht im PATH — fallback auf plattform-Default."
+            Write-Host "         Fuer tauri:build wird Rust trotzdem benoetigt:"
+            Write-Host "         winget install Rustlang.Rustup"
+            if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+                $arch = $env:PROCESSOR_ARCHITECTURE
+                $triple = if ($arch -eq 'ARM64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
+            } elseif ($IsMacOS) {
+                $arch = uname -m
+                $triple = if ($arch -match 'arm64|aarch64') { 'aarch64-apple-darwin' } else { 'x86_64-apple-darwin' }
+            } else {
+                $arch = uname -m
+                $triple = if ($arch -match 'aarch64|arm64') { 'aarch64-unknown-linux-gnu' } else { 'x86_64-unknown-linux-gnu' }
+            }
+            Write-Host "         fallback triple: $triple"
+        } else {
+            $hostLine = $rustcVer | Select-String -Pattern '^host:\s*(.+)$'
+            if (-not $hostLine) { throw "Could not parse host triple from rustc -Vv output" }
+            $triple = $hostLine.Matches.Groups[1].Value.Trim()
         }
-        $hostLine = $rustcVer | Select-String -Pattern '^host:\s*(.+)$'
-        if (-not $hostLine) { throw "Could not parse host triple from rustc -Vv output" }
-        $triple = $hostLine.Matches.Groups[1].Value.Trim()
     }
 
     $nodeMajor = (node --version) -replace '^v(\d+)\..*', '$1'
