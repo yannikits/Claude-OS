@@ -74,13 +74,13 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 ### Architektur (Folge-Iteration nach Cleanup-Sprint)
 
 - **M21** `sidecar/methods.ts` Namespace-Split — 549 LOC → 84 LOC orchestrator + 9 per-Namespace-Module unter `methods/` (catalog/vault/inbox/settings/secrets/chat/schedule/mcp/agent). Plus `methods/_shared.ts` mit `MethodsContext` + `requireString`/`Boolean`-Helpers (ersetzt 14× kopiertes Validierungspattern) + `canonicalizeRoots`/`isUnder` (C2 helpers). Public API unveraendert. 823/826 vitest + 6/6 smoke gruen (PR #78).
+- **M18** `cli/commands/catalog.ts:actAutoDeps` ruft `installFromGithubWithAutoDeps` — Domain-Funktion um `dryRun?: boolean`-Opt erweitert (`--json` mapped darauf). CLI shrunk von ~193 auf ~80 LOC; Codex-Adversarial-Review-Findings #2 (transactional persistence) und #3 (existing-manifests hydration) gelten jetzt fuer CLI- UND RPC-Caller. Exit-Codes 4/5/6/7/9 via `exitCodeForAutoDepsError`-Mapping back-compat preserved. Net -60 LOC (PR #80).
 
 ### Deferred als Follow-ups
 
 - **M3** mcp-Trust-Prompt — braucht GUI-Design-Sprint.
 - **M5** secrets cross-process file-lock — braucht `proper-lockfile`-Dep oder Custom-OS-EXCL-Loop.
 - **M8** RPC-Nonce — braucht koordinierten Tauri-Shell-Pull (`gui/src-tauri/`).
-- **M18** `cli/commands/catalog.ts:actAutoDeps` Refactor zu `installFromGithubWithAutoDeps`-Call.
 
 ### Breaking Changes (User-Migration)
 
