@@ -79,11 +79,12 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 ### Sicherheit (Folge-Iteration nach Cleanup-Sprint)
 
 - **M5** `secrets/encrypted-file-store` cross-process file-lock via `proper-lockfile@2.x` — `set()`/`delete()` gehen jetzt durch `withFileLock(operation)` (realpath:false, 10 retries 25-250ms exponential, 30s stale-timeout). Verhindert silent-overwrite-race wenn CLI und Sidecar parallel `secrets.enc` mutieren. 2 neue concurrency tests verifizieren 10× parallel set + 5×set/5×delete-Mix produce konsistenten Endstand. 825/828 vitest gruen (PR #82).
+- **M3** `mcp-clients` trust-gating — neuer `McpTrustStore` mit on-disk-acknowledged-list (`<dataDir>/mcp-trust.json`). `probeServer({isTrusted, serverKey})` checked VOR spawn — un-acknowledged servers liefern `kind: 'trust-required'` ohne arbitrary-binary-execution. 3 neue RPCs: `mcp.trust.list/acknowledge/revoke`. Sidecar-Entry-Point wired den trust-store in den watcher. GUI-Integration additiv (rendert trust-required + ruft trust-RPCs). 839/842 vitest gruen + 13 neue tests (PR #84).
+- **M8** per-spawn RPC-Nonce-Handshake — Sidecar generiert `randomBytes(16).hex` beim Startup, emittiert `{"type":"sidecar-ready","nonce":"...","pid":N}\n` auf stderr BEFORE Dispatcher-enforcement. `RpcDispatcher.setExpectedNonce()` aktiviert -32001-Reject fuer falsche/fehlende Nonce. Tauri-Supervisor parsed Handshake aus stderr (nested if-let, edition=2021) + attached Nonce an jeden Wire-RPC. `$CLAUDE_OS_RPC_NONCE=disabled` opt-out fuer dev/tests. `invoke()` (in-process) bleibt nonce-frei. Defense-in-depth gegen pipe-MITM + zukuenftigen HTTP-Transport. 845/848 vitest gruen + 6 neue tests; Rust-Compile-Verifikation in CI (cargo lokal nicht verfuegbar) (PR #85).
 
 ### Deferred als Follow-ups
 
-- **M3** mcp-Trust-Prompt — braucht GUI-Design-Sprint.
-- **M8** RPC-Nonce — braucht koordinierten Tauri-Shell-Pull (`gui/src-tauri/`).
+_Alle deferred-items aus dem Code-Review 2026-05-21 sind geshipped._
 
 ### Breaking Changes (User-Migration)
 
