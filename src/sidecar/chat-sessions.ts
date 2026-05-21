@@ -62,10 +62,28 @@ export type ChatNotificationEmitter = (method: string, params: unknown) => void;
 
 export class ChatSessions {
   private readonly sessions = new Map<string, Session>();
+  /**
+   * v1.x phase e: deprecation-warning soll nur einmal pro Sidecar-
+   * Lifetime erscheinen — wir haben keinen pino-Handle hier (das wuerde
+   * eine cyclic Dependency mit logger.ts ergeben). Stattdessen
+   * single-shot Stderr-write, das durch den Tauri-Supervisor als
+   * sidecar://stderr Tauri-Event re-emittiert wird.
+   */
+  private deprecationWarningEmitted = false;
 
   constructor(private readonly emit: ChatNotificationEmitter) {}
 
   spawn(args: readonly string[]): { sessionId: string } {
+    // v1.x phase e: chat.* ist Legacy-Pfad seit v1.x.0 — die
+    // PTY-basierten pty.* RPCs sind der vollwertige Ersatz. ADR-0021
+    // dokumentiert die coexist-policy. Entfernung frueheste v1.x.+1.
+    if (!this.deprecationWarningEmitted) {
+      this.deprecationWarningEmitted = true;
+      process.stderr.write(
+        '[deprecated] chat.* RPCs sind line-buffered und werden in v1.x.+1 entfernt — bitte auf pty.* (Full-TTY) migrieren. Siehe ADR-0021.\n',
+      );
+    }
+
     if (this.sessions.size >= MAX_SESSIONS) {
       throw new Error(
         `chat.spawn: too many active sessions (${this.sessions.size}/${MAX_SESSIONS}); kill some first`,
