@@ -44,6 +44,12 @@ struct RpcRequest<'a> {
     id: u64,
     method: &'a str,
     params: Value,
+    // M8 (2026-05-21 code-review): per-spawn nonce, set on the first
+    // sidecar-ready handshake from stderr. None until handshake; that
+    // path is back-compat for the `ping`/`shutdown` calls before the
+    // sidecar has fully booted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nonce: Option<String>,
 }
 
 #[derive(Debug)]
@@ -69,6 +75,10 @@ pub struct SidecarRpc {
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<RpcEnvelope>>>,
     child: Mutex<Option<CommandChild>>,
+    /// M8 (2026-05-21 code-review): per-spawn nonce extracted from
+    /// sidecar-ready handshake on stderr. Attached to every outgoing
+    /// RpcRequest after handshake.
+    nonce: Mutex<Option<String>>,
 }
 
 impl SidecarRpc {
@@ -77,7 +87,14 @@ impl SidecarRpc {
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             child: Mutex::new(Some(child)),
+            nonce: Mutex::new(None),
         })
+    }
+
+    /// M8: called by the stderr router when it parses the
+    /// `{"type":"sidecar-ready","nonce":"..."}` handshake line. Idempotent.
+    async fn set_nonce(&self, nonce: String) {
+        *self.nonce.lock().await = Some(nonce);
     }
 
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
@@ -85,7 +102,8 @@ impl SidecarRpc {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
 
-        let req = RpcRequest { jsonrpc: "2.0", id, method, params };
+        let nonce = self.nonce.lock().await.clone();
+        let req = RpcRequest { jsonrpc: "2.0", id, method, params, nonce };
         let mut line = serde_json::to_string(&req).map_err(|e| RpcError::Io(e.to_string()))?;
         line.push('\n');
 
@@ -187,6 +205,35 @@ async fn spawn_and_run(app: &AppHandle, state: &Arc<SupervisorState>) -> RpcErro
                 }
                 CommandEvent::Stderr(bytes) => {
                     let line = String::from_utf8_lossy(&bytes).trim().to_string();
+                    // M8 (2026-05-21 code-review): parse sidecar-ready
+                    // handshake. The line is JSON with shape:
+                    // {"type":"sidecar-ready","nonce":"<hex>","pid":N}
+                    // The handshake is always emitted BEFORE any other
+                    // stderr line by the sidecar — we don't need to
+                    // gate further calls beyond setting the nonce.
+                    // (rust 2021 / 1.77: let-chains nicht stabilisiert —
+                    // wir nesten if-let statt && let zu chainen.)
+                    let handled_handshake = if let Ok(json) = serde_json::from_str::<Value>(&line) {
+                        if json.get("type").and_then(Value::as_str) == Some("sidecar-ready") {
+                            if let Some(nonce) = json.get("nonce").and_then(Value::as_str) {
+                                rpc_for_router.set_nonce(nonce.to_string()).await;
+                                eprintln!("[supervisor] sidecar-ready handshake received");
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+                    if handled_handshake {
+                        // Don't forward the handshake to the renderer
+                        // as a regular stderr-event — it's an internal
+                        // protocol detail.
+                        continue;
+                    }
                     eprintln!("[sidecar.stderr] {line}");
                     let _ = app_for_router.emit(SIDECAR_STDERR_EVENT, json!({ "line": line }));
                 }

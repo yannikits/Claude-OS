@@ -122,4 +122,66 @@ describe('runRpcServer', () => {
     await runRpcServer({ dispatcher: d, input, output });
     expect(chunks).toEqual([]);
   });
+
+  describe('M8: nonce verification', () => {
+    it('rejects requests OHNE nonce wenn setExpectedNonce gesetzt', async () => {
+      const d = new RpcDispatcher();
+      d.register('ping', () => ({ pong: true }));
+      d.setExpectedNonce('expected-nonce-hex');
+      const r = await d.handle(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }));
+      expect(r).toMatchObject({
+        jsonrpc: '2.0',
+        id: 1,
+        error: { code: -32001, message: 'Invalid or missing nonce' },
+      });
+    });
+
+    it('rejects requests mit FALSCHEM nonce', async () => {
+      const d = new RpcDispatcher();
+      d.register('ping', () => ({ pong: true }));
+      d.setExpectedNonce('expected-nonce-hex');
+      const r = await d.handle(
+        JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping', nonce: 'wrong-nonce' }),
+      );
+      expect(r).toMatchObject({ error: { code: -32001 } });
+    });
+
+    it('akzeptiert requests mit korrektem nonce', async () => {
+      const d = new RpcDispatcher();
+      d.register('ping', () => ({ pong: true }));
+      d.setExpectedNonce('expected-nonce-hex');
+      const r = await d.handle(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'ping',
+          nonce: 'expected-nonce-hex',
+        }),
+      );
+      expect(r).toMatchObject({ jsonrpc: '2.0', id: 1, result: { pong: true } });
+    });
+
+    it('back-compat: ohne setExpectedNonce werden alle requests akzeptiert', async () => {
+      const d = new RpcDispatcher();
+      d.register('ping', () => ({ pong: true }));
+      const r = await d.handle(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }));
+      expect(r).toMatchObject({ result: { pong: true } });
+    });
+
+    it('setExpectedNonce mit empty string wirft', () => {
+      const d = new RpcDispatcher();
+      expect(() => d.setExpectedNonce('')).toThrow(/non-empty/);
+    });
+
+    it('invoke() ignoriert nonce (in-process direct-call)', async () => {
+      const d = new RpcDispatcher();
+      d.register('ping', () => ({ pong: true }));
+      d.setExpectedNonce('expected-nonce-hex');
+      // invoke() ist der in-process-Pfad (MCP-Server, Tests) und braucht
+      // keinen handshake. Wenn das hier throwt, hat M21 sidecar-test-
+      // surface gebrochen.
+      const result = await d.invoke('ping', {});
+      expect(result).toMatchObject({ pong: true });
+    });
+  });
 });
