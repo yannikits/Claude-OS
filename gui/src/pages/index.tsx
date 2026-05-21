@@ -1,14 +1,13 @@
+import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import '@xterm/xterm/css/xterm.css';
 import {
   type AgentListResult,
   addScheduleEntry,
   type CatalogInstallAutoDepsResult,
   type CatalogListResult,
-  type ChatExitPayload,
-  type ChatOutputPayload,
-  chatKill,
-  chatSpawn,
-  chatWrite,
   deleteSecret,
   getMcpClientsStatus,
   getSettings,
@@ -19,11 +18,17 @@ import {
   listSchedules,
   listSecrets,
   type McpClientsStatusResult,
-  onChatExit,
-  onChatOutput,
   onMcpClientEvent,
+  onPtyData,
+  onPtyExit,
   onSchedulerEvent,
+  type PtyDataPayload,
+  type PtyExitPayload,
   ping,
+  ptyKill,
+  ptyResize,
+  ptySpawn,
+  ptyWrite,
   removeCatalogEntry,
   removeScheduleEntry,
   reprobeMcpClient,
@@ -460,69 +465,108 @@ export function AgentRunsPage() {
   );
 }
 
-interface ChatLogEntry {
-  readonly id: number;
-  readonly stream: 'stdout' | 'stderr' | 'meta';
-  readonly text: string;
-}
-
-const MAX_LOG_LINES = 500;
-
 export function ChatPage() {
   const sidecarOk = useSidecarOk();
   const [argsText, setArgsText] = useState('--help');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [log, setLog] = useState<ChatLogEntry[]>([]);
-  const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const idCounter = useRef(0);
-  const logRef = useRef<HTMLDivElement | null>(null);
-  // Ref-basierter Event-Filter: useEffect mountet die Listener nur 1x.
-  // Bei jedem setSessionId/setRunning wird die ref aktualisiert, sodass die
-  // Listener-Closure auf den LATEST Wert prueft — fixed eine Race wo
-  // chat.exit zwischen spawn-resolve und useEffect-rerun verloren ging
-  // (PR #55, getestet im Screenshot vom 2026-05-20).
+
+  // xterm.js terminal state — lives in refs so we can re-attach across
+  // session lifecycles without remounting the host div.
+  const termHostRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const termWriteHandlerRef = useRef<{ dispose: () => void } | null>(null);
+
+  // Race-Fix carry-over aus v1.2 (PR #55, ChatPage): wir muessen die
+  // Tauri-listen()-Promises kennen damit start() vor dem spawn awaitet,
+  // sonst koennen pty.exit-Events fuer sehr kurze Spawns verloren gehen.
   const activeSessionIdRef = useRef<string | null>(null);
   const listenersReadyRef = useRef<Promise<unknown> | null>(null);
-  // Codex-Review MEDIUM finding #4: synchrone Spawn-Guard.
-  // `running`-state-check ist async-update — bei doppeltem Klick koennen
-  // 2 start()-Calls beide den check passieren bevor setRunning(true) feuert.
-  // Ref ist synchron → blockt sofort, kein await-Loophole.
+  // Synchrone Spawn-Guard — verhindert Double-Spawn bei Doppelklick
+  // (Codex-Review MEDIUM #4 carry-over).
   const startInFlightRef = useRef(false);
-  const [starting, setStarting] = useState(false);
 
-  const append = useCallback((stream: ChatLogEntry['stream'], text: string) => {
-    idCounter.current += 1;
-    const nextId = idCounter.current;
-    setLog((prev) => {
-      const next = [...prev, { id: nextId, stream, text }];
-      return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
+  // Mount xterm.js terminal once. We don't tear it down between sessions
+  // (the user can run claude --help, see output, then claude /login in the
+  // same terminal — like a real shell experience). The session-specific
+  // bindings (onData) are wired/unwired in start()/onExit().
+  useEffect(() => {
+    if (termHostRef.current === null) return;
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
+      fontSize: 13,
+      theme: {
+        background: '#161618',
+        foreground: '#e5e5e5',
+        cursor: '#8aa8ff',
+      },
+      scrollback: 5000,
+      convertEol: true,
     });
+    const fit = new FitAddon();
+    const links = new WebLinksAddon();
+    term.loadAddon(fit);
+    term.loadAddon(links);
+    term.open(termHostRef.current);
+    fit.fit();
+    termRef.current = term;
+    fitRef.current = fit;
+
+    // ResizeObserver: when the container width/height changes, refit and
+    // forward new dimensions to any active PTY session.
+    const ro = new ResizeObserver(() => {
+      try {
+        fit.fit();
+      } catch {
+        // happens during teardown — ignore
+      }
+      const id = activeSessionIdRef.current;
+      if (id !== null) {
+        void ptyResize(id, term.cols, term.rows).catch(() => {
+          // session already dead — exit handler will fire
+        });
+      }
+    });
+    ro.observe(termHostRef.current);
+
+    return () => {
+      ro.disconnect();
+      termWriteHandlerRef.current?.dispose();
+      termWriteHandlerRef.current = null;
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+    };
   }, []);
 
-  // Listener werden NUR 1x registriert. Filtering passiert ueber die Ref —
-  // die jedes Mal wenn setSessionId fired automatisch durch das andere
-  // useEffect unten aktualisiert wird.
-  //
-  // Wichtig: Tauri's `listen()` ist async und braucht eine Iteration bis
-  // der Listener wirklich beim Event-Bus registriert ist. listenersReadyRef
-  // signalisiert wenn beide listen()-Promises resolved sind, damit start()
-  // davor warten kann — sonst koennten chat.exit-Events fuer sehr kurze
-  // Spawns (`claude --help`) verloren gehen.
+  // Subscribe to pty.data / pty.exit events once. Filter by ref so the
+  // listener closure always sees the LATEST session id (avoids re-mounting
+  // and the race the v1.2 ChatPage had).
   useEffect(() => {
     const unsubs: Array<() => void> = [];
     let cancelled = false;
     const ready = Promise.all([
-      onChatOutput((p: ChatOutputPayload) => {
+      onPtyData((p: PtyDataPayload) => {
         if (p.sessionId !== activeSessionIdRef.current) return;
-        append(p.stream, p.chunk);
+        termRef.current?.write(p.data);
       }),
-      onChatExit((p: ChatExitPayload) => {
+      onPtyExit((p: PtyExitPayload) => {
         if (p.sessionId !== activeSessionIdRef.current) return;
-        append('meta', `[exited code=${p.exitCode ?? 'null'} signal=${p.signal ?? 'null'}]\n`);
+        // Visual marker in the terminal stream.
+        termRef.current?.write(
+          `\r\n\x1b[33m[exited code=${p.exitCode ?? 'null'} signal=${p.signal ?? 'null'}]\x1b[0m\r\n`,
+        );
+        // Tear down the onData -> ptyWrite binding so any stray keystrokes
+        // don't try to write into a dead session.
+        termWriteHandlerRef.current?.dispose();
+        termWriteHandlerRef.current = null;
         setRunning(false);
         setSessionId(null);
+        activeSessionIdRef.current = null;
       }),
     ]).then((subs) => {
       if (cancelled) {
@@ -536,118 +580,97 @@ export function ChatPage() {
       cancelled = true;
       for (const u of unsubs) u();
     };
-  }, [append]);
+  }, []);
 
-  // Sync the ref jedes Mal wenn sessionId ändert
-  useEffect(() => {
-    activeSessionIdRef.current = sessionId;
-  }, [sessionId]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `log` ist intentional — auto-scroll-on-new-log-line (gleiches Pattern wie stderr-drawer).
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [log]);
-
-  const start = async () => {
-    if (running) return;
-    // SYNCHRONE Guard via Ref — verhindert Double-Spawn bei schnellen
-    // Doppelklicks (Codex-Review #4). setRunning(true) ist async und
-    // wuerde erst beim naechsten render greifen.
-    if (startInFlightRef.current) return;
+  const start = useCallback(async () => {
+    if (running || startInFlightRef.current) return;
     startInFlightRef.current = true;
     setStarting(true);
     setError(null);
+
     const args = argsText.trim().length === 0 ? [] : argsText.trim().split(/\s+/);
-    setLog([]);
-    idCounter.current = 0;
+    const term = termRef.current;
+    if (term === null) {
+      startInFlightRef.current = false;
+      setStarting(false);
+      setError('Terminal noch nicht bereit');
+      return;
+    }
+    // Clear screen + scroll buffer so each spawn starts fresh. xterm's
+    // \x1bc is the full-reset ESC sequence.
+    term.reset();
+
     try {
-      // Warten bis die Tauri-listen()-Promises resolved sind — sonst koennten
-      // chat.exit-Events fuer sehr kurze Spawns wie `claude --help` verloren
-      // gehen weil der Listener noch nicht beim event-bus registriert ist.
       if (listenersReadyRef.current !== null) {
         await listenersReadyRef.current;
       }
-      const result = await chatSpawn(args);
-      // Ref SOFORT setzen damit ein eintreffender chat.exit/output Event
-      // vor dem naechsten render bereits den richtigen Filter sieht.
-      activeSessionIdRef.current = result.sessionId;
-      setSessionId(result.sessionId);
+      const { sessionId: newId } = await ptySpawn(args, {
+        cols: term.cols,
+        rows: term.rows,
+      });
+      activeSessionIdRef.current = newId;
+      setSessionId(newId);
       setRunning(true);
-      append(
-        'meta',
-        `[spawned session ${result.sessionId.slice(0, 8)}… args=${JSON.stringify(args)}]\n`,
-      );
+      // Wire xterm keystrokes -> pty.write. Keep the dispose handle so we
+      // can clean it up on exit.
+      termWriteHandlerRef.current?.dispose();
+      termWriteHandlerRef.current = term.onData((data) => {
+        // Fire-and-forget; if the session died mid-write, the catch is a
+        // no-op (the exit handler already cleaned up).
+        void ptyWrite(newId, data).catch(() => {});
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       startInFlightRef.current = false;
       setStarting(false);
     }
-  };
+  }, [argsText, running]);
 
-  const send = async () => {
-    if (sessionId === null) return;
-    const payload = `${input}\n`;
-    try {
-      await chatWrite(sessionId, payload);
-      append('meta', `> ${input}\n`);
-      setInput('');
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
-      // Wenn der Sidecar die Session nicht mehr kennt (z. B. weil sie
-      // gerade exited ist und das Event bei uns noch nicht angekommen
-      // ist), tote sessionId clearen.
-      if (/unknown sessionId/i.test(msg)) {
-        setSessionId(null);
-        setRunning(false);
-        append('meta', '[session bereits beendet — sessionId geclearet]\n');
-      }
-    }
-  };
-
-  const stop = async () => {
+  const stop = useCallback(async () => {
     if (sessionId === null) return;
     try {
-      await chatKill(sessionId);
+      await ptyKill(sessionId);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
       if (/unknown sessionId/i.test(msg)) {
         setSessionId(null);
         setRunning(false);
+        activeSessionIdRef.current = null;
       }
     }
-  };
+  }, [sessionId]);
 
   /**
-   * Reset-Button: clearet LOKAL den GUI-State ohne RPC. Escape-Hatch falls die
-   * Sidecar-Notification (chat.exit) verloren ging und die UI im running=true
-   * haengt. Pragmatischer Workaround fuer Race-Conditions in der Event-
-   * Lieferung.
+   * Reset-Button: clearet LOKAL den GUI-State + Terminal-Screen ohne RPC.
+   * Escape-Hatch falls eine Sidecar-Notification verloren ging und die UI
+   * im running=true haengt. Carry-over aus v1.2 ChatPage.
    */
-  const reset = () => {
+  const reset = useCallback(() => {
+    termWriteHandlerRef.current?.dispose();
+    termWriteHandlerRef.current = null;
     activeSessionIdRef.current = null;
     setSessionId(null);
     setRunning(false);
     setError(null);
-    setInput('');
-    append('meta', '[lokal: state geclearet via Reset]\n');
-  };
+    termRef.current?.reset();
+    termRef.current?.writeln('\x1b[2m[lokal: state geclearet via Reset]\x1b[0m');
+  }, []);
 
   return (
     <section className="page">
       <h1>Chat</h1>
       <p className="muted">
-        Line-buffered claude-binary streaming. MVP — keine PTY, daher kein interaktiver
-        Passwort-Prompt-Support. Für volle TTY-Features später node-pty + xterm.js (v1.x).
+        Vollwertiges TTY via node-pty + xterm.js. Interaktive Prompts (Login, Passwort, readline)
+        funktionieren echt. Window-Resize wird auto-an die PTY-Session propagiert.
       </p>
       {error && <p className="banner banner-error">{error}</p>}
       <div className="chat-controls">
         <input
           type="text"
           className="chat-args"
-          placeholder="claude args (z.B. --help)"
+          placeholder="claude args (z.B. --help oder /login)"
           value={argsText}
           onChange={(e) => setArgsText(e.target.value)}
           disabled={running}
@@ -669,42 +692,12 @@ export function ChatPage() {
         <button
           type="button"
           onClick={reset}
-          title="Lokal: GUI-State clearen ohne RPC (Escape-Hatch wenn die UI haengt)"
+          title="Lokal: GUI-State + Terminal clearen ohne RPC (Escape-Hatch wenn die UI haengt)"
         >
           Reset
         </button>
       </div>
-      <div className="chat-log" ref={logRef} data-testid="chat-log">
-        {log.length === 0 ? (
-          <p className="muted">Noch keine Ausgabe. Klick "Spawn" zum Starten.</p>
-        ) : (
-          log.map((entry) => (
-            <pre key={entry.id} className={`chat-line chat-line-${entry.stream}`}>
-              {entry.text}
-            </pre>
-          ))
-        )}
-      </div>
-      {running && (
-        <div className="chat-input-row">
-          <input
-            type="text"
-            className="chat-input"
-            placeholder="Eingabe zum stdin (Enter senden)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-          />
-          <button type="button" className="btn-primary" onClick={send}>
-            Senden
-          </button>
-        </div>
-      )}
+      <div className="terminal-host" ref={termHostRef} data-testid="terminal-host" />
     </section>
   );
 }

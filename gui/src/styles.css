@@ -405,7 +405,7 @@ code {
   color: var(--text);
 }
 
-/* ---------- Chat page (v1.2 MVP) ---------- */
+/* ---------- Chat page (v1.x full-TTY via xterm.js) ---------- */
 
 .chat-controls {
   display: flex;
@@ -444,54 +444,21 @@ code {
   cursor: not-allowed;
 }
 
-.chat-log {
-  background: var(--bg);
+/* xterm.js host: filled box matching panel surface; xterm-internal styles
+   (loaded via @xterm/xterm/css/xterm.css) handle the cell-grid + scrollbar. */
+.terminal-host {
+  background: #161618;
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  max-height: 50vh;
-  overflow-y: auto;
+  padding: 8px;
+  height: calc(100vh - 280px);
+  min-height: 240px;
 }
 
-.chat-line {
-  margin: 0;
-  padding: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: inherit;
-}
-
-.chat-line-stdout {
-  color: var(--text);
-}
-
-.chat-line-stderr {
-  color: var(--danger);
-}
-
-.chat-line-meta {
-  color: var(--muted);
-  font-style: italic;
-}
-
-.chat-input-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.chat-input {
-  flex: 1;
-  padding: 6px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  font-size: 13px;
+.terminal-host .xterm,
+.terminal-host .xterm-viewport,
+.terminal-host .xterm-screen {
+  height: 100%;
 }
 
 /* Schedule-Event-Tags (Phase 3 GUI) */

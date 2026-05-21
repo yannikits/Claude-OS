@@ -301,7 +301,64 @@ export async function onOutboxChanged(
   return listen<WatcherChangeEvent>(OUTBOX_CHANGED_EVENT, (e) => handler(e.payload));
 }
 
-// ---------- chat.* (v1.2 MVP) ----------
+// ---------- pty.* (v1.x full-TTY) ----------
+
+export const PTY_DATA_EVENT = 'pty.data';
+export const PTY_EXIT_EVENT = 'pty.exit';
+
+export interface PtySpawnResult {
+  sessionId: string;
+}
+
+export interface PtyDataPayload {
+  sessionId: string;
+  /** Raw PTY-output: stdout+stderr merged, ANSI-Sequences inkl. */
+  data: string;
+}
+
+export interface PtyExitPayload {
+  sessionId: string;
+  exitCode: number | null;
+  signal: string | null;
+}
+
+export interface PtySpawnOpts {
+  cols?: number;
+  rows?: number;
+}
+
+export async function ptySpawn(
+  args: readonly string[],
+  opts: PtySpawnOpts = {},
+): Promise<PtySpawnResult> {
+  return rpcCall<PtySpawnResult>('pty.spawn', { args, ...opts });
+}
+
+export async function ptyWrite(sessionId: string, input: string): Promise<{ ok: true }> {
+  return rpcCall<{ ok: true }>('pty.write', { sessionId, input });
+}
+
+export async function ptyResize(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<{ ok: true }> {
+  return rpcCall<{ ok: true }>('pty.resize', { sessionId, cols, rows });
+}
+
+export async function ptyKill(sessionId: string): Promise<{ ok: true }> {
+  return rpcCall<{ ok: true }>('pty.kill', { sessionId });
+}
+
+export async function onPtyData(handler: (p: PtyDataPayload) => void): Promise<UnlistenFn> {
+  return listen<PtyDataPayload>(PTY_DATA_EVENT, (e) => handler(e.payload));
+}
+
+export async function onPtyExit(handler: (p: PtyExitPayload) => void): Promise<UnlistenFn> {
+  return listen<PtyExitPayload>(PTY_EXIT_EVENT, (e) => handler(e.payload));
+}
+
+// ---------- chat.* (v1.2 MVP — kept for back-compat; deprecated in v1.x) ----------
 
 export const CHAT_OUTPUT_EVENT = 'chat.output';
 export const CHAT_EXIT_EVENT = 'chat.exit';
