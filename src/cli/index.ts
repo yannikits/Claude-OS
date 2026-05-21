@@ -18,14 +18,36 @@
  *
  * @module @cli/index
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
+
+/**
+ * M40 (2026-05-21 code-review): version aus package.json lesen statt
+ * hardcoden. Vorher: `'0.1.0-alpha.1'` driftete von `package.json:1.5.3`.
+ * Geht via import.meta.url-Aufloesung → relativ zum kompilierten
+ * `dist/cli/index.js` ist package.json zwei Levels rauf.
+ */
+function resolveVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '../../package.json'), 'utf8')) as {
+      version?: unknown;
+    };
+    if (typeof pkg.version === 'string' && pkg.version.length > 0) return pkg.version;
+  } catch {
+    /* fall through to unknown */
+  }
+  return 'unknown';
+}
 
 const program = new Command();
 
 program
   .name('claude-os')
   .description('Claude Develop Environment OS — Tauri GUI + Node CLI + cloud-mount vault sync')
-  .version('0.1.0-alpha.1')
+  .version(resolveVersion())
   .option('--root <path>', 'Override claude-os root path (default: $CLAUDE_OS_ROOT or repo-detect)')
   .option('--json', 'Output as JSON (for machine consumption)')
   .option('-v, --verbose', 'Verbose logging');
