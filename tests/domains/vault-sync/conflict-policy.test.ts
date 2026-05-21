@@ -141,4 +141,113 @@ describe('applyConflictResolution', () => {
     const bTip = (await gitB.raw(['rev-parse', 'HEAD'])).trim();
     expect(bareTip).toBe(bTip);
   });
+
+  describe('M35: error-branch coverage', () => {
+    /**
+     * Fake GitService that delegates `raw()` calls to a programmable
+     * dispatcher. The dispatcher lets each test inject failures for
+     * specific git-subcommands (z. B. `fetch` rejects, `branch`
+     * rejects, `reset` rejects). Other methods (clone, push, etc.)
+     * werden auf den echten gitB delegiert wenn nicht overriden.
+     */
+    function makeFakeGit(onRaw: (args: readonly string[]) => Promise<string> | string): GitService {
+      // GitService hat keine offizielle Factory fuer Fakes; das echte
+      // Klasse-Pattern ist class-based. Wir nutzen Object.create um eine
+      // partielle Instanz zu bauen die nur `raw` overrided — andere
+      // Methoden werden im Test nicht gerufen.
+      const fake = Object.create(GitService.prototype) as GitService;
+      Object.defineProperty(fake, 'raw', {
+        value: async (args: readonly string[]) => onRaw(args),
+        writable: true,
+      });
+      return fake;
+    }
+
+    it('prefer-local: fetch-fail → state=error mit mode=prefer-local + raw-error preserved', async () => {
+      const fake = makeFakeGit((args) => {
+        if (args[0] === 'fetch') throw new Error('fatal: unable to connect to origin');
+        throw new Error(`unexpected raw call: ${args.join(' ')}`);
+      });
+      const result = await applyConflictResolution({
+        mode: 'prefer-local',
+        git: fake,
+        branch: 'main',
+      });
+      expect(result.state).toBe('error');
+      expect(result.mode).toBe('prefer-local');
+      expect(result.message).toMatch(/fetch from origin failed before force-push/);
+      expect(result.error).toMatch(/unable to connect to origin/);
+    });
+
+    it('prefer-local: force-push-fail nach erfolgreichem fetch → state=error', async () => {
+      const fake = makeFakeGit((args) => {
+        if (args[0] === 'fetch') return '';
+        if (args[0] === 'push') throw new Error('error: stale info (lease check failed)');
+        throw new Error(`unexpected raw call: ${args.join(' ')}`);
+      });
+      const result = await applyConflictResolution({
+        mode: 'prefer-local',
+        git: fake,
+        branch: 'main',
+      });
+      expect(result.state).toBe('error');
+      expect(result.mode).toBe('prefer-local');
+      expect(result.message).toMatch(/force-with-lease push refused/);
+      expect(result.error).toMatch(/lease check failed/);
+    });
+
+    it('prefer-remote: backup-branch-create-fail → state=error mit kein backup leaked', async () => {
+      const fake = makeFakeGit((args) => {
+        if (args[0] === 'branch') throw new Error('fatal: failed to create branch');
+        throw new Error(`unexpected raw call: ${args.join(' ')}`);
+      });
+      const result = await applyConflictResolution({
+        mode: 'prefer-remote',
+        git: fake,
+        branch: 'main',
+      });
+      expect(result.state).toBe('error');
+      expect(result.mode).toBe('prefer-remote');
+      expect(result.message).toMatch(/failed to create backup branch/);
+      // backup-branch ist NICHT im result, weil die Erstellung scheiterte
+      expect(result.backupBranch).toBeUndefined();
+    });
+
+    it('prefer-remote: reset-fail nach backup-create und fetch → state=error mit backupBranch populated', async () => {
+      const fake = makeFakeGit((args) => {
+        if (args[0] === 'branch') return '';
+        if (args[0] === 'fetch') return '';
+        if (args[0] === 'reset') throw new Error('fatal: bad revision');
+        throw new Error(`unexpected raw call: ${args.join(' ')}`);
+      });
+      const result = await applyConflictResolution({
+        mode: 'prefer-remote',
+        git: fake,
+        branch: 'main',
+      });
+      expect(result.state).toBe('error');
+      expect(result.mode).toBe('prefer-remote');
+      expect(result.message).toMatch(/reset to origin\/main failed/);
+      expect(result.error).toMatch(/bad revision/);
+      // backupBranch sollte populated sein, weil das branch-Step erfolgreich war
+      expect(result.backupBranch).toMatch(/^claude-os\/backup\/main\//);
+    });
+
+    it('prefer-remote: fetch-fail nach backup-create → state=error mit backupBranch preserved', async () => {
+      const fake = makeFakeGit((args) => {
+        if (args[0] === 'branch') return '';
+        if (args[0] === 'fetch') throw new Error('fatal: could not read from remote');
+        throw new Error(`unexpected raw call: ${args.join(' ')}`);
+      });
+      const result = await applyConflictResolution({
+        mode: 'prefer-remote',
+        git: fake,
+        branch: 'main',
+      });
+      expect(result.state).toBe('error');
+      expect(result.mode).toBe('prefer-remote');
+      expect(result.message).toMatch(/fetch from origin failed; local commits preserved on/);
+      expect(result.backupBranch).toMatch(/^claude-os\/backup\/main\//);
+    });
+  });
 });
