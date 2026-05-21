@@ -53,6 +53,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
+import { lock as plLock } from 'proper-lockfile';
 import type { SecretMetadata, SecretStore } from './types.js';
 import { SecretsError, SecretsLockedError } from './types.js';
 
@@ -172,6 +173,33 @@ export class EncryptedFileStore implements SecretStore {
     renameSync(tmp, this.filePath);
   }
 
+  /**
+   * M5 (2026-05-21 code-review): cross-process lock fuer mutations.
+   *
+   * Vorher konnten zwei concurrent `set()`-Calls (z. B. CLI + Sidecar
+   * gleichzeitig oder zwei CLI-Invocations) ein read-modify-write race
+   * triggern → letzter Writer ueberschreibt den anderen silent. Mit
+   * `proper-lockfile.lock(filePath, ...)` wird die Mutation serialisiert.
+   *
+   * `realpath: false` weil das file vor dem ersten set NOCH NICHT
+   * existiert; proper-lockfile braucht aber nur dirname(filePath) als
+   * existing dir fuer das `.lock`-Sentinel-Verzeichnis. retries.factor
+   * + minTimeout: schnell-respondende Race-Resolution unter Last.
+   */
+  private async withFileLock<T>(operation: () => T | Promise<T>): Promise<T> {
+    mkdirSync(dirname(this.filePath), { recursive: true });
+    const release = await plLock(this.filePath, {
+      realpath: false,
+      retries: { retries: 10, factor: 1.4, minTimeout: 25, maxTimeout: 250 },
+      stale: 30_000,
+    });
+    try {
+      return await operation();
+    } finally {
+      await release();
+    }
+  }
+
   get(key: string): Promise<string | null> {
     try {
       const entries = this.readEntries();
@@ -186,39 +214,38 @@ export class EncryptedFileStore implements SecretStore {
     }
   }
 
-  set(key: string, value: string): Promise<void> {
+  async set(key: string, value: string): Promise<void> {
     try {
-      const entries = this.readEntries();
-      entries[key] = value;
-      this.writeEntries(entries);
-      return Promise.resolve();
+      await this.withFileLock(() => {
+        const entries = this.readEntries();
+        entries[key] = value;
+        this.writeEntries(entries);
+      });
     } catch (err) {
-      if (err instanceof SecretsError) return Promise.reject(err);
-      return Promise.reject(
-        new SecretsError(
-          `encrypted-file set failed for "${key}": ${err instanceof Error ? err.message : String(err)}`,
-        ),
+      if (err instanceof SecretsError) throw err;
+      throw new SecretsError(
+        `encrypted-file set failed for "${key}": ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
-  delete(key: string): Promise<boolean> {
+  async delete(key: string): Promise<boolean> {
     try {
-      const entries = this.readEntries();
-      if (!(key in entries)) return Promise.resolve(false);
-      delete entries[key];
-      if (Object.keys(entries).length === 0) {
-        if (existsSync(this.filePath)) unlinkSync(this.filePath);
-      } else {
-        this.writeEntries(entries);
-      }
-      return Promise.resolve(true);
+      return await this.withFileLock(() => {
+        const entries = this.readEntries();
+        if (!(key in entries)) return false;
+        delete entries[key];
+        if (Object.keys(entries).length === 0) {
+          if (existsSync(this.filePath)) unlinkSync(this.filePath);
+        } else {
+          this.writeEntries(entries);
+        }
+        return true;
+      });
     } catch (err) {
-      if (err instanceof SecretsError) return Promise.reject(err);
-      return Promise.reject(
-        new SecretsError(
-          `encrypted-file delete failed for "${key}": ${err instanceof Error ? err.message : String(err)}`,
-        ),
+      if (err instanceof SecretsError) throw err;
+      throw new SecretsError(
+        `encrypted-file delete failed for "${key}": ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

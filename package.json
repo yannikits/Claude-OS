@@ -34,12 +34,14 @@
     "diff": "^9.0.0",
     "pino": "^10.3.1",
     "pino-roll": "^4.0.0",
+    "proper-lockfile": "^4.1.2",
     "simple-git": "^3.36.0",
     "tar": "^7.5.15"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@types/node": "^25.8.0",
+    "@types/proper-lockfile": "^4.1.4",
     "@vitest/coverage-v8": "^4.1.6",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.4",

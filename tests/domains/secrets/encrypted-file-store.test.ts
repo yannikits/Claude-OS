@@ -129,4 +129,37 @@ describe('EncryptedFileStore', () => {
       expect(msg).not.toMatch(/unable to authenticate/);
     }
   });
+
+  it('M5: concurrent set() calls serialisieren — alle entries landen ohne torn writes', async () => {
+    // Reproducer: vor dem Lock wuerden zwei concurrent `set(k1)` + `set(k2)`
+    // beide den gleichen `readEntries`-snapshot lesen und einander
+    // ueberschreiben. Mit proper-lockfile serialisiert das.
+    const store = makeStore();
+    const N = 10;
+    await Promise.all(Array.from({ length: N }, (_, i) => store.set(`key-${i}`, `value-${i}`)));
+    const items = await store.list();
+    expect(items.length).toBe(N);
+    const keys = items.map((i) => i.key).sort();
+    expect(keys).toEqual(Array.from({ length: N }, (_, i) => `key-${i}`).sort());
+    // Verify every value is actually retrievable + correct
+    for (let i = 0; i < N; i++) {
+      expect(await store.get(`key-${i}`)).toBe(`value-${i}`);
+    }
+  });
+
+  it('M5: concurrent set() + delete() bleiben konsistent', async () => {
+    const store = makeStore();
+    // Seed: 5 entries
+    for (let i = 0; i < 5; i++) await store.set(`k${i}`, `v${i}`);
+
+    // Race: 5 setters + 5 deleters parallel auf disjoint keys
+    await Promise.all([
+      ...Array.from({ length: 5 }, (_, i) => store.set(`new-${i}`, `nv${i}`)),
+      ...Array.from({ length: 5 }, (_, i) => store.delete(`k${i}`)),
+    ]);
+
+    const items = await store.list();
+    const keys = items.map((i) => i.key).sort();
+    expect(keys).toEqual(['new-0', 'new-1', 'new-2', 'new-3', 'new-4']);
+  });
 });
