@@ -25,7 +25,7 @@
  */
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { extract as tarExtract } from 'tar';
+import { safeExtractTar } from './safe-tar-extract.js';
 import type { CatalogConfig, CatalogEntry, CatalogLock, CatalogLockEntry } from './schema.js';
 
 const BUCKET_BY_KIND = {
@@ -73,11 +73,9 @@ function destinationFor(root: string, entry: CatalogEntry): string {
 
 export async function applyLock(opts: SyncApplyOpts): Promise<SyncApplyResult> {
   const strip = opts.stripComponents ?? 1;
-  const extract =
-    opts.extract ??
-    (async (e) => {
-      await tarExtract(e);
-    });
+  // C3 (2026-05-21 code-review): safeExtractTar verhindert symlink/hardlink
+  // write-through und path-traversal beim Auspacken malicious tarballs.
+  const extract = opts.extract ?? ((e) => safeExtractTar(e));
 
   const catalogById = new Map<string, CatalogEntry>(opts.catalog.entries.map((e) => [e.id, e]));
   const applied: SyncAppliedEntry[] = [];

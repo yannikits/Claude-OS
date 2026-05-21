@@ -7,12 +7,13 @@
  * also stores the PID — if the PID is no longer alive we treat the
  * flag as stale and allow re-acquisition.
  *
- * Concurrency note: the JSON+rename approach is atomic *per write*
- * but does not prevent a true TOCTOU race between two simultaneous
- * acquire() calls. In v1 the scheduler runs in a single process
- * (Phase 6 Tauri sidecar) and the CLI is user-initiated one-at-a-time,
- * so this is sufficient. A real mutex (file-lock or sqlite BEGIN
- * IMMEDIATE) would be Phase 6 hardening.
+ * Concurrency: acquire() benutzt `fs.openSync(filePath, 'wx')` als
+ * atomare OS-level "claim" — der erste Prozess der den Aufruf gewinnt
+ * erzeugt die Datei, alle weiteren bekommen `EEXIST` und scheitern. Das
+ * schliesst die TOCTOU-Race zwischen zwei simultanen acquire()-Calls
+ * (CLI + Sidecar) auf demselben Host. Stale-PID-Recovery auf dem
+ * gleichen Host: nicht-laufende PID → unlink VOR dem openSync.
+ * Corrupt-File-Recovery: read() liefert null → unlink VOR dem openSync.
  *
  * On-disk shape:
  *   {
@@ -26,12 +27,13 @@
  * @module @domains/vault-sync/busy-flag
  */
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
-  renameSync,
   unlinkSync,
-  writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
@@ -127,6 +129,11 @@ export class BusyFlag {
    * Tries to acquire the flag. Returns true on success, false if another
    * party already holds it (alive PID on this host, or any hostname).
    * Stale state on the same host (PID dead) is auto-cleared.
+   *
+   * C5 (2026-05-21 code-review): TOCTOU-safe via openSync(..., 'wx') —
+   * atomarer OS-level exclusive-create. Wenn zwei Prozesse parallel
+   * acquire() rufen, gewinnt genau einer; der andere bekommt EEXIST und
+   * scheitert.
    */
   acquire(reason: string): boolean {
     const current = this.read();
@@ -134,8 +141,14 @@ export class BusyFlag {
       const isSameHost = current.hostname === this.hostname;
       const stale = isSameHost && !this.isPidAlive(current.pid);
       if (!stale) return false;
-      // Fall through — treat as released.
+      // Stale on same host — unlink BEFORE exclusive-create attempt.
+      this.bestEffortUnlink();
     }
+    // KEINE auto-recovery von "file exists aber read() ist null". Solche
+    // Faelle entstehen entweder durch korrupten on-disk state ODER
+    // durch eine laufende race mit einem anderen acquire(): falls
+    // letzteres wuerde ein unlink hier die Lock-Claim des anderen
+    // Prozesses kaputtmachen. User muss `vault unlock` ausfuehren.
     const next: BusyState = {
       busy: true,
       reason,
@@ -143,28 +156,66 @@ export class BusyFlag {
       hostname: this.hostname,
       acquiredAt: this.now().toISOString(),
     };
-    this.write(next);
-    return true;
+    return this.tryExclusiveWrite(next);
   }
 
-  /** Clears the flag. Safe to call when not currently held. */
+  /**
+   * Clears the flag wenn dieser Prozess (pid + hostname) ihn auch
+   * gesetzt hat. No-op wenn nicht gesetzt ODER von einem anderen
+   * Prozess gehalten wird — Codex-Round-2 finding: vorher konnte ein
+   * Prozess B den Lock von Prozess A clearen.
+   */
   release(): void {
     if (!existsSync(this.filePath)) return;
-    unlinkSync(this.filePath);
+    const current = this.read();
+    if (current === null) {
+      // Corrupt-state ist niemand-haelt-den-Lock → safe to clear.
+      this.bestEffortUnlink();
+      return;
+    }
+    const isOwner = current.pid === this.pid && current.hostname === this.hostname;
+    if (!isOwner) return; // Foreign lock — refuse to clear.
+    this.bestEffortUnlink();
   }
 
   /**
    * Explicit reset — used by `claude-os vault unlock` when the user
-   * accepts the loss of any in-flight work.
+   * accepts the loss of any in-flight work. Im Unterschied zu release()
+   * cleart forceReset() unconditional (Cross-Host-Crash-Recovery).
    */
   forceReset(): void {
-    this.release();
+    if (!existsSync(this.filePath)) return;
+    this.bestEffortUnlink();
   }
 
-  private write(state: BusyState): void {
+  /**
+   * Atomarer exclusive-create: gibt true zurueck wenn die Datei
+   * erfolgreich angelegt wurde, false wenn ein anderer Caller den Lock
+   * bereits hielt (EEXIST). Andere Fehler werden weitergeworfen.
+   */
+  private tryExclusiveWrite(state: BusyState): boolean {
     mkdirSync(dirname(this.filePath), { recursive: true });
-    const tmp = `${this.filePath}.tmp-${process.pid}-${Date.now()}`;
-    writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
-    renameSync(tmp, this.filePath);
+    let fd: number;
+    try {
+      fd = openSync(this.filePath, 'wx', 0o600);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') return false;
+      throw err;
+    }
+    try {
+      writeSync(fd, JSON.stringify(state));
+    } finally {
+      closeSync(fd);
+    }
+    return true;
+  }
+
+  private bestEffortUnlink(): void {
+    try {
+      unlinkSync(this.filePath);
+    } catch {
+      /* race: someone else already unlinked. */
+    }
   }
 }

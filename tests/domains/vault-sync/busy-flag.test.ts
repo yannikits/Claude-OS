@@ -122,4 +122,96 @@ describe('BusyFlag', () => {
     const parsed = JSON.parse(raw) as BusyState;
     expect(parsed.acquiredAt).toBe('2026-05-17T08:30:15.987Z');
   });
+
+  describe('C5: TOCTOU-safety via openSync wx', () => {
+    it('zweiter acquire scheitert selbst wenn read() racy null zurueckgibt', () => {
+      // Reproduziert die TOCTOU-Race: Prozess A schreibt, Prozess B's
+      // read() liefert (durch Cache/Race) noch null — aber tryExclusive
+      // Write trifft das exclusive-create und bekommt EEXIST.
+      const flagA = makeFlag({ pid: 100 });
+      expect(flagA.acquire('snap-a')).toBe(true);
+
+      class LyingFlag extends BusyFlag {
+        override read(): BusyState | null {
+          return null;
+        }
+      }
+      const flagB = new LyingFlag({
+        filePath,
+        hostname: 'test-host',
+        pid: 200,
+        isPidAlive: () => true,
+      });
+      expect(flagB.acquire('snap-b')).toBe(false);
+
+      // Verifikation: As lock-state bleibt unangetastet.
+      const state = makeFlag().read();
+      expect(state?.pid).toBe(100);
+      expect(state?.reason).toBe('snap-a');
+    });
+
+    it('korrupter file-state blockt acquire (kein silent-overwrite)', () => {
+      // C5: vorher hat acquire() einen corrupt file ueberschrieben. Das
+      // war konvenient, aber unsicher — eine race mit einem laufenden
+      // legitimen acquire wuerde durch den Overwrite zerstoert.
+      // Neuer Vertrag: corrupt → blocked, User muss `vault unlock`.
+      writeFileSync(filePath, '{not real json', 'utf8');
+      const flag = makeFlag();
+      expect(flag.acquire('snap')).toBe(false);
+      // forceReset/release loescht den corrupt file → naechster acquire
+      // klappt.
+      flag.forceReset();
+      expect(flag.acquire('snap')).toBe(true);
+    });
+
+    it('release nach acquire erlaubt fresh acquire (kein orphan file)', () => {
+      const flagA = makeFlag({ pid: 100 });
+      expect(flagA.acquire('snap-a')).toBe(true);
+      flagA.release();
+      expect(existsSync(filePath)).toBe(false);
+
+      const flagB = makeFlag({ pid: 200 });
+      expect(flagB.acquire('snap-b')).toBe(true);
+      expect(flagB.read()?.pid).toBe(200);
+    });
+
+    it('stale-pid-recovery loescht orphan und vergibt acquire korrekt', () => {
+      // Same-host alter Prozess ist gecrasht: pid 100 ist tot.
+      const corpse = makeFlag({ pid: 100, isPidAlive: () => true });
+      corpse.acquire('crashed-snapshot');
+
+      const successor = makeFlag({
+        pid: 200,
+        isPidAlive: (pid) => pid !== 100, // pid 100 dead, alles andere alive
+      });
+      expect(successor.acquire('clean-snap')).toBe(true);
+      expect(successor.read()?.pid).toBe(200);
+    });
+
+    it('Codex-Round-2: release() von foreign owner ist no-op', () => {
+      // Prozess A haelt den Lock. Prozess B ruft release() — darf
+      // den Lock NICHT clearen.
+      const owner = makeFlag({ pid: 100 });
+      expect(owner.acquire('owner-snap')).toBe(true);
+
+      const foreigner = makeFlag({ pid: 200 });
+      foreigner.release();
+
+      // Lock haelt weiter — owner's state unangetastet.
+      expect(existsSync(filePath)).toBe(true);
+      expect(makeFlag().read()?.pid).toBe(100);
+    });
+
+    it('Codex-Round-2: forceReset() cleart auch foreign locks (user-explicit-unlock)', () => {
+      // Cross-Host-Crash-Recovery: User auf Maschine B sagt explizit
+      // "der Lock von Maschine A ist tot, raus damit".
+      const flagA = makeFlag({ hostname: 'machine-A', pid: 99 });
+      flagA.acquire('snap');
+
+      const flagB = makeFlag({ hostname: 'machine-B', pid: 200 });
+      flagB.forceReset();
+      expect(flagB.read()).toBeNull();
+      expect(existsSync(filePath)).toBe(false);
+    });
+  });
 });

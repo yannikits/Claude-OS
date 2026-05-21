@@ -88,6 +88,11 @@ export class VaultScheduler {
   private pendingTimerSetAt: string | null = null;
   private lastSnapshotAt: string | null = null;
   private inFlight = false;
+  // C4 (2026-05-21 code-review): wenn der idle-Timer waehrend laufendem
+  // onSnapshot feuert, dropping wir nicht still — wir merken uns dass eine
+  // weitere Snapshot-Runde noetig ist und feuern sie aus dem finally-Hook
+  // des laufenden onSnapshot heraus.
+  private pendingFire = false;
 
   constructor(opts: SchedulerOpts) {
     this.workTree = opts.workTree;
@@ -174,7 +179,11 @@ export class VaultScheduler {
     this.timer = null;
     this.pendingTimerSetAt = null;
     if (this.inFlight) {
-      // Another snapshot is running — let `handleEvent` reschedule on the next mutation.
+      // C4-Fix: snapshot is already running. Vorher: `return` und damit
+      // alle events seit dem letzten erfolgreichen fire orphaned. Jetzt:
+      // pendingFire-Flag — der finally-Hook unten triggert erneut wenn
+      // events angesammelt wurden.
+      this.pendingFire = true;
       return;
     }
     this.inFlight = true;
@@ -188,6 +197,13 @@ export class VaultScheduler {
       .finally(() => {
         this.inFlight = false;
         this.lastSnapshotAt = this.now().toISOString();
+        if (this.pendingFire) {
+          this.pendingFire = false;
+          // Re-fire um die waehrend des letzten onSnapshot angefallenen
+          // events zu draenen. fireSnapshot ist re-entrant-safe — inFlight
+          // ist jetzt false.
+          this.fireSnapshot();
+        }
       });
   }
 }

@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CommandParseError,
+  chooseShellMode,
+  parseCommandTokens,
   type SchedulerEvent,
   startScheduler,
   writeSchedules,
@@ -242,5 +245,378 @@ describe('startScheduler — Tick + Fire', () => {
     });
     harness.fire();
     expect(events.some((e) => e.type === 'parse-error' && e.entryId === '*')).toBe(true);
+  });
+});
+
+describe('startScheduler — C1 Shell-Injection-Schutz', () => {
+  it('parst command in argv-Tokens und spawnt OHNE shell fuer .exe auf Windows', () => {
+    const harness = new TimerHarness();
+    const fakeChild = makeFakeChild();
+    const spawnFn = vi.fn().mockReturnValue(fakeChild);
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'normal',
+          cron: '* * * * *',
+          command: 'node.exe ./script.mjs --foo bar',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'win32',
+    });
+    harness.fire();
+    expect(spawnFn).toHaveBeenCalledWith(
+      'node.exe',
+      ['./script.mjs', '--foo', 'bar'],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+
+  it('parst command in argv-Tokens und spawnt OHNE shell auf POSIX', () => {
+    const harness = new TimerHarness();
+    const fakeChild = makeFakeChild();
+    const spawnFn = vi.fn().mockReturnValue(fakeChild);
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'posix',
+          cron: '* * * * *',
+          command: '/usr/bin/node ./script.mjs --foo bar',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'linux',
+    });
+    harness.fire();
+    expect(spawnFn).toHaveBeenCalledWith(
+      '/usr/bin/node',
+      ['./script.mjs', '--foo', 'bar'],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+
+  it('shell-Metachars werden als argv-Tokens an cmd geliefert, NICHT als shell-OPs interpretiert', () => {
+    const harness = new TimerHarness();
+    const fakeChild = makeFakeChild();
+    const spawnFn = vi.fn().mockReturnValue(fakeChild);
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'rce-attempt',
+          // PoC aus C1: shell:true wuerde '&' als shell-OP interpretieren
+          // und calc.exe ausfuehren. Mit unserem Fix wird '&' und 'calc.exe'
+          // als argv an `node.exe` durchgereicht — node wuerde es ignorieren
+          // oder mit Fehler quittieren, aber NIEMALS calc starten.
+          cron: '* * * * *',
+          command: 'node.exe script.mjs & calc.exe',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'win32',
+    });
+    harness.fire();
+    expect(spawnFn).toHaveBeenCalledWith(
+      'node.exe',
+      ['script.mjs', '&', 'calc.exe'],
+      expect.objectContaining({ shell: false }),
+    );
+    // Spawned EXACT one process — nicht eine Kette via shell.
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('aktiviert shell-Modus fuer .cmd/.bat damit Windows-PATH-Resolution greift (Node-arg-escape schuetzt)', () => {
+    const harness = new TimerHarness();
+    const fakeChild = makeFakeChild();
+    const spawnFn = vi.fn().mockReturnValue(fakeChild);
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'npm-task',
+          cron: '* * * * *',
+          command: 'npm.cmd run build',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'win32',
+    });
+    harness.fire();
+    expect(spawnFn).toHaveBeenCalledWith(
+      'npm.cmd',
+      ['run', 'build'],
+      expect.objectContaining({ shell: true }),
+    );
+  });
+
+  it('aktiviert shell-Modus auf Windows fuer extensionlose Tokens (PATHEXT-Resolution)', () => {
+    const harness = new TimerHarness();
+    const fakeChild = makeFakeChild();
+    const spawnFn = vi.fn().mockReturnValue(fakeChild);
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'extensionless',
+          cron: '* * * * *',
+          command: 'npm run build',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'win32',
+    });
+    harness.fire();
+    expect(spawnFn).toHaveBeenCalledWith(
+      'npm',
+      ['run', 'build'],
+      expect.objectContaining({ shell: true }),
+    );
+  });
+
+  it('refused shell-Modus wenn cmd selbst Shell-Metachars enthaelt', () => {
+    const harness = new TimerHarness();
+    const spawnFn = vi.fn();
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'malicious-cmd',
+          cron: '* * * * *',
+          // Quoted, sodass parser cmd = 'x&calc.cmd' produziert. .cmd-Ext
+          // wuerde shell-mode triggern, aber Metachar-Check fired.
+          command: '"x&calc.cmd" arg',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'win32',
+    });
+    harness.fire();
+    expect(spawnFn).not.toHaveBeenCalled();
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'parse-error' &&
+          e.entryId === 'malicious-cmd' &&
+          e.message?.includes('metacharacters'),
+      ),
+    ).toBe(true);
+  });
+
+  it('emittiert parse-error wenn command leer oder nur whitespace ist', () => {
+    const harness = new TimerHarness();
+    const spawnFn = vi.fn();
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'empty',
+          cron: '* * * * *',
+          command: '   ',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'linux',
+    });
+    harness.fire();
+    expect(spawnFn).not.toHaveBeenCalled();
+    expect(events.some((e) => e.type === 'parse-error' && e.entryId === 'empty')).toBe(true);
+  });
+
+  it('emittiert parse-error bei unterminierten Quotes (kein silent-success)', () => {
+    const harness = new TimerHarness();
+    const spawnFn = vi.fn();
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'unterminated',
+          cron: '* * * * *',
+          command: 'node "missing close',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'linux',
+    });
+    harness.fire();
+    expect(spawnFn).not.toHaveBeenCalled();
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'parse-error' &&
+          e.entryId === 'unterminated' &&
+          e.message?.includes('unterminated'),
+      ),
+    ).toBe(true);
+  });
+
+  it('respektiert gequotete Argumente', () => {
+    const harness = new TimerHarness();
+    const fakeChild = makeFakeChild();
+    const spawnFn = vi.fn().mockReturnValue(fakeChild);
+    writeSchedules(dataDir, {
+      version: 1,
+      entries: [
+        {
+          id: 'quoted',
+          cron: '* * * * *',
+          command: 'node script.mjs "hello world" \'foo bar\'',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          enabled: true,
+        },
+      ],
+    });
+    startScheduler({
+      dataDir,
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      now: () => new Date('2026-05-20T10:00:30.000Z'),
+      spawnFn: spawnFn as never,
+      platform: 'linux',
+    });
+    harness.fire();
+    expect(spawnFn).toHaveBeenCalledWith(
+      'node',
+      ['script.mjs', 'hello world', 'foo bar'],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+});
+
+describe('parseCommandTokens — Unit-Tests', () => {
+  it('split-bei-whitespace', () => {
+    expect(parseCommandTokens('a b c')).toEqual(['a', 'b', 'c']);
+  });
+  it('multiple whitespace zaehlt als ein delimiter', () => {
+    expect(parseCommandTokens('a    b\tc')).toEqual(['a', 'b', 'c']);
+  });
+  it('leading/trailing whitespace ignoriert', () => {
+    expect(parseCommandTokens('   a b   ')).toEqual(['a', 'b']);
+  });
+  it('double-quotes erhalten interne whitespace', () => {
+    expect(parseCommandTokens('a "b c" d')).toEqual(['a', 'b c', 'd']);
+  });
+  it('single-quotes erhalten interne whitespace', () => {
+    expect(parseCommandTokens("a 'b c' d")).toEqual(['a', 'b c', 'd']);
+  });
+  it('Windows-Pfade mit Backslashes bleiben intakt (\\ ist KEIN Escape)', () => {
+    expect(parseCommandTokens('C:\\Tools\\app.exe --x')).toEqual(['C:\\Tools\\app.exe', '--x']);
+  });
+  it('quoted Windows-Pfade mit Spaces bleiben intakt', () => {
+    expect(parseCommandTokens('"C:\\Program Files\\node\\node.exe" -v')).toEqual([
+      'C:\\Program Files\\node\\node.exe',
+      '-v',
+    ]);
+  });
+  it('unterminierte double-quote wirft CommandParseError', () => {
+    expect(() => parseCommandTokens('node "a b')).toThrow(CommandParseError);
+  });
+  it('unterminierte single-quote wirft CommandParseError', () => {
+    expect(() => parseCommandTokens("node 'a b")).toThrow(CommandParseError);
+  });
+  it('empty input → leeres Array', () => {
+    expect(parseCommandTokens('')).toEqual([]);
+    expect(parseCommandTokens('   ')).toEqual([]);
+  });
+  it('empty quoted string produziert ein Token', () => {
+    expect(parseCommandTokens('a "" b')).toEqual(['a', '', 'b']);
+  });
+  it('shell-Metachars bleiben in Tokens (kein Special-Handling)', () => {
+    expect(parseCommandTokens('a & b ; c | d')).toEqual(['a', '&', 'b', ';', 'c', '|', 'd']);
+  });
+});
+
+describe('chooseShellMode — Unit-Tests', () => {
+  it('POSIX → immer false', () => {
+    expect(chooseShellMode('node', 'linux')).toBe(false);
+    expect(chooseShellMode('node.exe', 'linux')).toBe(false);
+    expect(chooseShellMode('npm', 'darwin')).toBe(false);
+  });
+  it('Windows mit .exe → false (kein PATHEXT noetig)', () => {
+    expect(chooseShellMode('node.exe', 'win32')).toBe(false);
+    expect(chooseShellMode('C:\\app.exe', 'win32')).toBe(false);
+  });
+  it('Windows mit .cmd/.bat → true (Node arg-escape schuetzt)', () => {
+    expect(chooseShellMode('npm.cmd', 'win32')).toBe(true);
+    expect(chooseShellMode('script.bat', 'win32')).toBe(true);
+    expect(chooseShellMode('NPM.CMD', 'win32')).toBe(true);
+  });
+  it('Windows extensionlos → true (PATHEXT-Resolution noetig)', () => {
+    expect(chooseShellMode('npm', 'win32')).toBe(true);
+    expect(chooseShellMode('git', 'win32')).toBe(true);
   });
 });

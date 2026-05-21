@@ -145,7 +145,7 @@ describe('VaultScheduler', () => {
     expect(onSnapshot).toHaveBeenCalledTimes(1);
   });
 
-  it('skips firing while a snapshot is still in flight', async () => {
+  it('blockt second concurrent fire waehrend snapshot in-flight ist', async () => {
     let resolveSnapshot: (() => void) | null = null;
     const snapshotPromise = new Promise<void>((resolve) => {
       resolveSnapshot = resolve;
@@ -160,17 +160,72 @@ describe('VaultScheduler', () => {
     expect(onSnapshot).toHaveBeenCalledTimes(1);
     expect(scheduler.status().inFlight).toBe(true);
 
+    // Burst von events WAEHREND in-flight — der timer feuert nochmal,
+    // aber inFlight ist gesetzt, also wird die Snapshot-Anfrage als
+    // pendingFire gemerkt (NICHT silent verworfen wie vor C4-Fix).
     scheduler.notifyEventForTest();
     await vi.advanceTimersByTimeAsync(50);
     await Promise.resolve();
     await Promise.resolve();
     expect(onSnapshot).toHaveBeenCalledTimes(1);
+    expect(scheduler.status().inFlight).toBe(true);
 
+    // Erste snapshot abschliessen. finally-Hook sieht pendingFire=true
+    // UND events>0 → triggert sofort einen zweiten snapshot.
     resolveSnapshot?.();
-    // Flush the .then -> .catch -> .finally chain on the onSnapshot promise.
     await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('C4-Fix: events waehrend in-flight werden in der naechsten Snapshot-Runde gedraint, NICHT orphaned', async () => {
+    // Reproducer fuer die race: ohne C4-Fix wuerde der zweite Snapshot
+    // silent verworfen weil fireSnapshot beim inFlight-Check NUR return
+    // hat. Mit Fix: pendingFire merkt sich es, finally-Hook re-fired.
+    let resolveSnapshot: (() => void) | null = null;
+    const firstSnap = new Promise<void>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const onSnapshot = vi.fn().mockReturnValueOnce(firstSnap).mockResolvedValue(undefined);
+
+    const { scheduler } = makeScheduler({ idleMs: 50, onSnapshot });
+    scheduler.start();
+
+    // t=0: event arrives, timer T1 at t=50
+    scheduler.notifyEventForTest();
+    // t=50: T1 fires → fireSnapshot → inFlight=true, events=0, onSnapshot called
+    await vi.advanceTimersByTimeAsync(50);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onSnapshot).toHaveBeenCalledTimes(1);
+    expect(scheduler.status().inFlight).toBe(true);
+
+    // t=50+ε: event arrives mid-flight, increments events, timer T2 at t=100
+    scheduler.notifyEventForTest();
+    expect(scheduler.status().eventsSinceLastSnapshot).toBe(1);
+
+    // t=100: T2 fires → fireSnapshot finds inFlight=true → pendingFire=true, return
+    await vi.advanceTimersByTimeAsync(50);
+    await Promise.resolve();
+    await Promise.resolve();
+    // Snapshot count noch 1 (zweiter wurde geblockt)
+    expect(onSnapshot).toHaveBeenCalledTimes(1);
+    expect(scheduler.status().eventsSinceLastSnapshot).toBe(1); // events nicht reset
+
+    // Erste snapshot abschliessen
+    resolveSnapshot?.();
     await vi.advanceTimersByTimeAsync(0);
-    expect(scheduler.status().inFlight).toBe(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Jetzt MUSS der zweite Snapshot triggered worden sein (C4 fix);
+    // ohne Fix wuerde count bei 1 bleiben.
+    expect(onSnapshot).toHaveBeenCalledTimes(2);
+    // Events fuer die zweite Runde geclaimt
+    expect(scheduler.status().eventsSinceLastSnapshot).toBe(0);
   });
 
   it('stop clears the timer and closes the watcher', async () => {

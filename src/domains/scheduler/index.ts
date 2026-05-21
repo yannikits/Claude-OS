@@ -10,6 +10,9 @@
  */
 export { nextFire, type ParsedCron, parseCron } from './cron-parser.js';
 export {
+  CommandParseError,
+  chooseShellMode,
+  parseCommandTokens,
   type RunnerOpts,
   type SchedulerEvent,
   startScheduler,

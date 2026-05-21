@@ -4,6 +4,7 @@ import {
   AutoDepsError,
   AutoDepsMissingProviderError,
   type CatalogConfig,
+  CyclicAutoDepsError,
   type MarketplaceCandidate,
   resolveAutoDeps,
 } from '../../../src/domains/catalog/index.js';
@@ -84,24 +85,57 @@ describe('resolveAutoDeps — Missing-Provider (TF-4)', () => {
 });
 
 describe('resolveAutoDeps — Cyclic (TF-5)', () => {
-  it('wirft CyclicAutoDepsError wenn Provider sich selbst transitiv braucht', async () => {
+  it('wirft CyclicAutoDepsError wenn Marketplace dieselbe Provider-ID fuer zwei verschiedene Caps zurueckgibt', async () => {
+    // A requires foo. Marketplace returns B (provides foo, requires bar).
+    // Iter 1: B added → visited = {a, b}.
+    // Iter 2: B needs bar (unmet). Marketplace returns B AGAIN for bar
+    // (inconsistent marketplace — claims B provides bar via a second
+    // manifest variant). Resolver sees `visited.has('b')` → throws.
+    const aManifest = makeManifest('a', { requires: ['mcp:foo'] });
+    const bManifestFirst = makeManifest('b', {
+      requires: ['mcp:bar'],
+      provides: ['mcp:foo'],
+    });
+    const bManifestSecond = makeManifest('b', { provides: ['mcp:bar'] });
+
+    const lookup = vi.fn(async (cap: { name: string }) => {
+      if (cap.name === 'foo') {
+        return [{ manifest: bManifestFirst, source: 'marketplace:acme:b' }];
+      }
+      if (cap.name === 'bar') {
+        return [{ manifest: bManifestSecond, source: 'marketplace:acme:b-alt' }];
+      }
+      return [];
+    });
+
+    await expect(
+      resolveAutoDeps({
+        catalog: EMPTY_CATALOG,
+        existingManifests: new Map([['a', aManifest]]),
+        lookupProvider: lookup,
+      }),
+    ).rejects.toThrow(CyclicAutoDepsError);
+
+    expect(lookup).toHaveBeenCalledTimes(2);
+  });
+
+  it('Linear-Chain ohne echte Zyklen laeuft sauber durch', async () => {
+    // Sanity-check: A → B (provides foo, requires bar), C (provides bar)
+    // ist KEIN Zyklus. Beide werden hinzugefuegt.
     const aManifest = makeManifest('a', { requires: ['mcp:foo'] });
     const bManifest = makeManifest('b', { requires: ['mcp:bar'], provides: ['mcp:foo'] });
-    const cManifest = makeManifest('c', { requires: ['mcp:foo'], provides: ['mcp:bar'] });
+    const cManifest = makeManifest('c', { provides: ['mcp:bar'] });
 
     const lookup = vi.fn(async (cap: { name: string }) => {
       if (cap.name === 'foo') {
         return [{ manifest: bManifest, source: 'marketplace:acme:b' }];
       }
       if (cap.name === 'bar') {
-        // c provides bar, but c requires foo (already provided by b)
         return [{ manifest: cManifest, source: 'marketplace:acme:c' }];
       }
       return [];
     });
 
-    // Resolver shouldn't cycle — b provides foo, c provides bar, c requires foo (b provides).
-    // Actually this is OK, not cyclic. Lass es einfach durchlaufen.
     const result = await resolveAutoDeps({
       catalog: EMPTY_CATALOG,
       existingManifests: new Map([['a', aManifest]]),
@@ -110,27 +144,55 @@ describe('resolveAutoDeps — Cyclic (TF-5)', () => {
     expect(result.newEntries.map((e) => e.id).sort()).toEqual(['b', 'c']);
   });
 
-  it('erkennt echte Selbst-Zyklen via visited-Set', async () => {
+  it('Selbst-providende Plugins (B requires foo + provides foo) brauchen keinen weiteren Provider', async () => {
     const aManifest = makeManifest('a', { requires: ['mcp:foo'] });
     const bManifest = makeManifest('b', { requires: ['mcp:foo'], provides: ['mcp:foo'] });
 
     const lookup = vi.fn(async () => {
-      // b provides foo aber required AUCH foo — selbst-rekursion soll
-      // gefangen werden weil b im naechsten Iteration nochmal als
-      // Provider auftaucht.
       return [{ manifest: bManifest, source: 'marketplace:acme:b' }];
     });
 
-    // Erste Iteration: a needs foo -> b added. b needs foo too (=b
-    // already provides it), so binding resolves without re-fetching.
-    // Wenn der Resolver buggy ist und b nochmal fetchen will, schlaegt
-    // die visited-detection an.
+    // Iter 1: foo unmet → B added (visited={a,b}). Iter 2: B requires
+    // foo, aber B selbst provides foo → resolveBindings findet binding
+    // → KEIN unmet mehr → Fixpoint. Lookup wird nur EINMAL gerufen.
     const result = await resolveAutoDeps({
       catalog: EMPTY_CATALOG,
       existingManifests: new Map([['a', aManifest]]),
       lookupProvider: lookup,
     });
     expect(result.newEntries.map((e) => e.id)).toEqual(['b']);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('resolveAutoDeps — Version-Konflikt (existingManifests-Kollision)', () => {
+  it('wirft CyclicAutoDepsError wenn Marketplace eine ID liefert die bereits in existingManifests existiert', async () => {
+    // Catalog hat c@1.0.0 das KEIN foo provides. A requires foo.
+    // Marketplace lookup fuer foo gibt c@2.0.0 zurueck (gleiche id,
+    // andere Version, claims foo). visited startet mit {a, c} →
+    // chosen.manifest.id 'c' kollidiert → CyclicAutoDepsError.
+    const aManifest = makeManifest('a', { requires: ['mcp:foo'] });
+    const cInstalled = {
+      id: 'c',
+      version: '1.0.0',
+      provides: ['mcp:something-else'],
+    };
+    const cMarketplaceV2 = makeManifest('c', { provides: ['mcp:foo'] });
+
+    const lookup = vi.fn(async () => [
+      { manifest: cMarketplaceV2, source: 'marketplace:acme:c@2.0.0' },
+    ]);
+
+    await expect(
+      resolveAutoDeps({
+        catalog: EMPTY_CATALOG,
+        existingManifests: new Map([
+          ['a', aManifest],
+          ['c', cInstalled],
+        ]),
+        lookupProvider: lookup,
+      }),
+    ).rejects.toThrow(CyclicAutoDepsError);
   });
 });
 

@@ -95,6 +95,11 @@ export {
 } from './marketplace-registry.js';
 export { type UrlLoaderOpts, urlLoader } from './marketplace-url-loader.js';
 export {
+  type SafeExtractOpts,
+  safeExtractTar,
+  UnsafeTarballError,
+} from './safe-tar-extract.js';
+export {
   type CatalogConfig,
   CatalogConfigJsonSchema,
   CatalogConfigSchema,

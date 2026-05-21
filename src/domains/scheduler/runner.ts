@@ -23,6 +23,87 @@ import { nextFire, type ParsedCron, parseCron } from './cron-parser.js';
 import { readSchedules } from './store.js';
 import type { ScheduleEntry } from './types.js';
 
+export class CommandParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CommandParseError';
+  }
+}
+
+/**
+ * Token-split a command string into `[cmd, ...args]` for spawn without
+ * shell. Quoting via `"` or `'`. Backslash is NOT an escape char —
+ * Windows paths like `C:\Program Files\app.exe` must survive intact.
+ * Users wanting a literal `"` inside an arg should wrap the arg in
+ * single-quotes (or vice-versa).
+ *
+ * Throws CommandParseError on unterminated quotes — silently accepting
+ * them would let malformed schedules execute instead of failing fast.
+ */
+export function parseCommandTokens(input: string): readonly string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let inToken = false;
+  for (const ch of input) {
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+        inToken = true; // empty quoted string still produces a token
+        continue;
+      }
+      current += ch;
+      inToken = true;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      inToken = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (inToken) {
+        tokens.push(current);
+        current = '';
+        inToken = false;
+      }
+      continue;
+    }
+    current += ch;
+    inToken = true;
+  }
+  if (quote !== null) {
+    throw new CommandParseError(`unterminated ${quote}-quoted string in command "${input}"`);
+  }
+  if (inToken) tokens.push(current);
+  return tokens;
+}
+
+// Shell-metachar set that would re-introduce injection if `cmd` itself
+// (not args) is passed through `shell: true`. Node 20+ escapes args, but
+// not the command path. We refuse shell-mode if cmd contains any of these.
+// Backslash ist KEIN Metachar — Windows-Pfade `C:\Tools\app.exe` muessen
+// shell-mode (.cmd/.bat oder extensionless) durchlaufen koennen. Aber
+// `%` (cmd.exe env-expansion) und `!` (DelayedExpansion) MUESSEN dabei
+// blockiert werden — Codex-Round-2 finding.
+const SHELL_METACHARS = /[&|<>"^();`$%!]/;
+
+/**
+ * Pick spawn-mode for a parsed command. Windows shells (`.cmd`/`.bat`)
+ * require `shell: true` so cmd.exe handles arg-escaping (CVE-2024-27980
+ * fix). Extensionless tokens on Windows also need shell-mode because
+ * Node's `spawn` won't apply PATHEXT — `node` won't find `node.exe`.
+ * On all other platforms or with an explicit executable extension,
+ * shell:false is safe.
+ */
+export function chooseShellMode(cmd: string, platform: NodeJS.Platform): boolean {
+  if (platform !== 'win32') return false;
+  if (/\.(cmd|bat)$/i.test(cmd)) return true;
+  // Extensionless on Windows → needs PATHEXT resolution via shell.
+  if (!/\.[a-z0-9]+$/i.test(cmd)) return true;
+  return false;
+}
+
 export interface SchedulerEvent {
   readonly type: 'fire' | 'skip-overlap' | 'output' | 'exit' | 'parse-error';
   readonly entryId: string;
@@ -48,6 +129,8 @@ export interface RunnerOpts {
   readonly now?: () => Date;
   /** Test-Injection: Process-Spawner. */
   readonly spawnFn?: typeof spawn;
+  /** Test-Injection: platform (default `process.platform`). Influences spawn shell-mode. */
+  readonly platform?: NodeJS.Platform;
 }
 
 /**
@@ -60,6 +143,7 @@ export function startScheduler(opts: RunnerOpts): { stop: () => Promise<void> } 
   const setTimer = opts.setTimeoutFn ?? ((cb, ms) => setTimeout(cb, ms));
   const clearTimer = opts.clearTimeoutFn ?? ((h) => clearTimeout(h as NodeJS.Timeout));
   const spawnImpl = opts.spawnFn ?? spawn;
+  const platform = opts.platform ?? process.platform;
 
   // Pro Entry-Id: ob aktuell ein Child laeuft + Cache der parsedCron
   // damit wir nicht jeden Tick re-parsen.
@@ -101,9 +185,48 @@ export function startScheduler(opts: RunnerOpts): { stop: () => Promise<void> } 
       });
       return;
     }
+    // C1 (2026-05-21 code-review): parse command in argv-tokens und
+    // spawne OHNE shell. Verhindert shell-injection via `; & | $()` in
+    // FREEFORM-input. Auf Windows bleibt shell:true noetig fuer .cmd/.bat
+    // sowie extensionlose Tokens (PATHEXT-Resolution). Node 20+ escapt
+    // dann die Args (CVE-2024-27980-Fix); zusaetzlich validieren wir
+    // dass `cmd` selbst metachar-frei ist (cmd.exe parsed den Pfad).
+    let tokens: readonly string[];
+    try {
+      tokens = parseCommandTokens(entry.command);
+    } catch (err) {
+      opts.emit({
+        type: 'parse-error',
+        entryId: entry.id,
+        timestamp: now().toISOString(),
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    const cmd = tokens[0];
+    if (cmd === undefined || cmd.length === 0) {
+      opts.emit({
+        type: 'parse-error',
+        entryId: entry.id,
+        timestamp: now().toISOString(),
+        message: `command parse: empty token list from "${entry.command}"`,
+      });
+      return;
+    }
+    const args = tokens.slice(1);
+    const useShell = chooseShellMode(cmd, platform);
+    if (useShell && SHELL_METACHARS.test(cmd)) {
+      opts.emit({
+        type: 'parse-error',
+        entryId: entry.id,
+        timestamp: now().toISOString(),
+        message: `command parse: refusing shell-mode for cmd containing shell metacharacters: "${cmd}"`,
+      });
+      return;
+    }
     opts.emit({ type: 'fire', entryId: entry.id, timestamp: now().toISOString() });
-    const child = spawnImpl(entry.command, [], {
-      shell: true,
+    const child = spawnImpl(cmd, args, {
+      shell: useShell,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });

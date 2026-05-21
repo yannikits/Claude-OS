@@ -22,6 +22,7 @@ import {
   AutoDepsMissingProviderError,
   applyLock,
   type Catalog,
+  type CatalogConfig,
   type CatalogEntry,
   type CatalogLock,
   catalogPathsFor,
@@ -676,13 +677,13 @@ async function actUpdate(globals: GlobalOpts, id: string | undefined): Promise<v
     printErr(`catalog update: unknown id "${id}" in ${paths.catalogPath}`);
     process.exit(1);
   }
-  const slice: Catalog | Awaited<ReturnType<typeof readCatalog>> = {
+  const slice: CatalogConfig = {
     version: 1,
     entries: [targetEntry],
-  } as const as never;
+  };
   let sliceResult: Awaited<ReturnType<typeof lockCatalog>>;
   try {
-    sliceResult = await lockCatalog({ catalog: slice as never, cacheDir });
+    sliceResult = await lockCatalog({ catalog: slice, cacheDir });
   } catch (err) {
     if (err instanceof LockBuilderError) {
       printErr(`catalog update: ${err.message}`);

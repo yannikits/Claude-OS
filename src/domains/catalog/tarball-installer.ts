@@ -19,7 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { extract as tarExtract } from 'tar';
+import { safeExtractTar, UnsafeTarballError } from './safe-tar-extract.js';
 
 export class TarballInstallError extends Error {
   constructor(message: string) {
@@ -128,12 +128,18 @@ async function extractIntoDestination(
 ): Promise<void> {
   mkdirSync(destination, { recursive: true });
   try {
-    await tarExtract({
+    await safeExtractTar({
       file: cachedPath,
       cwd: destination,
       strip: stripComponents,
+      // destination ist exklusiv fuer diesen Install — bei UnsafeTarball
+      // Error wird kein partial-state hinterlassen.
+      cleanupOnFailure: true,
     });
   } catch (err) {
+    if (err instanceof UnsafeTarballError) {
+      throw new TarballInstallError(`refused unsafe tarball ${cachedPath}: ${err.message}`);
+    }
     throw new TarballInstallError(
       `tar extract failed for ${cachedPath} into ${destination}: ` +
         (err instanceof Error ? err.message : String(err)),
