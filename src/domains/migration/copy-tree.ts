@@ -93,6 +93,11 @@ export interface CopyTreeStats {
  * fs.cp wirft dann auf ersten Treffer und der Caller bekommt den
  * Fehler propagiert. Caller kann `overwrite: true` setzen wenn explizit
  * gewollt.
+ *
+ * M17 (2026-05-21 code-review): Statistik wird im `filter`-Callback
+ * waehrend des cp-Walks erfasst — vorher gab es einen zweiten
+ * walkAsync-Pass ueber den destination-Tree NUR fuers Zaehlen. Bei
+ * grossen Vaults (10k+ Dateien) halbiert das die Wall-Time.
  */
 export async function copyTree(opts: CopyTreeOpts): Promise<CopyTreeStats> {
   const { source, destination, exclude, overwrite = false } = opts;
@@ -107,53 +112,27 @@ export async function copyTree(opts: CopyTreeOpts): Promise<CopyTreeStats> {
     errorOnExist: !overwrite,
     preserveTimestamps: true,
     verbatimSymlinks: true,
-    filter: (sourcePath) => {
+    filter: async (sourcePath) => {
       const rel = relative(source, sourcePath);
       if (rel === '' || rel === '.') return true;
       if (matchesAny(rel, exclude)) {
         excludedPaths.push(rel);
         return false;
       }
+      // Erfasse File-Stats waehrend des Walks; Directories werden NICHT
+      // gezaehlt (filesCopied = nur regulaere Files, wie vorher).
+      try {
+        const s = await stat(sourcePath);
+        if (s.isFile()) {
+          filesCopied++;
+          bytesCopied += s.size;
+        }
+      } catch {
+        filesSkipped++;
+      }
       return true;
     },
   });
 
-  // Statistik nach-erfassen — fs.cp gibt selber keinen Counter zurück.
-  for await (const entry of walkAsync(destination)) {
-    try {
-      const s = await stat(entry);
-      if (s.isFile()) {
-        filesCopied++;
-        bytesCopied += s.size;
-      }
-    } catch {
-      filesSkipped++;
-    }
-  }
-
   return { filesCopied, bytesCopied, filesSkipped, excludedPaths };
-}
-
-async function* walkAsync(root: string): AsyncGenerator<string> {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const stack: string[] = [root];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined) break;
-    let dirents: import('node:fs').Dirent[];
-    try {
-      dirents = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const d of dirents) {
-      const full = path.join(current, d.name);
-      if (d.isDirectory()) {
-        stack.push(full);
-      } else if (d.isFile()) {
-        yield full;
-      }
-    }
-  }
 }

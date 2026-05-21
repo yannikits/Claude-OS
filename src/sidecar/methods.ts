@@ -508,16 +508,27 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
     return { count: enriched.length, entries: enriched };
   });
 
-  dispatcher.register('agent.list', (rawParams: unknown) => {
-    const params = (rawParams ?? {}) as { project?: string; limit?: number };
+  // M13 (2026-05-21 code-review): AgentRunsRepository wird einmal pro
+  // Sidecar-Lifetime instanziert, NICHT pro RPC-Call. Vorher wurde
+  // `new AgentRunsRepository()` bei jedem agent.list aufgerufen — und
+  // dessen loadOrRebuild walked alle JSONLs wenn der on-disk-Index
+  // fehlt/korrupt. Mit Singleton bleibt der Index-State im Speicher.
+  let agentRunsRepoCache: AgentRunsRepository | null = null;
+  const getAgentRunsRepo = (): AgentRunsRepository => {
+    if (agentRunsRepoCache !== null) return agentRunsRepoCache;
     const root = rootPath();
     const machine = resolveMachinePaths();
-    const repo = new AgentRunsRepository({
+    agentRunsRepoCache = new AgentRunsRepository({
       agentRunsRoot: join(root, 'vault', 'agent-runs'),
       indexPath: agentRunsIndexPathFor(machine.dataDir),
       vaultRoot: join(root, 'vault'),
     });
-    const items = repo.list({
+    return agentRunsRepoCache;
+  };
+
+  dispatcher.register('agent.list', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { project?: string; limit?: number };
+    const items = getAgentRunsRepo().list({
       ...(params.project === undefined ? {} : { project: params.project }),
       ...(params.limit === undefined ? {} : { limit: params.limit }),
     });

@@ -124,6 +124,63 @@ function parseRequires(manifest: PluginManifest): readonly Capability[] {
 }
 
 /**
+ * M15 (2026-05-21 code-review): providers-index per Catalog.
+ *
+ * `findProviders` lief vorher linear ueber `catalog.plugins` × `provides`
+ * pro Lookup. Bei N plugins mit R required-caps wurde das im
+ * resolveBindings-Loop O(N · R · N · Pp) — quartic-ish bei dicht
+ * verbundenen Catalogs.
+ *
+ * Fix: pro Catalog wird die `providers`-Map (kind+name → providers[])
+ * EINMAL gebaut und in einer WeakMap gecached. Jeder weitere Lookup ist
+ * O(1) statt O(N · Pp). Lebenszeit: solange das Catalog-Object lebt.
+ */
+type ProvidersIndex = Map<string, { manifest: PluginManifest; providedCap: Capability }[]>;
+const providersIndexCache = new WeakMap<Catalog, ProvidersIndex>();
+
+function providerKey(cap: Capability): string {
+  return `${cap.kind}:${cap.name}`;
+}
+
+function buildProvidersIndex(plugins: readonly PluginManifest[]): ProvidersIndex {
+  const idx: ProvidersIndex = new Map();
+  for (const manifest of plugins) {
+    let provides: readonly Capability[];
+    try {
+      provides = parseProvides(manifest);
+    } catch {
+      continue;
+    }
+    for (const p of provides) {
+      const key = providerKey(p);
+      const arr = idx.get(key);
+      if (arr === undefined) {
+        idx.set(key, [{ manifest, providedCap: p }]);
+      } else {
+        arr.push({ manifest, providedCap: p });
+      }
+    }
+  }
+  // Deterministic sort: by id asc, version DESC
+  for (const arr of idx.values()) {
+    arr.sort((a, b) => {
+      if (a.manifest.id !== b.manifest.id) return a.manifest.id < b.manifest.id ? -1 : 1;
+      return -compareVersions(a.manifest.version, b.manifest.version);
+    });
+  }
+  return idx;
+}
+
+function getProvidersIndex(catalog: Catalog): ProvidersIndex {
+  let idx = providersIndexCache.get(catalog);
+  if (idx === undefined) {
+    idx = buildProvidersIndex(catalog.plugins);
+    providersIndexCache.set(catalog, idx);
+  }
+  return idx;
+}
+
+/**
  * Returns the providers that expose a capability matching `wanted`
  * (kind + name + optional version constraint). Multiple providers
  * sorted deterministically by id, then by version DESC.
@@ -132,25 +189,7 @@ function findProviders(
   catalog: Catalog,
   wanted: Capability,
 ): readonly { manifest: PluginManifest; providedCap: Capability }[] {
-  const matches: { manifest: PluginManifest; providedCap: Capability }[] = [];
-  for (const manifest of catalog.plugins) {
-    let provides: readonly Capability[];
-    try {
-      provides = parseProvides(manifest);
-    } catch {
-      continue;
-    }
-    for (const p of provides) {
-      if (p.kind !== wanted.kind) continue;
-      if (p.name !== wanted.name) continue;
-      matches.push({ manifest, providedCap: p });
-    }
-  }
-  matches.sort((a, b) => {
-    if (a.manifest.id !== b.manifest.id) return a.manifest.id < b.manifest.id ? -1 : 1;
-    return -compareVersions(a.manifest.version, b.manifest.version);
-  });
-  return matches;
+  return getProvidersIndex(catalog).get(providerKey(wanted)) ?? [];
 }
 
 function constraintSatisfied(providerVersion: string, constraint?: VersionConstraint): boolean {

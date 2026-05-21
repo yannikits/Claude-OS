@@ -172,7 +172,11 @@ export class AgentRunsIndex {
       rebuiltAt,
       records: allRecords,
     };
-    atomicWrite(opts.indexPath, JSON.stringify(envelope, null, 2));
+    // M16 (2026-05-21 code-review): kein pretty-print — cuts ~30-40 %
+    // sowohl Stringify-Zeit als auch on-disk-Size bei grossen Record-
+    // Counts. Diff/Debug-Konsumenten sind ohnehin programmatic
+    // (read+parse), nicht human.
+    atomicWrite(opts.indexPath, JSON.stringify(envelope));
     const index = new AgentRunsIndex(opts, allRecords, rebuiltAt);
     return {
       index,
