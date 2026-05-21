@@ -39,14 +39,10 @@ import {
   updatePlugins,
   updateSkillsRepo,
 } from '../../domains/update-orchestrator/index.js';
+import { type GlobalOpts, printErr, printJson, printLine } from '../output.js';
 
 const SKILLS_REPO_SOURCE = 'https://github.com/iteenschmiede/claude-config.git';
 const SKILLS_REPO_BRANCH = 'main';
-
-interface GlobalOpts {
-  readonly root?: string;
-  readonly json?: boolean;
-}
 
 interface UpdateOpts {
   readonly env?: boolean;
@@ -64,20 +60,6 @@ interface ResolvedUpdatePaths {
   readonly backupsDir: string;
   readonly logsDir: string;
   readonly dataDir: string;
-}
-
-function printJson(payload: unknown): void {
-  // biome-ignore lint/suspicious/noConsole: CLI presenter output by design
-  console.log(JSON.stringify(payload, null, 2));
-}
-
-function printLine(line: string): void {
-  // biome-ignore lint/suspicious/noConsole: CLI presenter output by design
-  console.log(line);
-}
-
-function printErr(line: string): void {
-  console.error(line);
 }
 
 function resolveUpdatePaths(globals: GlobalOpts): ResolvedUpdatePaths {

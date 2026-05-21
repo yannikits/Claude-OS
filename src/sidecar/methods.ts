@@ -30,8 +30,7 @@ import {
   setEnabled as setScheduleEnabled,
   writeSchedules,
 } from '../domains/scheduler/index.js';
-import { createSecretStore } from '../domains/secrets/index.js';
-import { SecretsLockedError } from '../domains/secrets/types.js';
+import { createSecretStore, SecretsLockedError } from '../domains/secrets/index.js';
 import { BusyFlag, loadVaultConfig } from '../domains/vault-sync/index.js';
 import type { ChatSessions } from './chat-sessions.js';
 import type { RpcDispatcher } from './rpc.js';

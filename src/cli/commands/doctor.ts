@@ -14,13 +14,9 @@ import type { Command } from 'commander';
 import { runDoctor } from '../../core/doctor/index.js';
 import { RootNotFoundError, resolveRoot } from '../../core/environment/index.js';
 import { migrateGitMetadata } from '../../core/git-metadata/index.js';
+import type { GlobalOpts } from '../output.js';
 import { formatDoctorReportJson, formatDoctorReportText } from '../presenters/doctor.js';
 import { formatMigrationResultJson, formatMigrationResultText } from '../presenters/migration.js';
-
-interface GlobalOpts {
-  readonly root?: string;
-  readonly json?: boolean;
-}
 
 interface DoctorOpts {
   readonly migrateGitMetadata?: boolean;

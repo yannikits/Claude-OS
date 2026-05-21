@@ -11,12 +11,12 @@ export {
   installFromGithubWithAutoDeps,
 } from './auto-deps-install.js';
 export {
-  AmbiguousProviderError as AutoDepsAmbiguousProviderError,
+  AutoDepsAmbiguousProviderError,
   AutoDepsError,
+  AutoDepsMissingProviderError,
   type AutoDepsResolution,
   CyclicAutoDepsError,
   type MarketplaceCandidate,
-  MissingProviderError as AutoDepsMissingProviderError,
   manifestReaderFromMap,
   type ProviderLookup,
   type ResolveAutoDepsOpts,

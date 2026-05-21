@@ -21,11 +21,7 @@ import {
   type MigrationResult,
   type StepResult,
 } from '../../domains/migration/index.js';
-
-interface GlobalOpts {
-  readonly root?: string;
-  readonly json?: boolean;
-}
+import { type GlobalOpts, printJson, printLine } from '../output.js';
 
 interface MigrateOpts {
   readonly fromPortable: string;
@@ -35,16 +31,6 @@ interface MigrateOpts {
   readonly dryRun?: boolean;
   readonly force?: boolean;
   readonly overwrite?: boolean;
-}
-
-function printJson(payload: unknown): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(JSON.stringify(payload, null, 2));
-}
-
-function printLine(line: string): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(line);
 }
 
 function renderPlan(plan: MigrationPlan): void {

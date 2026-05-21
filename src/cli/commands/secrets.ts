@@ -13,24 +13,7 @@
  */
 import type { Command } from 'commander';
 import { createSecretStore } from '../../domains/secrets/index.js';
-
-interface GlobalOpts {
-  readonly json?: boolean;
-}
-
-function printJson(payload: unknown): void {
-  // biome-ignore lint/suspicious/noConsole: CLI presenter output to stdout by design
-  console.log(JSON.stringify(payload, null, 2));
-}
-
-function printLine(line: string): void {
-  // biome-ignore lint/suspicious/noConsole: CLI presenter output to stdout by design
-  console.log(line);
-}
-
-function printErr(line: string): void {
-  console.error(line);
-}
+import { type GlobalOpts, printErr, printJson, printLine } from '../output.js';
 
 export function registerSecretsCommand(program: Command): void {
   const secrets = program

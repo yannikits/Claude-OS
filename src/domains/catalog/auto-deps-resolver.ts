@@ -44,7 +44,7 @@ export class CyclicAutoDepsError extends AutoDepsError {
   }
 }
 
-export class MissingProviderError extends AutoDepsError {
+export class AutoDepsMissingProviderError extends AutoDepsError {
   constructor(
     public readonly capability: string,
     public readonly requiredBy: string,
@@ -52,11 +52,11 @@ export class MissingProviderError extends AutoDepsError {
     super(
       `no marketplace provider found for capability "${capability}" (required by "${requiredBy}")`,
     );
-    this.name = 'MissingProviderError';
+    this.name = 'AutoDepsMissingProviderError';
   }
 }
 
-export class AmbiguousProviderError extends AutoDepsError {
+export class AutoDepsAmbiguousProviderError extends AutoDepsError {
   constructor(
     public readonly capability: string,
     public readonly candidates: readonly string[],
@@ -64,7 +64,7 @@ export class AmbiguousProviderError extends AutoDepsError {
     super(
       `multiple marketplace providers for capability "${capability}": ${candidates.join(', ')}`,
     );
-    this.name = 'AmbiguousProviderError';
+    this.name = 'AutoDepsAmbiguousProviderError';
   }
 }
 
@@ -172,17 +172,17 @@ export async function resolveAutoDeps(opts: ResolveAutoDepsOpts): Promise<AutoDe
     const cap = parseCapability(next.capability);
     const candidates = await opts.lookupProvider(cap);
     if (candidates.length === 0) {
-      throw new MissingProviderError(next.capability, next.requiredBy);
+      throw new AutoDepsMissingProviderError(next.capability, next.requiredBy);
     }
     if (candidates.length > 1) {
-      throw new AmbiguousProviderError(
+      throw new AutoDepsAmbiguousProviderError(
         next.capability,
         candidates.map((c) => c.manifest.id),
       );
     }
     const chosen = candidates[0];
     if (chosen === undefined) {
-      throw new MissingProviderError(next.capability, next.requiredBy);
+      throw new AutoDepsMissingProviderError(next.capability, next.requiredBy);
     }
     if (visited.has(chosen.manifest.id)) {
       // Cycle detected — same id already added; further requires

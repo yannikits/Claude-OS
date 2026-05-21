@@ -21,20 +21,7 @@ import {
   summariseStatuses,
 } from '../../domains/mcp-clients/index.js';
 import { runMcpServer } from '../../mcp/index.js';
-
-interface GlobalOpts {
-  readonly json?: boolean;
-}
-
-function printJson(payload: unknown): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(JSON.stringify(payload, null, 2));
-}
-
-function printLine(line: string): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(line);
-}
+import { type GlobalOpts, printJson, printLine } from '../output.js';
 
 function renderStatus(s: McpServerStatus): string {
   const marker = s.kind === 'ok' ? '[OK]' : s.kind === 'disabled' ? '[OFF]' : '[!]';
