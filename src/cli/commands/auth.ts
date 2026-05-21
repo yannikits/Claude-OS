@@ -14,25 +14,7 @@ import { RootNotFoundError, resolveRoot } from '../../core/environment/index.js'
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import { checkAuthState, isAuthError, ProfileManager } from '../../domains/auth/index.js';
 import { BinaryNotFoundError, resolveClaudeBinary } from '../../domains/claude-bridge/index.js';
-
-interface GlobalOpts {
-  readonly root?: string;
-  readonly json?: boolean;
-}
-
-function printJson(payload: unknown): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(JSON.stringify(payload, null, 2));
-}
-
-function printLine(line: string): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(line);
-}
-
-function printErr(line: string): void {
-  console.error(line);
-}
+import { type GlobalOpts, printErr, printJson, printLine } from '../output.js';
 
 function machinePaths(): ReturnType<typeof resolveMachinePaths> {
   return resolveMachinePaths();

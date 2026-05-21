@@ -15,10 +15,7 @@
 import type { Command } from 'commander';
 import { RootNotFoundError, resolveRoot } from '../../core/environment/index.js';
 import { BinaryNotFoundError, spawnClaudeBridge } from '../../domains/claude-bridge/index.js';
-
-interface GlobalOpts {
-  readonly root?: string;
-}
+import type { GlobalOpts } from '../output.js';
 
 function exitCodeFor(exitCode: number | null, signal: NodeJS.Signals | null): number {
   if (exitCode !== null) return exitCode;

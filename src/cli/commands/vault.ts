@@ -32,25 +32,7 @@ import {
   updateVaultConfig,
   type VaultConfig,
 } from '../../domains/vault-sync/index.js';
-
-interface GlobalOpts {
-  readonly root?: string;
-  readonly json?: boolean;
-}
-
-function printJson(payload: unknown): void {
-  // biome-ignore lint/suspicious/noConsole: CLI presenter output by design
-  console.log(JSON.stringify(payload, null, 2));
-}
-
-function printLine(line: string): void {
-  // biome-ignore lint/suspicious/noConsole: CLI presenter output by design
-  console.log(line);
-}
-
-function printErr(line: string): void {
-  console.error(line);
-}
+import { type GlobalOpts, printErr, printJson, printLine } from '../output.js';
 
 interface ResolvedVaultPaths {
   readonly vaultPath: string;

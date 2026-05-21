@@ -14,7 +14,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Command } from 'commander';
-import { RootNotFoundError, resolveRoot } from '../../core/environment/index.js';
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import {
   AutoDepsAmbiguousProviderError,
@@ -51,25 +50,7 @@ import {
   writeCatalog,
   writeCatalogLock,
 } from '../../domains/catalog/index.js';
-
-interface GlobalOpts {
-  readonly root?: string;
-  readonly json?: boolean;
-}
-
-function printJson(payload: unknown): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(JSON.stringify(payload, null, 2));
-}
-
-function printLine(line: string): void {
-  // biome-ignore lint/suspicious/noConsole: CLI output
-  console.log(line);
-}
-
-function printErr(line: string): void {
-  console.error(line);
-}
+import { type GlobalOpts, printErr, printJson, printLine, resolveRootOrExit } from '../output.js';
 
 interface InstallOpts {
   readonly autoDeps?: boolean;
@@ -96,16 +77,7 @@ async function actAutoDeps(globals: GlobalOpts, raw: string, opts: InstallOpts):
     );
     process.exit(2);
   }
-  let root: ReturnType<typeof resolveRoot>;
-  try {
-    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
-  } catch (err) {
-    if (err instanceof RootNotFoundError) {
-      printErr(`catalog install: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  const root = resolveRootOrExit(globals, 'catalog install');
   const machine = resolveMachinePaths();
   const cacheDir = tarballCacheDirFor(machine.dataRoot);
 
@@ -312,19 +284,9 @@ async function actInstall(globals: GlobalOpts, raw: string, opts: InstallOpts = 
     process.exit(2);
   }
 
-  let machinePaths: ReturnType<typeof resolveMachinePaths>;
-  let destination: string;
-  try {
-    const root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
-    machinePaths = resolveMachinePaths();
-    destination = join(root.path, 'config', 'skills', parsed.repo);
-  } catch (err) {
-    if (err instanceof RootNotFoundError) {
-      printErr(`catalog install: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  const root = resolveRootOrExit(globals, 'catalog install');
+  const machinePaths = resolveMachinePaths();
+  const destination = join(root.path, 'config', 'skills', parsed.repo);
   const cacheDir = tarballCacheDirFor(machinePaths.dataRoot);
   const url = githubTarballUrl(parsed);
 
@@ -393,16 +355,7 @@ function actResolve(globals: GlobalOpts, manifestPath: string): void {
 }
 
 function actList(globals: GlobalOpts): void {
-  let root: ReturnType<typeof resolveRoot>;
-  try {
-    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
-  } catch (err) {
-    if (err instanceof RootNotFoundError) {
-      printErr(`catalog list: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  const root = resolveRootOrExit(globals, 'catalog list');
   const paths = catalogPathsFor(root.path);
   let entries: readonly CatalogEntry[];
   let lockResolvedAt: string | null;
@@ -446,16 +399,7 @@ function actList(globals: GlobalOpts): void {
 }
 
 function resolveCatalogPath(globals: GlobalOpts, action: string): string {
-  let root: ReturnType<typeof resolveRoot>;
-  try {
-    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
-  } catch (err) {
-    if (err instanceof RootNotFoundError) {
-      printErr(`catalog ${action}: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  const root = resolveRootOrExit(globals, `catalog ${action}`);
   return catalogPathsFor(root.path).catalogPath;
 }
 
@@ -504,16 +448,7 @@ function actUninstall(globals: GlobalOpts, id: string): void {
 }
 
 async function actLock(globals: GlobalOpts): Promise<void> {
-  let root: ReturnType<typeof resolveRoot>;
-  try {
-    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
-  } catch (err) {
-    if (err instanceof RootNotFoundError) {
-      printErr(`catalog lock: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  const root = resolveRootOrExit(globals, 'catalog lock');
   const paths = catalogPathsFor(root.path);
   const machinePaths = resolveMachinePaths();
   const cacheDir = tarballCacheDirFor(machinePaths.dataRoot);
@@ -562,16 +497,7 @@ async function actLock(globals: GlobalOpts): Promise<void> {
 }
 
 async function actSync(globals: GlobalOpts): Promise<void> {
-  let root: ReturnType<typeof resolveRoot>;
-  try {
-    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
-  } catch (err) {
-    if (err instanceof RootNotFoundError) {
-      printErr(`catalog sync: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  const root = resolveRootOrExit(globals, 'catalog sync');
   const paths = catalogPathsFor(root.path);
   const machinePaths = resolveMachinePaths();
   const cacheDir = tarballCacheDirFor(machinePaths.dataRoot);
@@ -616,16 +542,7 @@ async function actSync(globals: GlobalOpts): Promise<void> {
 }
 
 async function actUpdate(globals: GlobalOpts, id: string | undefined): Promise<void> {
-  let root: ReturnType<typeof resolveRoot>;
-  try {
-    root = resolveRoot(globals.root === undefined ? {} : { explicit: globals.root });
-  } catch (err) {
-    if (err instanceof RootNotFoundError) {
-      printErr(`catalog update: ${err.message}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  const root = resolveRootOrExit(globals, 'catalog update');
   const paths = catalogPathsFor(root.path);
   const machinePaths = resolveMachinePaths();
   const cacheDir = tarballCacheDirFor(machinePaths.dataRoot);
