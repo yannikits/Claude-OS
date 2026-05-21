@@ -36,6 +36,7 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/claude-os-sidecar"],
+    "resources": ["binaries/node-pty/**"],
     "category": "DeveloperTool",
     "shortDescription": "claude-os desktop shell",
     "longDescription": "Tauri shell for claude-os — vault sync, catalog, agent runs, secrets."

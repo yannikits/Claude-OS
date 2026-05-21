@@ -1,74 +1,61 @@
 /**
- * Binding-Loader-Monkey-Patch fuer node-pty.
+ * Sideload-Loader fuer node-pty.
  *
- * Hintergrund: `@yao-pkg/pkg` (unser Sidecar-Bundler) baked das gesamte
- * `node_modules`-Tree in ein virtuelles snapshot-FS. Native `.node`-Files
- * funktionieren da nicht — sie muessen real-on-disk liegen. node-pty
- * resolved seine bindings via `lib/utils.js loadNativeModule()`, das
- * relativ zu `__dirname` in `build/Release/`, `build/Debug/` und
- * `prebuilds/<platform>-<arch>/` sucht. Im pkg-snapshot zeigen die alle
- * ins virtuelle FS und schlagen fehl.
+ * Hintergrund: `@yao-pkg/pkg` (unser Sidecar-Bundler) bundlet nur Files
+ * die statisch via `require('literal-string')` referenziert werden.
+ * `createRequire(import.meta.url).require(x)` ist dynamisch — pkg
+ * traced das nicht, also wird node-pty NICHT in den Snapshot bundleled.
+ * Zusaetzlich braucht node-pty seine `.node`-Bindings on-disk
+ * (Native-Module funktionieren nicht im Snapshot).
  *
- * Workaround: vor dem ersten `require('node-pty')` patchen wir
- * `lib/utils.js loadNativeModule` so dass es zuerst aus
- * `process.env.CLAUDE_OS_PTY_BINDINGS_DIR` laedt (gesetzt vom Tauri-
- * Supervisor — siehe `gui/src-tauri/src/supervisor.rs`). Wenn die
- * env-Var nicht gesetzt ist oder der bindings-Pfad nicht passt,
- * fall back auf die originale relative-paths-Suche (dev-mode ohne
- * pkg-Bundle funktioniert dann weiterhin).
+ * Loesung: nach `npm run sidecar:build` wird das komplette
+ * `node_modules/node-pty/`-Package nach `binaries/node-pty/` neben den
+ * Sidecar kopiert (inkl. `lib/`, `package.json`, `prebuilds/<arch>/`).
+ * Tauri's `bundle.resources` zieht das in den finalen App-Installer.
+ * Dieser Loader resolved zur Runtime den Sideload-Pfad via
+ * `dirname(process.execPath) + '/node-pty'`. node-ptys eigener
+ * `loadNativeModule` findet seine `.node`-Files dann ueber die
+ * normalen relativen Pfade.
  *
- * Wird per Spike auf Windows 10 validiert: `npm install node-pty@1.1.0`
- * landet prebuilds in `node_modules/node-pty/prebuilds/<platform>-<arch>/`,
- * der monkey-patch findet sie aus dem sideloaded resource-dir.
+ * Dev-mode (`node dist/sidecar/index.js`): faellt auf
+ * `require('node-pty')` aus dem `node_modules/`-Tree zurueck.
+ *
+ * Spike-validated auf Windows 10 mit useConptyDll:true.
  *
  * @module @sidecar/pty-binding-loader
  */
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const requireCjs = createRequire(import.meta.url);
 
-interface PtyUtilsModule {
-  loadNativeModule(name: string): { dir: string; module: unknown };
-}
-
-let patched = false;
-
 /**
- * Idempotenter Monkey-Patch. Erster Aufruf modifiziert das exports-
- * Object von `node-pty/lib/utils.js`; alle weiteren Aufrufe sind No-Ops.
- * MUSS vor dem ersten `require('node-pty')` ablaufen, sonst koennten
- * andere node-pty-Module bereits `loadNativeModule` per closure
- * gecached haben.
+ * Default-Pfad fuer sideloaded node-pty-Package, abgeleitet aus
+ * `process.execPath`. Beispiel auf Windows:
+ *   execPath: C:\...\binaries\claude-os-sidecar-x86_64-pc-windows-msvc.exe
+ *   node-pty: C:\...\binaries\node-pty\
  */
-function applyMonkeyPatch(): void {
-  if (patched) return;
-  patched = true;
-
-  const ptyUtils = requireCjs('node-pty/lib/utils.js') as PtyUtilsModule;
-  const original = ptyUtils.loadNativeModule.bind(ptyUtils);
-
-  ptyUtils.loadNativeModule = (name: string) => {
-    const bindingsDir = process.env.CLAUDE_OS_PTY_BINDINGS_DIR;
-    if (typeof bindingsDir === 'string' && bindingsDir.length > 0) {
-      try {
-        const fullPath = join(bindingsDir, `${name}.node`);
-        return { dir: bindingsDir, module: requireCjs(fullPath) };
-      } catch {
-        // Fallthrough: original-lookup probieren — z. B. weil das
-        // .node nicht ge-shipped wurde (dev) oder weil der CI-build
-        // den prebuild nicht in den resource-dir kopiert hat.
-      }
-    }
-    return original(name);
-  };
+function defaultNodePtyDir(): string {
+  return join(dirname(process.execPath), 'node-pty');
 }
 
 /**
- * Idempotenter node-pty-Loader. Wendet den Monkey-Patch an (no-op nach
- * dem ersten Call) und liefert das `node-pty`-Module zurueck.
+ * Laed node-pty entweder aus dem sideloaded-Pfad (production / pkg) oder
+ * via regular module-resolution aus node_modules (dev / unit-tests).
+ * Env-var `CLAUDE_OS_NODE_PTY_DIR` ueberschreibt den default.
  */
 export function loadNodePty(): typeof import('node-pty') {
-  applyMonkeyPatch();
-  return requireCjs('node-pty') as typeof import('node-pty');
+  const override = process.env.CLAUDE_OS_NODE_PTY_DIR;
+  if (typeof override === 'string' && override.length > 0) {
+    return requireCjs(override) as typeof import('node-pty');
+  }
+  const sideloadDir = defaultNodePtyDir();
+  try {
+    return requireCjs(sideloadDir) as typeof import('node-pty');
+  } catch {
+    // Dev-mode fallback: normale module-resolution. In den Unit-Tests
+    // zeigt `process.execPath` auf das `node`-binary, neben dem es kein
+    // `node-pty/` gibt — wir holen es aus `node_modules/node-pty/`.
+    return requireCjs('node-pty') as typeof import('node-pty');
+  }
 }
