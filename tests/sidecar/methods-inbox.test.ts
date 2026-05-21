@@ -151,7 +151,7 @@ describe('inbox.import RPC — C2 path-traversal/symlink-exfil-Schutz', () => {
     expect(err?.message).toMatch(/not a regular file/);
   });
 
-  it('multiple paths: alle Validierungen, partial-failure throws bei erstem bad src', async () => {
+  it('multiple paths: partial-state — guter src wird kopiert BEVOR bad src mid-loop wirft', async () => {
     const goodFile = join(tmpOutside, 'good.md');
     writeFileSync(goodFile, '# good\n');
     const credsDir = join(tmpHome, '.claude');
@@ -160,7 +160,34 @@ describe('inbox.import RPC — C2 path-traversal/symlink-exfil-Schutz', () => {
     writeFileSync(credsFile, '{}');
 
     const err = getError(await call([goodFile, credsFile]));
-    // Erste good wird kopiert; zweiter throw → inbox.import wirft mid-loop
     expect(err?.message).toMatch(/refusing to copy from sensitive root/);
+    // Codex-Round-2 finding documented: partial-state EXPECTED (kein
+    // transactional rollback). Goodfile landet im inbox, credsfile
+    // bleibt aussen vor.
+    const inboxFiles = readdirSync(join(tmpRoot, 'inbox'));
+    expect(inboxFiles.length).toBe(1);
+    expect(inboxFiles[0]).toMatch(/-good\.md$/);
+    // credentials waren NIE im inbox.
+    expect(inboxFiles.some((f) => f.includes('credentials'))).toBe(false);
+  });
+
+  it('Codex-Round-2: per-file counter im stamp verhindert basename-collision', async () => {
+    const dirA = join(tmpOutside, 'a');
+    const dirB = join(tmpOutside, 'b');
+    mkdirSync(dirA);
+    mkdirSync(dirB);
+    const fileA = join(dirA, 'note.md');
+    const fileB = join(dirB, 'note.md');
+    writeFileSync(fileA, '# A\n');
+    writeFileSync(fileB, '# B\n');
+
+    const response = await call([fileA, fileB]);
+    const result = getResult(response);
+    expect(result.count).toBe(2);
+    const inboxFiles = readdirSync(join(tmpRoot, 'inbox')).sort();
+    expect(inboxFiles.length).toBe(2);
+    // Filenames muessen unique sein — verifying via -1- + -2- counter prefix
+    expect(inboxFiles.some((f) => f.includes('-1-note.md'))).toBe(true);
+    expect(inboxFiles.some((f) => f.includes('-2-note.md'))).toBe(true);
   });
 });

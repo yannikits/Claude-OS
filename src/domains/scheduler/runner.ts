@@ -82,7 +82,11 @@ export function parseCommandTokens(input: string): readonly string[] {
 // Shell-metachar set that would re-introduce injection if `cmd` itself
 // (not args) is passed through `shell: true`. Node 20+ escapes args, but
 // not the command path. We refuse shell-mode if cmd contains any of these.
-const SHELL_METACHARS = /[&|<>"^();`$\\]/;
+// Backslash ist KEIN Metachar — Windows-Pfade `C:\Tools\app.exe` muessen
+// shell-mode (.cmd/.bat oder extensionless) durchlaufen koennen. Aber
+// `%` (cmd.exe env-expansion) und `!` (DelayedExpansion) MUESSEN dabei
+// blockiert werden — Codex-Round-2 finding.
+const SHELL_METACHARS = /[&|<>"^();`$%!]/;
 
 /**
  * Pick spawn-mode for a parsed command. Windows shells (`.cmd`/`.bat`)

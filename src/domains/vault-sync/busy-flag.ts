@@ -159,18 +159,33 @@ export class BusyFlag {
     return this.tryExclusiveWrite(next);
   }
 
-  /** Clears the flag. Safe to call when not currently held. */
+  /**
+   * Clears the flag wenn dieser Prozess (pid + hostname) ihn auch
+   * gesetzt hat. No-op wenn nicht gesetzt ODER von einem anderen
+   * Prozess gehalten wird — Codex-Round-2 finding: vorher konnte ein
+   * Prozess B den Lock von Prozess A clearen.
+   */
   release(): void {
     if (!existsSync(this.filePath)) return;
-    unlinkSync(this.filePath);
+    const current = this.read();
+    if (current === null) {
+      // Corrupt-state ist niemand-haelt-den-Lock → safe to clear.
+      this.bestEffortUnlink();
+      return;
+    }
+    const isOwner = current.pid === this.pid && current.hostname === this.hostname;
+    if (!isOwner) return; // Foreign lock — refuse to clear.
+    this.bestEffortUnlink();
   }
 
   /**
    * Explicit reset — used by `claude-os vault unlock` when the user
-   * accepts the loss of any in-flight work.
+   * accepts the loss of any in-flight work. Im Unterschied zu release()
+   * cleart forceReset() unconditional (Cross-Host-Crash-Recovery).
    */
   forceReset(): void {
-    this.release();
+    if (!existsSync(this.filePath)) return;
+    this.bestEffortUnlink();
   }
 
   /**

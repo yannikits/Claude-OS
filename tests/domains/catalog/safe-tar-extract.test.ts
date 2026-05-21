@@ -7,7 +7,15 @@
  * Tarball-Format reicht — die `tar` Package detected Plain-vs-Gzip
  * automatisch.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { create as tarCreate } from 'tar';
@@ -167,25 +175,22 @@ describe('safeExtractTar — malicious tarball rejection (C3)', () => {
   });
 
   it('wirft UnsafeTarballError bei parent-dir-Segment', async () => {
+    // Use a non-leading parent-segment so tar v7's own absolute-path
+    // rejection doesn't preempt our filter — we want to PROVE that
+    // safe-tar-extract's filter (not just tar's defaults) catches this.
     const evil = buildTarball([
       { name: 'pkg/normal.md', typeflag: '0', content: Buffer.from('# ok\n') },
-      { name: '../escape.md', typeflag: '0', content: Buffer.from('# escape\n') },
+      { name: 'pkg/sub/../../escape.md', typeflag: '0', content: Buffer.from('# escape\n') },
     ]);
     const archive = join(tmpBase, 'evil-traversal.tar');
     writeFileSync(archive, evil);
 
-    let caught: unknown;
-    try {
-      await safeExtractTar({ file: archive, cwd: dest });
-    } catch (err) {
-      caught = err;
-    }
-    // tar v7 rejects ../ paths natively too, so we accept EITHER our
-    // UnsafeTarballError OR a tar-level error — both prove the escape
-    // didn't materialize.
-    expect(caught).toBeDefined();
+    await expect(safeExtractTar({ file: archive, cwd: dest })).rejects.toBeInstanceOf(
+      UnsafeTarballError,
+    );
     // Verify nothing escaped above `dest`.
     expect(existsSync(join(tmpBase, 'escape.md'))).toBe(false);
+    expect(existsSync(join(dest, '..', 'escape.md'))).toBe(false);
   });
 
   it('mehrere Violations in einem Tarball werden in einer Fehlermeldung gesammelt', async () => {
@@ -211,7 +216,8 @@ describe('safeExtractTar — malicious tarball rejection (C3)', () => {
     // Klassisches CVE-Muster: erst Symlink `escape -> ..`, dann file
     // `escape/payload`. Wenn der Symlink durchgewunken wuerde, wuerde
     // payload OBERHALB von dest landen. safeExtractTar muss den Symlink
-    // ablehnen.
+    // ablehnen — explizit als UnsafeTarballError, nicht als generischen
+    // tar-Fehler.
     const evil = buildTarball([
       { name: 'pkg/escape', typeflag: '2', linkname: '..' },
       { name: 'pkg/escape/payload.txt', typeflag: '0', content: Buffer.from('PWND\n') },
@@ -225,14 +231,72 @@ describe('safeExtractTar — malicious tarball rejection (C3)', () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeDefined();
-    // Critical: no `payload.txt` outside dest.
+    expect(caught).toBeInstanceOf(UnsafeTarballError);
+    const violations = (caught as UnsafeTarballError).violations;
+    expect(violations.some((v) => v.includes('SymbolicLink'))).toBe(true);
+    // Critical: payload landed NICHT oberhalb von dest. Innerhalb von
+    // dest darf das file existieren (als regulaeres File in einem
+    // regulaeren Subdir) — das ist kein Sicherheitsproblem, der Symlink
+    // wurde nie materialisiert.
     expect(existsSync(join(tmpBase, 'payload.txt'))).toBe(false);
     expect(existsSync(join(dest, '..', 'payload.txt'))).toBe(false);
-    // Read the dest dir — only normal.md if any should be there
-    if (existsSync(dest)) {
-      const _entries = readdirSync(dest, { recursive: true });
-      // We don't assert exact contents — what matters is no escape.
+    // pkg/escape MUSS — wenn ueberhaupt — ein Directory sein (Symlink-
+    // Bytes wurden vom Filter verworfen, also kann es kein Symlink mehr
+    // sein).
+    if (existsSync(join(dest, 'pkg', 'escape'))) {
+      const statInfo = lstatSync(join(dest, 'pkg', 'escape'));
+      expect(statInfo.isSymbolicLink()).toBe(false);
     }
+  });
+
+  it('cleanupOnFailure: bei UnsafeTarballError wird dest komplett geleert', async () => {
+    const evil = buildTarball([
+      { name: 'pkg/clean1.md', typeflag: '0', content: Buffer.from('# c1\n') },
+      { name: 'pkg/clean2.md', typeflag: '0', content: Buffer.from('# c2\n') },
+      { name: 'pkg/bad-symlink', typeflag: '2', linkname: '/etc/passwd' },
+    ]);
+    const archive = join(tmpBase, 'evil-mixed.tar');
+    writeFileSync(archive, evil);
+
+    await expect(
+      safeExtractTar({ file: archive, cwd: dest, cleanupOnFailure: true }),
+    ).rejects.toBeInstanceOf(UnsafeTarballError);
+
+    // dest sollte nicht mehr existieren oder leer sein nach cleanup.
+    if (existsSync(dest)) {
+      const entries = readdirSync(dest, { recursive: true });
+      expect(entries).toEqual([]);
+    }
+  });
+
+  it('GNUSparse / unbekannte tar-types werden via ALLOW-list rejected', async () => {
+    // Codex-Round-2: switched from deny-list to allow-list. Verify a
+    // non-File/Directory/GNULongPath type (e.g. CharacterDevice via
+    // typeflag '3') is rejected.
+    const evil = buildTarball([
+      { name: 'pkg/dev', typeflag: '0', content: Buffer.from('# placeholder\n') },
+    ]);
+    // Mutate the typeflag byte at offset 156 in the first block to '3'
+    // (CharacterDevice). USTAR header starts at byte 0.
+    evil[156] = '3'.charCodeAt(0);
+    // Re-compute checksum (placeholder 8 spaces at offset 148-155)
+    evil.fill(0x20, 148, 156);
+    let chksum = 0;
+    for (let i = 0; i < 512; i++) chksum += evil[i] ?? 0;
+    evil.write(`${chksum.toString(8).padStart(6, '0')}\0 `, 148);
+
+    const archive = join(tmpBase, 'evil-chardev.tar');
+    writeFileSync(archive, evil);
+
+    let caught: unknown;
+    try {
+      await safeExtractTar({ file: archive, cwd: dest });
+    } catch (err) {
+      caught = err;
+    }
+    // Either UnsafeTarballError (via filter) or a generic tar error — both
+    // acceptable because the entry was rejected one way or the other.
+    expect(caught).toBeDefined();
+    expect(existsSync(join(dest, 'pkg', 'dev'))).toBe(false);
   });
 });

@@ -49,6 +49,22 @@ function rootPath(): string {
 }
 
 /**
+ * Canonicalisiert eine Liste von Root-Pfaden via `realpathSync`. Fehler
+ * (z. B. wenn die Pfad noch nicht existiert) werden geschluckt: dann
+ * bleibt der raw-Pfad in der Liste — `isUnder` wird sich auf Mismatch
+ * konservativ verhalten.
+ */
+function canonicalizeRoots(roots: readonly string[]): readonly string[] {
+  return roots.map((r) => {
+    try {
+      return realpathSync(r);
+    } catch {
+      return r;
+    }
+  });
+}
+
+/**
  * C2 (2026-05-21 code-review): true wenn `candidate` denselben Pfad ODER
  * eine Subdirectory von `root` ist. Beide muessen bereits canonical /
  * absolute sein. Plattform-unabhaengig via `path.relative`.
@@ -159,17 +175,20 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
     // Vorher konnte ein RPC-caller `inbox.import({paths: ["~/.claude/.credentials.json"]})`
     // rufen, das file ins vault/inbox/ kopieren und via vault-sync git-push
     // exfiltrieren. Fix: lstat (kein symlink-follow) + realpath + deny-list
-    // gegen sensitive Roots.
+    // gegen sensitive Roots. Codex-Round-2: denyRoots MUSS canonicalized
+    // sein damit ein symlink in `machine.dataDir` oder `home` nicht den
+    // isUnder-Vergleich umgeht (canonical src vs non-canonical denyRoot).
     const machine = resolveMachinePaths();
     const h = home();
-    const denyRoots: readonly string[] = [
-      machine.dataDir, // <dataDir>/secrets.enc, logs, vault-sync-state, ...
-      join(h, '.claude'), // Anthropic .credentials.json + ~/.claude/skills etc.
-      root, // Niemals aus dem cloud-mount-root selbst kopieren (recursion).
-    ];
+    const denyRoots: readonly string[] = canonicalizeRoots([
+      machine.dataDir,
+      join(h, '.claude'),
+      root,
+    ]);
 
     const stamp = new Date().toISOString().replaceAll(':', '-');
     const written: string[] = [];
+    let counter = 0;
     for (const src of params.paths) {
       if (typeof src !== 'string' || src.length === 0) {
         throw new Error(`inbox.import: each path must be a non-empty string, got ${typeof src}`);
@@ -206,7 +225,12 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
           );
         }
       }
-      const dest = join(inboxDir, `${stamp}-${basename(src)}`);
+      // Codex-Round-2 finding: per-file counter im Stamp verhindert dass
+      // zwei Sources mit gleichem basename (z. B. `C:\a\note.md` + `C:\b\note.md`)
+      // dasselbe dest produzieren — sonst ueberschreibt der zweite den
+      // ersten silent.
+      counter += 1;
+      const dest = join(inboxDir, `${stamp}-${counter}-${basename(src)}`);
       await fspCopyFile(canonical, dest);
       written.push(dest);
     }

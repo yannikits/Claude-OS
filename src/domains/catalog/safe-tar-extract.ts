@@ -19,6 +19,7 @@
  *
  * @module @domains/catalog/safe-tar-extract
  */
+import { rmSync } from 'node:fs';
 import { extract as tarExtract } from 'tar';
 
 export class UnsafeTarballError extends Error {
@@ -38,6 +39,14 @@ export interface SafeExtractOpts {
   readonly cwd: string;
   /** Strip-N-Components (siehe tar `strip`). Default 0. */
   readonly strip?: number;
+  /**
+   * Wenn true und `UnsafeTarballError` geworfen wird, wird der Inhalt
+   * von `cwd` rekursiv geloescht — verhindert partial-extracted clean
+   * entries auf Disk wenn der Tarball Bad-Entries enthielt. Default
+   * false (caller darf entscheiden ob das dest exklusiv fuer den Pull
+   * gehoert).
+   */
+  readonly cleanupOnFailure?: boolean;
 }
 
 /**
@@ -55,14 +64,14 @@ export async function safeExtractTar(opts: SafeExtractOpts): Promise<void> {
     preserveOwner: false,
     unlink: true,
     filter: (path, stat) => {
-      // Tar-v7 `stat.type` enthaelt z. B. 'File', 'Directory',
-      // 'SymbolicLink', 'Link' (hardlink), 'CharacterDevice',
-      // 'BlockDevice', 'FIFO', 'ContiguousFile', 'GNULongPath',
-      // 'GNULongLink', 'GNUSparse'. Erlaubt: nur File + Directory +
-      // GNULongPath (Path-Header).
+      // ALLOW-list (statt vorher Deny-list): nur File/Directory/
+      // GNULongPath sind erlaubt. Alles andere (SymbolicLink, Link
+      // (hardlink), CharacterDevice, BlockDevice, FIFO, ContiguousFile,
+      // GNUSparse, unbekannte Typen) wird abgelehnt — Codex-Round-2
+      // finding: Deny-list erlaubt zukuenftige Tar-Type-Varianten.
       const type = (stat as { type?: string }).type ?? 'File';
-      if (type === 'SymbolicLink' || type === 'Link') {
-        violations.push(`${type}: ${path}`);
+      if (type !== 'File' && type !== 'Directory' && type !== 'GNULongPath') {
+        violations.push(`forbidden-type ${type}: ${path}`);
         return false;
       }
       // Strip-Components passiert NACH filter; pruefe ../-Segmente vor
@@ -79,20 +88,20 @@ export async function safeExtractTar(opts: SafeExtractOpts): Promise<void> {
         violations.push(`absolute-path: ${path}`);
         return false;
       }
-      // Devices/FIFOs sind weder sinnvoll noch sicher in Plugin-Tarballs.
-      if (
-        type === 'CharacterDevice' ||
-        type === 'BlockDevice' ||
-        type === 'FIFO' ||
-        type === 'ContiguousFile'
-      ) {
-        violations.push(`forbidden-type ${type}: ${path}`);
-        return false;
-      }
       return true;
     },
   });
   if (violations.length > 0) {
+    if (opts.cleanupOnFailure === true) {
+      // Loesche alle bereits geschriebenen clean-entries — verhindert
+      // partial-extract-state auf Disk. Caller muss garantieren dass
+      // cwd exklusiv fuer diese Extraktion ist.
+      try {
+        rmSync(opts.cwd, { recursive: true, force: true });
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
     const preview = violations.slice(0, 5).join(', ');
     const suffix = violations.length > 5 ? ` (…+${violations.length - 5} more)` : '';
     throw new UnsafeTarballError(

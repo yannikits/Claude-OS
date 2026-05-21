@@ -132,6 +132,9 @@ async function extractIntoDestination(
       file: cachedPath,
       cwd: destination,
       strip: stripComponents,
+      // destination ist exklusiv fuer diesen Install — bei UnsafeTarball
+      // Error wird kein partial-state hinterlassen.
+      cleanupOnFailure: true,
     });
   } catch (err) {
     if (err instanceof UnsafeTarballError) {

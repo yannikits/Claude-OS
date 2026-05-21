@@ -187,5 +187,31 @@ describe('BusyFlag', () => {
       expect(successor.acquire('clean-snap')).toBe(true);
       expect(successor.read()?.pid).toBe(200);
     });
+
+    it('Codex-Round-2: release() von foreign owner ist no-op', () => {
+      // Prozess A haelt den Lock. Prozess B ruft release() — darf
+      // den Lock NICHT clearen.
+      const owner = makeFlag({ pid: 100 });
+      expect(owner.acquire('owner-snap')).toBe(true);
+
+      const foreigner = makeFlag({ pid: 200 });
+      foreigner.release();
+
+      // Lock haelt weiter — owner's state unangetastet.
+      expect(existsSync(filePath)).toBe(true);
+      expect(makeFlag().read()?.pid).toBe(100);
+    });
+
+    it('Codex-Round-2: forceReset() cleart auch foreign locks (user-explicit-unlock)', () => {
+      // Cross-Host-Crash-Recovery: User auf Maschine B sagt explizit
+      // "der Lock von Maschine A ist tot, raus damit".
+      const flagA = makeFlag({ hostname: 'machine-A', pid: 99 });
+      flagA.acquire('snap');
+
+      const flagB = makeFlag({ hostname: 'machine-B', pid: 200 });
+      flagB.forceReset();
+      expect(flagB.read()).toBeNull();
+      expect(existsSync(filePath)).toBe(false);
+    });
   });
 });
