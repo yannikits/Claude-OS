@@ -120,6 +120,40 @@ describe('checkAuthState', () => {
     expect(state.warning).toMatch(/token expires at/);
   });
 
+  it('M34: NaN expiresAt → fromFile returns null → falls through to no-creds', async () => {
+    writeCreds({
+      claudeAiOauth: {
+        accessToken: 'at',
+        refreshToken: 'rt',
+        // readCredentialsFile lehnt non-number ab, aber NaN ist ein number.
+        // Wir muessen den File direkt mit NaN-sentinel patchen.
+        expiresAt: 0,
+        scopes: [],
+      },
+    });
+    // NaN ist nicht JSON-serialisierbar; wir patchen den File direkt.
+    writeFileSync(
+      join(configDir, '.credentials.json'),
+      '{"claudeAiOauth":{"accessToken":"at","refreshToken":"rt","expiresAt":null,"scopes":[]}}',
+    );
+    // readCredentialsFile rejected typeof !== 'number' → returns null →
+    // state-check fallthrough → no-creds. M34-Guard greift NICHT auf
+    // dieser Lane (Defense bleibt fuer den nicht-passing-type-Pfad).
+    const stateNullExpires = await checkAuthState({ home: tmpBase, env: {} });
+    expect(stateNullExpires.source).toBe('no-creds');
+
+    // Realistic M34-Lane: schreibe Infinity als JSON-Number (parsed wird zu Infinity).
+    // JSON.stringify(Infinity) → "null"; wir muessen das raw schreiben.
+    writeFileSync(
+      join(configDir, '.credentials.json'),
+      '{"claudeAiOauth":{"accessToken":"at","refreshToken":"rt","expiresAt":1e999,"scopes":["user"]}}',
+    );
+    const stateInfinity = await checkAuthState({ home: tmpBase, env: {} });
+    // JSON.parse("1e999") → Infinity. Number.isFinite(Infinity) → false → null
+    // → fall-through zu no-creds.
+    expect(stateInfinity.source).toBe('no-creds');
+  });
+
   it('returns no-creds when nothing is found', async () => {
     const state = await checkAuthState({ home: tmpBase, env: {} });
     expect(state.source).toBe('no-creds');

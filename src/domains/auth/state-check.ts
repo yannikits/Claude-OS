@@ -54,6 +54,12 @@ function fromFile(opts: StateCheckOpts): AuthState | null {
   });
   if (envelope === null) return null;
   const expiresAtMs = envelope.claudeAiOauth.expiresAt;
+  // M34 (2026-05-21 code-review): readCredentialsFile akzeptiert
+  // `typeof expiresAt === 'number'`, was NaN und Infinity einschliesst.
+  // Mit NaN waere `expiresAtMs > nowMs` silent false → loggedIn=false
+  // ohne Hinweis warum. Hier explizit checken und als malformed-creds
+  // behandeln (fall-through zu noCreds).
+  if (!Number.isFinite(expiresAtMs)) return null;
   const nowMs = (opts.now ?? (() => new Date()))().getTime();
   const threshold = opts.expiresSoonMs ?? DEFAULT_EXPIRES_SOON_MS;
   const expiresAt = new Date(expiresAtMs).toISOString();
