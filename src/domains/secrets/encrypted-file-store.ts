@@ -118,10 +118,12 @@ function decryptEnvelope(envelope: FileEnvelope, masterKey: string): Record<stri
     return parsed as Record<string, string>;
   } catch (err) {
     if (err instanceof SecretsError) throw err;
-    throw new SecretsError(
-      'Decryption failed — wrong master key or corrupted file. ' +
-        (err instanceof Error ? err.message : String(err)),
-    );
+    // M6 (2026-05-21 code-review): KEIN err.message-Propagation — Node's
+    // GCM-auth-fail Message wuerde durch heartbeat/spawn-Logger fliessen
+    // (ADR-0004 §51 verbietet Value-Logs). Fester String + opake
+    // Diskriminierung "wrong master key OR corrupted file" — Attacker
+    // bekommt keine Information ob der Master-Key korrekt war.
+    throw new SecretsError('Decryption failed — wrong master key or corrupted file');
   }
 }
 
