@@ -91,7 +91,6 @@ export class RpcDispatcher {
         // sollten. Wir loggen auf stderr (geht zum Tauri-Supervisor)
         // und verschlucken den Error trotzdem auf Wire-Ebene.
         const msg = err instanceof Error ? err.message : String(err);
-        // biome-ignore lint/suspicious/noConsole: stderr is the diagnostic channel for the sidecar
         console.error(`rpc notification handler error (method=${parsed.method}): ${msg}`);
       }
       return null;

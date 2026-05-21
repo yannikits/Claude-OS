@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// biome-ignore-all lint/suspicious/noConsole: CLI-Tool — console-Output ist gewollt.
 // Diagnose-Skript für Stop-Hook-Hänger auf Windows.
 //
 // Liest alle settings*.json unter ~/.claude/{settings.json,plugins/marketplaces/**/.claude/settings.json}
@@ -15,8 +16,6 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-// biome-ignore-all lint/suspicious/noConsole: CLI-Tool — console-Output ist gewollt.
 
 const CLAUDE_DIR = join(homedir(), '.claude');
 
@@ -114,17 +113,19 @@ function main() {
   let totalHooks = 0;
   let risks = 0;
 
-  console.log(`Stop-Hook-Audit (${process.platform}, ${files.length} Settings-Dateien gescannt)\n`);
+  console.info(
+    `Stop-Hook-Audit (${process.platform}, ${files.length} Settings-Dateien gescannt)\n`,
+  );
 
   for (const file of files) {
     const parseResult = safeParse(file);
     if (!parseResult.ok) {
-      console.log(`! ${file}\n  (JSON-Parse-Fehler — ueberspringe: ${parseResult.error})\n`);
+      console.info(`! ${file}\n  (JSON-Parse-Fehler — ueberspringe: ${parseResult.error})\n`);
       continue;
     }
     const hooks = extractStopHooks(parseResult.data);
     if (hooks.length === 0) continue;
-    console.log(`--- ${file.replace(homedir(), '~')} ---`);
+    console.info(`--- ${file.replace(homedir(), '~')} ---`);
     for (const hook of hooks) {
       totalHooks++;
       const klass = classifyCommand(hook.command ?? '');
@@ -140,16 +141,16 @@ function main() {
       const tmo = hook.timeout ?? '(default)';
       const onErr =
         hook.continueOnError === true ? 'continueOnError=true' : 'continueOnError=false';
-      console.log(`  ${marker}  timeout=${tmo}  ${onErr}`);
-      console.log(`    cmd: ${hook.command}`);
-      console.log(`    why: ${klass.reason}`);
+      console.info(`  ${marker}  timeout=${tmo}  ${onErr}`);
+      console.info(`    cmd: ${hook.command}`);
+      console.info(`    why: ${klass.reason}`);
     }
-    console.log('');
+    console.info('');
   }
 
-  console.log(`\nZusammenfassung: ${totalHooks} Stop-Hook(s) gefunden, ${risks} mit Risiko.`);
+  console.info(`\nZusammenfassung: ${totalHooks} Stop-Hook(s) gefunden, ${risks} mit Risiko.`);
   if (risks > 0) {
-    console.log(
+    console.info(
       '\nEmpfehlung: Plattform-uebergreifender Hook-Konflikt — siehe docs/troubleshooting/stop-hook-hang.md',
     );
     process.exit(1);

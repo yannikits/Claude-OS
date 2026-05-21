@@ -120,7 +120,7 @@ describe('agent.list RPC', () => {
     }));
     writeFileSync(
       join(runsDir, 'demo-m1.jsonl'),
-      records.map((r) => JSON.stringify(r)).join('\n') + '\n',
+      `${records.map((r) => JSON.stringify(r)).join('\n')}\n`,
     );
 
     const d = new RpcDispatcher();
@@ -137,7 +137,7 @@ describe('agent.list RPC', () => {
     mkdirSync(runsDir, { recursive: true });
     writeFileSync(
       join(runsDir, 'demo-m1.jsonl'),
-      JSON.stringify({
+      `${JSON.stringify({
         version: 1 as const,
         runId: 'r1',
         project: 'demo',
@@ -149,7 +149,7 @@ describe('agent.list RPC', () => {
         prompt: 'p',
         binaryPath: '/x/claude',
         binarySource: 'override' as const,
-      }) + '\n',
+      })}\n`,
     );
     const d = new RpcDispatcher();
     registerMethods(d);

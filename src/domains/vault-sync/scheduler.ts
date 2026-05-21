@@ -120,7 +120,6 @@ export class VaultScheduler {
         // M27-Default: stderr-Log mit minimaler shape. Sidecar/CLI kann
         // einen Pino-Logger injizieren wenn struktiertes Logging gewollt.
         const message = err instanceof Error ? err.message : String(err);
-        // biome-ignore lint/suspicious/noConsole: scheduler is a domain — Logger-Injection ist optional
         console.error(`vault-sync chokidar error: ${message}`);
       });
   }

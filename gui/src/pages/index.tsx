@@ -543,6 +543,7 @@ export function ChatPage() {
     activeSessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `log` ist intentional — auto-scroll-on-new-log-line (gleiches Pattern wie stderr-drawer).
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
