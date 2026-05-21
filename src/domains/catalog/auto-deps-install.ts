@@ -44,6 +44,14 @@ export interface AutoDepsInstallOpts {
   readonly root: string;
   /** Cache-Dir fuer Tarballs (typically dataRoot/tarballs). */
   readonly cacheDir: string;
+  /**
+   * M18 (2026-05-21 code-review): wenn `true`, kehrt die Funktion nach
+   * Resolution direkt zurueck OHNE catalog.json / catalog.lock.json zu
+   * schreiben oder Tarballs zu extrahieren. `applyResult` ist dann ein
+   * leeres Stub-Result. CLI nutzt das fuer `--json` plan-only-Output.
+   * Default `false` — bestehende Sidecar-RPC-Caller bleiben back-compat.
+   */
+  readonly dryRun?: boolean;
 }
 
 export interface AutoDepsInstallResult {
@@ -54,6 +62,8 @@ export interface AutoDepsInstallResult {
   readonly catalogPath: string;
   readonly lockPath: string;
   readonly lockWarnings: readonly string[];
+  /** M18: true wenn `dryRun` Opt war — Persistierung uebersprungen. */
+  readonly dryRun: boolean;
 }
 
 export class AutoDepsInstallError extends Error {
@@ -230,6 +240,22 @@ export async function installFromGithubWithAutoDeps(
   }
   const newCatalog = { version: 1 as const, entries: mergedEntries };
 
+  // M18 (2026-05-21 code-review): dryRun-Mode kehrt hier zurueck. Catalog
+  // wird NICHT geschrieben, kein Lock-Build, kein FS-Extract. CLI nutzt
+  // das fuer `--json` plan-only-output.
+  if (opts.dryRun === true) {
+    return {
+      targetManifest,
+      newEntries: resolution.newEntries,
+      iterations: resolution.iterations,
+      applyResult: { applied: [], skipped: [], errors: [] },
+      catalogPath: catalogPaths.catalogPath,
+      lockPath: catalogPaths.lockPath,
+      lockWarnings: [],
+      dryRun: true,
+    };
+  }
+
   // Phase 1: Lock IN-MEMORY bauen — kein FS-Write bisher
   let newLock: Awaited<ReturnType<typeof lockCatalog>>;
   try {
@@ -265,5 +291,6 @@ export async function installFromGithubWithAutoDeps(
     catalogPath: catalogPaths.catalogPath,
     lockPath: catalogPaths.lockPath,
     lockWarnings: newLock.warnings,
+    dryRun: false,
   };
 }

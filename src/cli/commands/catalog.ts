@@ -16,38 +16,31 @@ import { join } from 'node:path';
 import type { Command } from 'commander';
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import {
-  AutoDepsAmbiguousProviderError,
-  AutoDepsError,
-  AutoDepsMissingProviderError,
+  AutoDepsInstallError,
   applyLock,
   type Catalog,
   type CatalogConfig,
   type CatalogEntry,
   type CatalogLock,
   catalogPathsFor,
-  createMarketplaceProviderLookup,
-  fileLoader,
   githubTarballUrl,
   InvalidCatalogError,
+  installFromGithubWithAutoDeps,
   installFromTarball,
   LockBuilderError,
   lockCatalog,
-  MarketplaceRegistry,
   mergeLockEntry,
   type PluginManifest,
   parseSource,
   readCatalog,
   readCatalogLock,
-  readPluginManifestFromTarball,
   removeCatalogEntry,
-  resolveAutoDeps,
   resolveCapabilities,
   SourceParseError,
   setCatalogEntryEnabled,
   TarballInstallError,
   tarballCacheDirFor,
   UnknownCatalogEntryError,
-  writeCatalog,
   writeCatalogLock,
 } from '../../domains/catalog/index.js';
 import { type GlobalOpts, printErr, printJson, printLine, resolveRootOrExit } from '../output.js';
@@ -57,6 +50,28 @@ interface InstallOpts {
   readonly registry?: string;
 }
 
+/**
+ * M18 (2026-05-21 code-review): Map `AutoDepsInstallError.code` auf die
+ * historischen exit-codes des CLI. Domain-Funktion ist code-agnostisch;
+ * CLI behaelt die etablierten Codes (4=missing-provider, 5=auto-deps-
+ * error, 6=ambiguous, 7=lock-build, 1=alles andere) damit Skripte die
+ * `claude-os catalog install --auto-deps` wrappen back-compat bleiben.
+ */
+function exitCodeForAutoDepsError(code: string): number {
+  switch (code) {
+    case 'missing-provider':
+      return 4;
+    case 'auto-deps-error':
+      return 5;
+    case 'ambiguous-provider':
+      return 6;
+    case 'lock-build':
+      return 7;
+    default:
+      return 1;
+  }
+}
+
 async function actAutoDeps(globals: GlobalOpts, raw: string, opts: InstallOpts): Promise<void> {
   if (opts.registry === undefined) {
     printErr(
@@ -64,189 +79,77 @@ async function actAutoDeps(globals: GlobalOpts, raw: string, opts: InstallOpts):
     );
     process.exit(2);
   }
-  let parsed: ReturnType<typeof parseSource>;
-  try {
-    parsed = parseSource(raw);
-  } catch (err) {
-    printErr(`catalog install: ${err instanceof SourceParseError ? err.message : String(err)}`);
-    process.exit(1);
-  }
-  if (parsed.kind !== 'github') {
-    printErr(
-      'catalog install --auto-deps: nur github: Sources unterstuetzt (marketplace/local: deferred zu v1.6)',
-    );
-    process.exit(2);
-  }
   const root = resolveRootOrExit(globals, 'catalog install');
   const machine = resolveMachinePaths();
   const cacheDir = tarballCacheDirFor(machine.dataRoot);
 
-  // Target-Tarball fetchen via lockCatalog-Hilfsfunktion-Pattern: wir
-  // bauen einen einzelnen-Eintrags-Lock fuer den Target damit das
-  // Tarball gecached wird und das Manifest peekbar ist.
-  const stubCatalog: import('../../domains/catalog/index.js').CatalogConfig = {
-    version: 1,
-    entries: [
-      {
-        id: `auto-deps-target-${parsed.owner}-${parsed.repo}`,
-        kind: 'plugin',
-        source: raw,
-        enabled: true,
-        scope: 'user',
-      },
-    ],
-  };
-  let stubLock: Awaited<ReturnType<typeof lockCatalog>>;
+  // M18: Domain-Funktion macht den eigentlichen Flow — wir uebernehmen
+  // nur CLI-Validation, exit-code-mapping und User-facing-Output.
+  let result: Awaited<ReturnType<typeof installFromGithubWithAutoDeps>>;
   try {
-    stubLock = await lockCatalog({ catalog: stubCatalog, cacheDir });
-  } catch (err) {
-    printErr(
-      `catalog install --auto-deps: Target-Fetch fehlgeschlagen: ${err instanceof LockBuilderError ? err.message : String(err)}`,
-    );
-    process.exit(1);
-  }
-  const targetLockEntry = stubLock.lock.entries[0];
-  if (targetLockEntry === undefined) {
-    printErr(
-      `catalog install --auto-deps: Target-Tarball konnte nicht fetched werden (${stubLock.warnings.join('; ')})`,
-    );
-    process.exit(1);
-  }
-  const targetTarball = join(cacheDir, `${targetLockEntry.sha256}.tar.gz`);
-  const targetManifestRead = await readPluginManifestFromTarball(targetTarball);
-  if (targetManifestRead.ok === false) {
-    printErr(
-      `catalog install --auto-deps: Target hat kein lesbares plugin.json (${targetManifestRead.reason})`,
-    );
-    process.exit(1);
-  }
-  const targetManifest = targetManifestRead.manifest;
-
-  // Registry laden und Provider-Lookup bauen
-  const registry = new MarketplaceRegistry({ load: fileLoader(opts.registry) });
-  const providerLookup = createMarketplaceProviderLookup({
-    registry,
-    cacheDir,
-  });
-
-  // Bestehenden Catalog laden um existierende Manifests zu sammeln
-  const catalogPaths = catalogPathsFor(root.path);
-  const existingCatalog = readCatalog(catalogPaths.catalogPath);
-  const existingManifests = new Map<string, PluginManifest>();
-  existingManifests.set(targetManifest.id, targetManifest);
-
-  let resolution: Awaited<ReturnType<typeof resolveAutoDeps>>;
-  try {
-    resolution = await resolveAutoDeps({
-      catalog: existingCatalog,
-      existingManifests,
-      lookupProvider: providerLookup,
+    result = await installFromGithubWithAutoDeps({
+      source: raw,
+      registryPath: opts.registry,
+      root: root.path,
+      cacheDir,
+      dryRun: globals.json === true,
     });
   } catch (err) {
-    if (err instanceof AutoDepsMissingProviderError) {
-      printErr(
-        `[FAIL] auto-deps: kein Marketplace-Provider fuer Capability "${err.capability}" (required by "${err.requiredBy}")`,
-      );
-      process.exit(4);
-    }
-    if (err instanceof AutoDepsAmbiguousProviderError) {
-      printErr(
-        `[FAIL] auto-deps: mehrdeutige Provider fuer "${err.capability}" — Kandidaten: ${err.candidates.join(', ')}`,
-      );
-      process.exit(6);
-    }
-    if (err instanceof AutoDepsError) {
-      printErr(`[FAIL] auto-deps: ${err.message}`);
-      process.exit(5);
+    if (err instanceof AutoDepsInstallError) {
+      // Spezielle Behandlung fuer "unsupported-source" (CLI-friendly Text)
+      if (err.code === 'unsupported-source') {
+        printErr(
+          'catalog install --auto-deps: nur github: Sources unterstuetzt (marketplace/local: deferred zu v1.6)',
+        );
+        process.exit(2);
+      }
+      // source-parse, target-fetch, target-manifest, missing-provider,
+      // ambiguous-provider, auto-deps-error, lock-build
+      const prefix =
+        err.code === 'missing-provider' ||
+        err.code === 'ambiguous-provider' ||
+        err.code === 'auto-deps-error' ||
+        err.code === 'lock-build'
+          ? '[FAIL] auto-deps: '
+          : 'catalog install --auto-deps: ';
+      printErr(`${prefix}${err.message}`);
+      process.exit(exitCodeForAutoDepsError(err.code));
     }
     throw err;
   }
 
   // Plan-Output: was waere neu installiert?
-  if (globals.json === true) {
+  if (result.dryRun) {
     printJson({
-      target: { id: targetManifest.id, source: raw },
-      newEntries: resolution.newEntries,
-      iterations: resolution.iterations,
+      target: { id: result.targetManifest.id, source: raw },
+      newEntries: result.newEntries,
+      iterations: result.iterations,
     });
     return;
-  }
-  printLine(`[OK] auto-deps fuer ${targetManifest.id}@${targetManifest.version} aufgeloest`);
-  printLine(`     Iterationen bis Fixpoint: ${resolution.iterations}`);
-  if (resolution.newEntries.length === 0) {
-    printLine('     Keine zusaetzlichen Provider noetig — Target ist autark.');
-    return;
-  }
-  printLine(`     Neue Catalog-Eintraege (${resolution.newEntries.length}):`);
-  for (const entry of resolution.newEntries) {
-    printLine(`       + ${entry.id}  (${entry.kind}, ${entry.scope})  source=${entry.source}`);
-  }
-
-  // Catalog persistieren — Target + alle neuen Entries
-  const targetEntry: CatalogEntry = {
-    id: targetManifest.id,
-    kind: 'plugin',
-    source: raw,
-    enabled: true,
-    scope: 'user',
-  };
-  const mergedEntries: CatalogEntry[] = [];
-  for (const e of existingCatalog.entries) {
-    if (e.id === targetEntry.id) continue;
-    mergedEntries.push(e);
-  }
-  mergedEntries.push(targetEntry);
-  for (const e of resolution.newEntries) {
-    if (mergedEntries.some((m) => m.id === e.id)) continue;
-    mergedEntries.push(e);
-  }
-  const newCatalog = { version: 1 as const, entries: mergedEntries };
-  writeCatalog(catalogPaths.catalogPath, newCatalog);
-  printLine(`     catalog.json aktualisiert: ${catalogPaths.catalogPath}`);
-
-  // ---- Phase 5r: Lock + Sync direkt mitlaufen lassen ----
-  // Bisher musste der User `catalog lock && catalog sync` separat
-  // aufrufen. Das ist Bullshit-UX wenn --auto-deps das ganze Plan-
-  // Resultat schon ermittelt hat. Wir lassen lockCatalog + applyLock
-  // direkt mitlaufen damit der Install end-to-end vollendet ist.
-  let newLock: Awaited<ReturnType<typeof lockCatalog>>;
-  try {
-    newLock = await lockCatalog({ catalog: newCatalog, cacheDir });
-  } catch (err) {
-    printErr(
-      `[FAIL] Lock-Build nach Catalog-Update fehlgeschlagen: ${err instanceof LockBuilderError ? err.message : String(err)}`,
-    );
-    printLine(
-      '     catalog.json wurde geschrieben — manuell `catalog lock && catalog sync` versuchen.',
-    );
-    process.exit(7);
-  }
-  if (newLock.warnings.length > 0) {
-    printLine('     Lock-Build Warnings:');
-    for (const w of newLock.warnings) printLine(`       ! ${w}`);
-  }
-  writeCatalogLock(catalogPaths.lockPath, newLock.lock);
-  printLine(`     catalog.lock.json geschrieben: ${catalogPaths.lockPath}`);
-
-  let applyResult: Awaited<ReturnType<typeof applyLock>>;
-  try {
-    applyResult = await applyLock({
-      root: root.path,
-      catalog: newCatalog,
-      lock: newLock.lock,
-      cacheDir,
-    });
-  } catch (err) {
-    printErr(
-      `[FAIL] Sync nach Catalog-Update fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    process.exit(8);
   }
   printLine(
-    `     Sync abgeschlossen: ${applyResult.applied.length} installiert, ${applyResult.skipped.length} skipped, ${applyResult.errors.length} fehlgeschlagen`,
+    `[OK] auto-deps fuer ${result.targetManifest.id}@${result.targetManifest.version} aufgeloest`,
   );
-  if (applyResult.errors.length > 0) {
-    for (const e of applyResult.errors) printLine(`       ! ${e.id}: ${e.message}`);
+  printLine(`     Iterationen bis Fixpoint: ${result.iterations}`);
+  if (result.newEntries.length === 0) {
+    printLine('     Keine zusaetzlichen Provider noetig — Target ist autark.');
+  } else {
+    printLine(`     Neue Catalog-Eintraege (${result.newEntries.length}):`);
+    for (const entry of result.newEntries) {
+      printLine(`       + ${entry.id}  (${entry.kind}, ${entry.scope})  source=${entry.source}`);
+    }
+  }
+  printLine(`     catalog.json aktualisiert: ${result.catalogPath}`);
+  if (result.lockWarnings.length > 0) {
+    printLine('     Lock-Build Warnings:');
+    for (const w of result.lockWarnings) printLine(`       ! ${w}`);
+  }
+  printLine(`     catalog.lock.json geschrieben: ${result.lockPath}`);
+  printLine(
+    `     Sync abgeschlossen: ${result.applyResult.applied.length} installiert, ${result.applyResult.skipped.length} skipped, ${result.applyResult.errors.length} fehlgeschlagen`,
+  );
+  if (result.applyResult.errors.length > 0) {
+    for (const e of result.applyResult.errors) printLine(`       ! ${e.id}: ${e.message}`);
     process.exit(9);
   }
 }
