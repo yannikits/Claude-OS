@@ -79,7 +79,12 @@ export interface MigrationPlan {
 /** Resultat eines einzelnen Plan-Schritts nach Execute. */
 export interface StepResult {
   readonly step: PlanStep;
-  readonly status: 'success' | 'skipped' | 'failed';
+  /**
+   * M29 (2026-05-21 code-review): `'aborted'` markiert Schritte die nach
+   * einem vorherigen `failed`-Step uebersprungen wurden — vorher
+   * surfaceten sie als `'skipped'` was wie ein dry-run aussah.
+   */
+  readonly status: 'success' | 'skipped' | 'failed' | 'aborted';
   readonly message: string;
   /** Anzahl kopierter Files (nur bei copy-tree gefüllt). */
   readonly filesCopied?: number;

@@ -219,11 +219,26 @@ export async function executePlan(opts: ExecutePlanOpts): Promise<MigrationResul
   // geändert haben).
   assertNoOverlap(plan.source.root, plan.target);
 
+  // M29 (2026-05-21 code-review): nach einem `failed`-Step werden
+  // Folge-Steps NICHT mehr ausgefuehrt, sondern als `'aborted'`
+  // markiert. Vorher liefen sie weiter und retournten `'skipped'` was
+  // dry-run-Output identisch sah — User dachte alles waere OK.
   const results: StepResult[] = [];
+  let aborted = false;
   for (const step of plan.steps) {
-    results.push(await runStep(step, dryRun, overwrite));
+    if (aborted) {
+      results.push({
+        step,
+        status: 'aborted',
+        message: 'uebersprungen — vorheriger Schritt ist fehlgeschlagen',
+      });
+      continue;
+    }
+    const result = await runStep(step, dryRun, overwrite);
+    results.push(result);
+    if (result.status === 'failed') aborted = true;
   }
-  const success = results.every((r) => r.status !== 'failed');
+  const success = results.every((r) => r.status !== 'failed' && r.status !== 'aborted');
   return {
     plan,
     results,
