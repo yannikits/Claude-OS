@@ -19,6 +19,13 @@ export type BinarySource = 'bin' | 'path' | 'override';
 export interface ResolvedBinary {
   readonly path: string;
   readonly source: BinarySource;
+  /**
+   * M2 (2026-05-21 code-review): non-fatal Sicherheits-Warnung wenn die
+   * Aufloesung den $PATH-Fallback genutzt hat. CLI-Layer kann die
+   * Warning per stderr oder doctor an den User weitergeben. Default
+   * undefined wenn keine Warnung anfaellt.
+   */
+  readonly warning?: string;
 }
 
 export interface BridgeOpts {

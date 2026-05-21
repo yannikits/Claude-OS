@@ -66,6 +66,36 @@ describe('resolveClaudeBinary', () => {
     expect(result.path).toBe(onPath);
   });
 
+  it('M2: $PATH-Resolution attached eine Sicherheits-Warnung', () => {
+    const onPath = join(pathDir, 'claude');
+    writeFileSync(onPath, '#!/bin/sh\n');
+    const result = resolveClaudeBinary({
+      rootPath,
+      env: { PATH: pathDir },
+      platform: 'linux',
+    });
+    expect(result.source).toBe('path');
+    expect(result.warning).toBeDefined();
+    expect(result.warning).toMatch(/PATH/);
+    expect(result.warning).toMatch(/hijacked/);
+  });
+
+  it('M2: bin-Resolution attached KEINE Warnung (sicherer Pfad)', () => {
+    const binFile = join(rootPath, 'bin', 'claude');
+    writeFileSync(binFile, '#!/bin/sh\n');
+    const result = resolveClaudeBinary({ rootPath, platform: 'linux' });
+    expect(result.source).toBe('bin');
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('M2: override-Resolution attached KEINE Warnung (User-Explicit)', () => {
+    const override = join(tmpBase, 'override-claude');
+    writeFileSync(override, '#!/bin/sh\n');
+    const result = resolveClaudeBinary({ binaryPath: override, platform: 'linux' });
+    expect(result.source).toBe('override');
+    expect(result.warning).toBeUndefined();
+  });
+
   it('throws BinaryNotFoundError when neither rootPath nor PATH yields a match', () => {
     expect(() =>
       resolveClaudeBinary({
