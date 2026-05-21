@@ -161,8 +161,5 @@ describe('EncryptedFileStore', () => {
     const items = await store.list();
     const keys = items.map((i) => i.key).sort();
     expect(keys).toEqual(['new-0', 'new-1', 'new-2', 'new-3', 'new-4']);
-  }, // PBKDF2-600k Re-Derive bei jeder Mutation summieren sich auf // Windows-CI: proper-lockfile retries (10 × 25-250ms exponential) +
-  // langsamen GitHub-Actions-Runnern auf > 5s default-timeout. 15s ist
-  // konservativ; local-Run faellt typically in < 2s ab.
-  15_000);
+  }, 15_000);
 });
