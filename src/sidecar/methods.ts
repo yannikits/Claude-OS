@@ -9,6 +9,7 @@ import { ProfileManager } from '../domains/auth/index.js';
 import {
   AutoDepsInstallError,
   catalogPathsFor,
+  InvalidCatalogError,
   installFromGithubWithAutoDeps,
   readCatalog,
   readCatalogLock,
@@ -84,14 +85,25 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
   const home = (): string => opts.home ?? homedir();
   dispatcher.register('catalog.list', () => {
     const paths = catalogPathsFor(rootPath());
-    const catalog = readCatalog(paths.catalogPath);
-    const lock = readCatalogLock(paths.lockPath);
-    return {
-      catalogPath: paths.catalogPath,
-      lockPath: paths.lockPath,
-      lockResolvedAt: lock?.resolvedAt ?? null,
-      entries: catalog.entries,
-    };
+    // M11 (2026-05-21 code-review): InvalidCatalogError propagiert sonst
+    // den File-Path in der Error-Message — RPC-Peers (GUI) bekommen die
+    // interne Pfad-Struktur zu sehen. Catch + opaque error-shape, success
+    // shape bleibt back-compat-stabil.
+    try {
+      const catalog = readCatalog(paths.catalogPath);
+      const lock = readCatalogLock(paths.lockPath);
+      return {
+        catalogPath: paths.catalogPath,
+        lockPath: paths.lockPath,
+        lockResolvedAt: lock?.resolvedAt ?? null,
+        entries: catalog.entries,
+      };
+    } catch (err) {
+      if (err instanceof InvalidCatalogError) {
+        return { ok: false as const, code: 'invalid-catalog' as const };
+      }
+      throw err;
+    }
   });
 
   dispatcher.register('catalog.removeEntry', (rawParams: unknown) => {

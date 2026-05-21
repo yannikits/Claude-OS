@@ -124,7 +124,7 @@ Der Vault-Status auf der zweiten Maschine wird durch den Cloud-Sync-Client gepul
 
 - **`vault-config.json`** — `{conflictMode: "abort"|"prefer-local"|"prefer-remote", idleSeconds: 300, scheduleEnabled: false}`
 - **`vault-sync-state.json`** — Persistent Busy-Flag (Crash-Recovery)
-- **`secrets.enc`** — AES-256-GCM Fallback wenn OS-Keychain nicht verfügbar
+- **`secrets.enc`** — AES-256-GCM Fallback wenn OS-Keychain nicht verfügbar. **Windows-Hinweis (M9):** `mode: 0o600` wird auf Windows von Node-FS ignoriert — der File erbt die ACL des Parent-Verzeichnisses. Auf Multi-User-Hosts via `icacls` einschränken oder den OS-Keyring (`CLAUDE_OS_SECRETS_BACKEND=keyring`) bevorzugen.
 
 ## Tauri-GUI (Phase 6 + v1.5/v1.7 Erweiterungen)
 

@@ -31,6 +31,75 @@ interface GitServiceOpts {
   readonly options?: Partial<SimpleGitOptions>;
 }
 
+/**
+ * M7 (2026-05-21 code-review): validate `remote`/`branch`/`source`/`destination`
+ * gegen argv-injection. simple-git uses child_process.spawn(git, args) ohne
+ * shell — keine command-injection ueber Metachars. ABER git akzeptiert
+ * `--upload-pack=<cmd>`-aehnliche Args wenn URLs/Refs mit `-` beginnen
+ * (CVE-2024-32002-Familie). Allowlist verhindert das.
+ *
+ * Erlaubt: alphanumerisch + `.`, `_`, `/`, `-` (aber NICHT als erstes
+ * Zeichen). URLs duerfen zusaetzlich `:`, `@`, `?`, `=`, `&`, `%`, `+`
+ * fuer query-strings enthalten.
+ */
+/**
+ * Refs (branches, remotes): conservative allowlist `[A-Za-z0-9_./-]+`
+ * mit Verbot von '-' am Anfang. Git-ref-Konventionen erlauben mehr
+ * (z. B. Slashes), aber das ist die safe-subset fuer unsere Use-Cases
+ * (origin, main, master, feature/x).
+ */
+const GIT_REF_PATTERN = /^[A-Za-z0-9_./][A-Za-z0-9_./-]*$/;
+
+export class GitArgValidationError extends GitError {
+  constructor(
+    public readonly arg: string,
+    public readonly value: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GitArgValidationError';
+  }
+}
+
+function validateRef(arg: string, value: string): void {
+  if (value.length === 0) {
+    throw new GitArgValidationError(arg, value, `git ${arg}: must be non-empty`);
+  }
+  if (value.startsWith('-')) {
+    throw new GitArgValidationError(
+      arg,
+      value,
+      `git ${arg}: refusing value starting with '-' (argv-injection guard): "${value}"`,
+    );
+  }
+  if (!GIT_REF_PATTERN.test(value)) {
+    throw new GitArgValidationError(
+      arg,
+      value,
+      `git ${arg}: invalid characters (allow A-Za-z0-9_./-): "${value}"`,
+    );
+  }
+}
+
+/**
+ * Clone-source/URL: minimal-guard — nur `-` am Anfang refusen (argv-
+ * injection). Git akzeptiert URLs (https/ssh/git://), Windows + POSIX
+ * file-paths sowie relative pfade — wir koennen den char-set nicht
+ * sinnvoll einschraenken ohne legitime Use-Cases zu brechen.
+ */
+function validateUrl(arg: string, value: string): void {
+  if (value.length === 0) {
+    throw new GitArgValidationError(arg, value, `git ${arg}: must be non-empty`);
+  }
+  if (value.startsWith('-')) {
+    throw new GitArgValidationError(
+      arg,
+      value,
+      `git ${arg}: refusing value starting with '-' (argv-injection guard): "${value}"`,
+    );
+  }
+}
+
 function mapError(err: unknown, hint?: string): GitError {
   if (err instanceof GitError) return err;
   const raw = err instanceof Error ? err.message : String(err);
@@ -182,7 +251,9 @@ export class GitService {
   }
 
   async push(remote = 'origin', branch?: string): Promise<PushResult> {
+    validateRef('remote', remote);
     const target = branch ?? (await this.getCurrentBranch());
+    validateRef('branch', target);
     try {
       await this.git.push(remote, target);
       return { pushed: true, remote, branch: target };
@@ -192,7 +263,9 @@ export class GitService {
   }
 
   async pull(remote = 'origin', branch?: string, opts: { ffOnly?: boolean } = {}): Promise<void> {
+    validateRef('remote', remote);
     const target = branch ?? (await this.getCurrentBranch());
+    validateRef('branch', target);
     try {
       if (opts.ffOnly === true) {
         await this.git.raw(['pull', '--ff-only', remote, target]);
@@ -214,6 +287,8 @@ export class GitService {
     destination: string,
     opts: { branch?: string } = {},
   ): Promise<GitService> {
+    validateUrl('clone-source', source);
+    if (opts.branch !== undefined) validateRef('branch', opts.branch);
     const git = simpleGit();
     const args = opts.branch === undefined ? [] : ['--branch', opts.branch];
     try {

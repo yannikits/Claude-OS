@@ -4,7 +4,7 @@
  * @module @core/git
  */
 
-export { GitService } from './git-service.js';
+export { GitArgValidationError, GitService } from './git-service.js';
 export type {
   CommitResult,
   GitConfigScope,

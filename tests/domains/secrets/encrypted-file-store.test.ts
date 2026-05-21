@@ -112,4 +112,21 @@ describe('EncryptedFileStore', () => {
     expect(typeof envelope.ciphertextHex).toBe('string');
     expect(typeof envelope.tagHex).toBe('string');
   });
+
+  it('M6: wrong master-key wirft opake error-message (kein Node-GCM-Internal-Leak)', async () => {
+    await makeStore().set('key', 'value');
+    const wrongKey = new EncryptedFileStore({ filePath, masterKey: 'totally-different-key' });
+    try {
+      await wrongKey.get('key');
+      throw new Error('expected SecretsError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(SecretsError);
+      const msg = (err as Error).message;
+      // Genau die opake message — KEIN Node-internal-detail wie
+      // "Unsupported state or unable to authenticate data".
+      expect(msg).toBe('Decryption failed — wrong master key or corrupted file');
+      expect(msg).not.toMatch(/Unsupported state/);
+      expect(msg).not.toMatch(/unable to authenticate/);
+    }
+  });
 });

@@ -72,9 +72,21 @@ export function resolveClaudeBinary(opts: ResolveOpts = {}): ResolvedBinary {
     }
   }
 
-  // 3. $PATH fallback.
+  // 3. $PATH fallback. M2 (2026-05-21 code-review): warne, denn auf
+  // Windows kann %LOCALAPPDATA%\Microsoft\WindowsApps user-writable
+  // vor dem echten install-dir liegen (claude.exe-Hijack-Risk). Auf
+  // POSIX ist $PATH meistens unter system-control, aber lokale ~/.local
+  // /bin Vorrang kann gleiches Risiko haben.
   const fromPath = walkPath(env, platform);
-  if (fromPath !== null) return { path: fromPath, source: 'path' };
+  if (fromPath !== null) {
+    const warning =
+      `claude-binary aus $PATH geladen: "${fromPath}". ` +
+      'Empfehlung: pinne die binary explizit auf `<root>/bin/claude` ' +
+      'oder via `--binary-path` ueberschreiben — $PATH-fallback ' +
+      'kann von user-writable Pfaden hijacked werden (z. B. ' +
+      '%LOCALAPPDATA%\\Microsoft\\WindowsApps auf Windows).';
+    return { path: fromPath, source: 'path', warning };
+  }
 
   throw new BinaryNotFoundError(
     `Could not locate the Anthropic claude binary. Searched: ` +

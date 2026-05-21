@@ -3,7 +3,12 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MarketplaceRegistryError, urlLoader } from '../../../src/domains/catalog/index.js';
+import {
+  DEFAULT_MARKETPLACE_HOSTS,
+  MarketplaceRegistryError,
+  MarketplaceUrlPolicyError,
+  urlLoader,
+} from '../../../src/domains/catalog/index.js';
 
 const REGISTRY_URL = 'https://example.test/marketplace.json';
 
@@ -217,6 +222,90 @@ describe('urlLoader — cache key', () => {
     const files = readdirSync(cacheDir);
     expect(files.filter((f) => f.endsWith('.json')).length).toBe(1);
     expect(files.filter((f) => f.endsWith('.etag')).length).toBe(1);
+  });
+
+  describe('M4: SSRF host-allowlist + https-only', () => {
+    it('blockt http:// (nur https erlaubt) wenn allowedHosts gesetzt', () => {
+      const fetchSpy = vi.fn();
+      expect(() =>
+        urlLoader({
+          url: 'http://example.test/marketplace.json',
+          cacheDir,
+          fetch: fetchSpy,
+          allowedHosts: ['example.test'],
+        }),
+      ).toThrow(MarketplaceUrlPolicyError);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('blockt SSRF-Target (169.254.169.254 AWS-IMDS) wenn nicht in allowlist', () => {
+      const fetchSpy = vi.fn();
+      expect(() =>
+        urlLoader({
+          url: 'https://169.254.169.254/latest/meta-data/',
+          cacheDir,
+          fetch: fetchSpy,
+          allowedHosts: ['raw.githubusercontent.com'],
+        }),
+      ).toThrow(MarketplaceUrlPolicyError);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('blockt localhost wenn nicht in allowlist', () => {
+      const fetchSpy = vi.fn();
+      expect(() =>
+        urlLoader({
+          url: 'https://localhost:8080/registry.json',
+          cacheDir,
+          fetch: fetchSpy,
+          allowedHosts: ['raw.githubusercontent.com'],
+        }),
+      ).toThrow(MarketplaceUrlPolicyError);
+    });
+
+    it('akzeptiert host aus allowlist (case-insensitive)', () => {
+      const fetchSpy = vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(mockResponse({ status: 200, body: validRegistryJson })),
+        );
+      // No throw — loader created successfully.
+      const loader = urlLoader({
+        url: 'https://RAW.GITHUBUSERCONTENT.com/owner/repo/main/marketplace.json',
+        cacheDir,
+        fetch: fetchSpy,
+        allowedHosts: DEFAULT_MARKETPLACE_HOSTS,
+      });
+      expect(loader).toBeDefined();
+    });
+
+    it('default-behavior: keine allowlist gesetzt → keine restriction (back-compat)', async () => {
+      // Existing callers passieren keine allowedHosts — sollte NICHT
+      // breaken (M4 ist opt-in fuer back-compat).
+      const fetchSpy = vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(mockResponse({ status: 200, body: validRegistryJson })),
+        );
+      const result = await urlLoader({
+        url: 'https://arbitrary.example.com/marketplace.json',
+        cacheDir,
+        fetch: fetchSpy,
+      })();
+      expect(result.marketplaces).toBeDefined();
+    });
+
+    it('wirft bei invaliden URL-Strings', () => {
+      const fetchSpy = vi.fn();
+      expect(() =>
+        urlLoader({
+          url: 'not a url',
+          cacheDir,
+          fetch: fetchSpy,
+          allowedHosts: ['example.test'],
+        }),
+      ).toThrow(MarketplaceUrlPolicyError);
+    });
   });
 });
 

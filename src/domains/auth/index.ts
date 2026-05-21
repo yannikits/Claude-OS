@@ -11,6 +11,7 @@ export {
   isExpiringSoon,
   readCredentialsFile,
   resolveCredentialsPath,
+  validateAnthropicConfigDir,
 } from './credentials.js';
 export { ProfileManager } from './profile-manager.js';
 export { checkAuthState } from './state-check.js';

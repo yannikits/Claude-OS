@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { GitError, GitNotInstalledError, GitService } from '../../../src/core/git/index.js';
+import {
+  GitArgValidationError,
+  GitError,
+  GitNotInstalledError,
+  GitService,
+} from '../../../src/core/git/index.js';
 
 describe('GitService', () => {
   let tmpBase: string;
@@ -76,6 +81,82 @@ describe('GitService', () => {
 
   it('maps unknown raw errors to plain GitError', async () => {
     await expect(service.raw(['this-is-not-a-git-subcommand'])).rejects.toThrow(GitError);
+  });
+
+  describe('M7: argv-injection guards', () => {
+    it('push refused remote starting with "-" (argv-injection)', async () => {
+      await expect(service.push('--upload-pack=evil', 'main')).rejects.toThrow(
+        GitArgValidationError,
+      );
+    });
+
+    it('push refused branch starting with "-"', async () => {
+      await expect(service.push('origin', '--upload-pack=evil')).rejects.toThrow(
+        GitArgValidationError,
+      );
+    });
+
+    it('push refused remote with invalid chars (ref-pattern guard)', async () => {
+      await expect(service.push('origin;rm -rf /', 'main')).rejects.toThrow(GitArgValidationError);
+    });
+
+    it('clone akzeptiert Windows-Pfade (file-system-clones)', () => {
+      // Smoke-Test fuer den simplifizierten URL-Validator: backslash-
+      // paths sind legitime clone-sources (Windows-tmpdir).
+      const winPath = 'C:\\Users\\x\\repo.git';
+      // Konsumiert nur das validator-Helper (kein echtes git invocieren)
+      // — wir koennen GitService.clone() nicht aufrufen ohne echtes git
+      // aber die Validation laeuft im static-method-Header zuerst.
+      // Hier indirekt via try-catch: erwarten KEIN
+      // GitArgValidationError.
+      // (Echtes clone wird mit "not a git repo" failen; das ist OK.)
+      const dest = join(tmpBase, 'cloned-win');
+      return expect(
+        GitService.clone(winPath, dest).then(
+          () => 'success',
+          (err) => {
+            if (err instanceof GitArgValidationError) throw err;
+            return 'real-git-error';
+          },
+        ),
+      ).resolves.toMatch(/success|real-git-error/);
+    });
+
+    it('pull refused remote starting with "-"', async () => {
+      await expect(service.pull('-evil')).rejects.toThrow(GitArgValidationError);
+    });
+
+    it('pull refused branch starting with "-"', async () => {
+      await expect(service.pull('origin', '--bad')).rejects.toThrow(GitArgValidationError);
+    });
+
+    it('GitService.clone refused source starting with "-"', async () => {
+      const dest = join(tmpBase, 'cloned');
+      await expect(GitService.clone('--upload-pack=evil', dest)).rejects.toThrow(
+        GitArgValidationError,
+      );
+    });
+
+    it('GitService.clone refused branch starting with "-"', async () => {
+      const dest = join(tmpBase, 'cloned2');
+      await expect(
+        GitService.clone('https://example.com/repo.git', dest, { branch: '--bad' }),
+      ).rejects.toThrow(GitArgValidationError);
+    });
+
+    it('push akzeptiert normale remote-namen + branch-namen', async () => {
+      writeFileSync(join(workTree, 'a.md'), '#a');
+      await service.addAll();
+      await service.commit('init');
+      // Push laeuft fail mit "no remote" — der Punkt ist: NICHT
+      // GitArgValidationError, sondern ein echter Git-error.
+      try {
+        await service.push('origin', 'main');
+      } catch (err) {
+        expect(err).not.toBeInstanceOf(GitArgValidationError);
+        expect(err).toBeInstanceOf(GitError);
+      }
+    });
   });
 });
 

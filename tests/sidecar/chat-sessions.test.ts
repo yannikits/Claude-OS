@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ChatSessions } from '../../src/sidecar/chat-sessions.js';
+import { ChatSessionError, ChatSessions } from '../../src/sidecar/chat-sessions.js';
 
 /**
  * Build a tiny shell-script that pretends to be claude. Echoes args on
@@ -131,5 +131,29 @@ describe('ChatSessions', () => {
   it('kill on unknown session throws', () => {
     const chat = new ChatSessions(() => {});
     expect(() => chat.kill('nope')).toThrow(/unknown sessionId/);
+  });
+
+  it('M1: Shell-Metachar-Args werden rejected wenn .cmd-binary (shell:true mode)', () => {
+    if (process.platform !== 'win32') return; // M1 mitigation only fires on win32 .cmd-Binaries
+    const chat = new ChatSessions(() => {});
+    expect(() => chat.spawn(['safe-arg', '& calc.exe'])).toThrow(ChatSessionError);
+    expect(() => chat.spawn(['"injected\\"'])).toThrow(ChatSessionError);
+    expect(() => chat.spawn(['pipe', '|', 'evil'])).toThrow(ChatSessionError);
+  });
+
+  it('M1: normale args ohne Metachars werden akzeptiert (regression-Schutz)', () => {
+    // Cross-platform: braucht keine win32, da Args-Validierung nur bei
+    // needsShell=true fired. Auf POSIX werden Args ohnehin nicht
+    // shell-interpretiert.
+    const chat = new ChatSessions(() => {});
+    // Wir koennen den spawn nicht voll testen ohne fake-claude-Setup,
+    // aber wir koennen sicherstellen dass der M1-Check KEINEN Error
+    // wirft fuer normale args.
+    expect(() => chat.spawn(['--help', 'arg-with-equals=value', 'with spaces'])).not.toThrow(
+      ChatSessionError,
+    );
+    // Kill etwaige gestartete session, damit afterEach sauber bleibt
+    // (besonders auf Windows ohne fake-claude wird der spawn evtl
+    // BinaryNotFoundError werfen — das ist OK, nicht ChatSessionError).
   });
 });

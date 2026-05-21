@@ -93,7 +93,12 @@ export {
   type RegistryLoader,
   validateRegistry,
 } from './marketplace-registry.js';
-export { type UrlLoaderOpts, urlLoader } from './marketplace-url-loader.js';
+export {
+  DEFAULT_MARKETPLACE_HOSTS,
+  MarketplaceUrlPolicyError,
+  type UrlLoaderOpts,
+  urlLoader,
+} from './marketplace-url-loader.js';
 export {
   type SafeExtractOpts,
   safeExtractTar,

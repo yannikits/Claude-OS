@@ -42,6 +42,55 @@ export interface UrlLoaderOpts {
   readonly cacheDir: string;
   /** Injectable for tests. Defaults to `globalThis.fetch`. */
   readonly fetch?: FetchFn;
+  /**
+   * M4 (2026-05-21 code-review): Host-Allowlist gegen SSRF. Wenn gesetzt,
+   * muss `opts.url`-Host (case-insensitive) in der Liste sein. Schuetzt
+   * gegen poisoned marketplace-registry-Entries die auf `169.254.169.254`
+   * (AWS-IMDS), `localhost`, oder internal-network-IPs zeigen.
+   * Default: keine restriction (back-compat fuer existierende Caller).
+   */
+  readonly allowedHosts?: readonly string[];
+}
+
+/**
+ * M4: dedault-Allowlist fuer marketplace-URLs — nur dokumentierte
+ * Marketplace-Hosts. Caller, der eine andere Allowlist will, kann sie
+ * via opts.allowedHosts injizieren.
+ */
+export const DEFAULT_MARKETPLACE_HOSTS: readonly string[] = [
+  'raw.githubusercontent.com',
+  'github.com',
+  'codeload.github.com',
+];
+
+export class MarketplaceUrlPolicyError extends MarketplaceRegistryError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MarketplaceUrlPolicyError';
+  }
+}
+
+function assertAllowedUrl(url: string, allowedHosts: readonly string[] | undefined): void {
+  if (allowedHosts === undefined || allowedHosts.length === 0) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new MarketplaceUrlPolicyError(`urlLoader: invalid URL "${url}"`);
+  }
+  // SSRF defense: nur https erlaubt (kein http://, file://, ftp://, ...).
+  if (parsed.protocol !== 'https:') {
+    throw new MarketplaceUrlPolicyError(
+      `urlLoader: refused non-https URL "${url}" (only https:// allowed)`,
+    );
+  }
+  const host = parsed.hostname.toLowerCase();
+  const allowed = allowedHosts.some((h) => h.toLowerCase() === host);
+  if (!allowed) {
+    throw new MarketplaceUrlPolicyError(
+      `urlLoader: host "${host}" not in allowlist [${allowedHosts.join(', ')}] — refused`,
+    );
+  }
 }
 
 interface CachePaths {
@@ -89,6 +138,11 @@ export function urlLoader(opts: UrlLoaderOpts): RegistryLoader {
       'urlLoader requires a fetch implementation (none on globalThis, none injected)',
     );
   }
+  // M4: pre-validate URL gegen Host-Allowlist BEVOR irgendein I/O passiert.
+  // Wenn die URL spaeter ungueltig wird (z. B. redirect), entscheidet
+  // fetchImpl — wir koennen den Caller nicht vor jedem Edge-Case schuetzen
+  // aber der initial-URL-Check verhindert die haeufigsten SSRF-Faelle.
+  assertAllowedUrl(opts.url, opts.allowedHosts);
   const paths = cachePathsFor(opts.cacheDir, opts.url);
 
   return async () => {
