@@ -14,6 +14,13 @@ struct RpcRequest<'a> {
     id: u64,
     method: &'a str,
     params: Value,
+    // M8 (2026-05-21 code-review): optional shared-secret nonce.
+    // RpcClient hier ist v1.2-MVP-Variante die kein stderr-handshake
+    // hat — Caller setzt nonce explizit via `with_nonce()`. Sidecar
+    // akzeptiert requests ohne nonce nur wenn der Dispatcher KEINEN
+    // expectedNonce gesetzt hat (CLAUDE_OS_RPC_NONCE=disabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nonce: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -75,9 +82,19 @@ pub struct RpcClient {
     next_id: Arc<AtomicU64>,
     pending: Arc<PendingMap>,
     stdin: Arc<Mutex<ChildStdin>>,
+    /// M8 (2026-05-21 code-review): optional nonce attached to every
+    /// outgoing request. Set via `with_nonce()` after the caller has
+    /// extracted it from a sidecar-ready stderr handshake.
+    nonce: Arc<Mutex<Option<String>>>,
 }
 
 impl RpcClient {
+    /// M8: clone of this client that forwards `nonce` on every call.
+    /// Idempotent — calling again overwrites the previous nonce.
+    pub async fn set_nonce(&self, nonce: String) {
+        *self.nonce.lock().await = Some(nonce);
+    }
+
     pub fn new(stdin: ChildStdin, stdout: ChildStdout) -> (Self, impl Future<Output = ()>) {
         let pending: Arc<PendingMap> = Arc::new(Mutex::new(HashMap::new()));
         let pending_clone = pending.clone();
@@ -107,6 +124,7 @@ impl RpcClient {
             next_id: Arc::new(AtomicU64::new(1)),
             pending,
             stdin: Arc::new(Mutex::new(stdin)),
+            nonce: Arc::new(Mutex::new(None)),
         };
         (client, reader)
     }
@@ -116,7 +134,8 @@ impl RpcClient {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
 
-        let request = RpcRequest { jsonrpc: "2.0", id, method, params };
+        let nonce = self.nonce.lock().await.clone();
+        let request = RpcRequest { jsonrpc: "2.0", id, method, params, nonce };
         let mut line = serde_json::to_string(&request)?;
         line.push('\n');
 

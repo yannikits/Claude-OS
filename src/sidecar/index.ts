@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomBytes } from 'node:crypto';
 import { resolveRoot } from '../core/environment/index.js';
 import { resolveMachinePaths } from '../core/paths/index.js';
 import { McpTrustStore, mcpTrustPathFor, startMcpWatcher } from '../domains/mcp-clients/index.js';
@@ -17,6 +18,35 @@ if (logsDir !== null) {
 }
 
 const dispatcher = new RpcDispatcher();
+
+// M8 (2026-05-21 code-review): Sidecar generiert einen Per-Spawn-Nonce
+// und committed ihn als stderr-handshake. Tauri-Supervisor (siehe
+// `gui/src-tauri/src/supervisor.rs`) parsed die erste handshake-Line aus
+// stderr und attached den nonce an jeden Wire-RPC. Wir aktivieren die
+// Pruefung NACH dem handshake-write damit ein eventuell früher
+// gefeuerter ping (z. B. von einem schon laufenden router) noch
+// durchkommt — die handshake-Line ist immer das ERSTE was wir auf
+// stderr schreiben.
+//
+// Opt-out via $CLAUDE_OS_RPC_NONCE=disabled (fuer e2e-tests / dev-runs
+// die ohne Tauri-Supervisor laufen). Setzt man stattdessen einen
+// concrete-Wert in der env, wird DIESER als expected verwendet
+// (deterministic-mode fuer Integration-Tests).
+const nonceMode = process.env.CLAUDE_OS_RPC_NONCE ?? 'auto';
+let rpcNonce: string | null = null;
+if (nonceMode !== 'disabled') {
+  rpcNonce = nonceMode === 'auto' ? randomBytes(16).toString('hex') : nonceMode;
+  // WICHTIG: dieser write MUSS auf stderr (nicht logger.info — das
+  // landet im pino-file aber auch stderr ueber multistream). Tauri
+  // supervisor parsed die line als JSON.
+  process.stderr.write(
+    `${JSON.stringify({ type: 'sidecar-ready', nonce: rpcNonce, pid: process.pid })}\n`,
+  );
+  dispatcher.setExpectedNonce(rpcNonce);
+  logger.info({ noncePrefix: rpcNonce.slice(0, 8) }, 'sidecar: rpc-nonce active (M8)');
+} else {
+  logger.warn('sidecar: rpc-nonce DISABLED via env — only safe in dev/tests');
+}
 
 dispatcher.register('ping', () => ({ pong: true, ts: Date.now() }));
 
