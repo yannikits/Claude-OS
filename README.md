@@ -128,7 +128,7 @@ Der Vault-Status auf der zweiten Maschine wird durch den Cloud-Sync-Client gepul
 
 ## Tauri-GUI (Phase 6 + v1.5/v1.7 Erweiterungen)
 
-Desktop-App-Shell mit Claude-Desktop-Look-and-Feel (per [ADR-0001](docs/architecture/adr/0001-gui-framework-tauri.md) / [ADR-0006](docs/architecture/adr/0006-sidecar-architecture.md)).
+Desktop-App-Shell mit Claude-Desktop-Look-and-Feel (per [ADR-0001](docs/architecture/adr/0001-gui-framework-tauri.md) / [ADR-0006](docs/architecture/adr/0006-tauri-node-sidecar-ipc.md)).
 
 **GUI-Tabs:**
 
