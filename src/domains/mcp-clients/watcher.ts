@@ -63,10 +63,23 @@ export interface WatcherOpts {
   /** Tests: Override fuer probe-batch. */
   readonly probe?: (
     entries: readonly McpServerEntry[],
-    opts: { timeoutMs: number; concurrency: number },
+    opts: {
+      timeoutMs: number;
+      concurrency: number;
+      isTrusted?: (serverKey: string) => boolean;
+      serverKeyFor?: (entry: McpServerEntry) => string;
+    },
   ) => Promise<ReadonlyArray<{ entry: McpServerEntry; result: ProbeResult }>>;
   /** Project-cwd fuer .claude/mcp.json-Discovery (default process.cwd()). */
   readonly projectCwd?: string;
+  /**
+   * M3 (2026-05-21 code-review): optionaler trust-check pro Server.
+   * Wenn gesetzt, werden NICHT-acknowledged servers in der probe-batch
+   * als `trust-required` markiert OHNE spawn. Default `undefined` →
+   * back-compat (alle servers werden gespawnt). Sidecar wired das
+   * automatisch mit dem persistenten `McpTrustStore`.
+   */
+  readonly isTrusted?: (serverKey: string) => boolean;
 }
 
 function serverKeyOf(entry: McpServerEntry): string {
@@ -124,6 +137,14 @@ export function startMcpWatcher(opts: WatcherOpts): WatcherHandle {
       const results = await probeImpl(discovery.servers, {
         timeoutMs: probeTimeoutMs,
         concurrency,
+        // M3: per-Tick fresh trust-check (User koennte zwischen Ticks
+        // einen Server acknowledged/revoked haben).
+        ...(opts.isTrusted === undefined
+          ? {}
+          : {
+              isTrusted: opts.isTrusted,
+              serverKeyFor: serverKeyOf,
+            }),
       });
       for (const { entry, result } of results) {
         const key = serverKeyOf(entry);

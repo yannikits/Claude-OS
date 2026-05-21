@@ -21,6 +21,7 @@ export {
   type StatusCheckOpts,
   summariseStatuses,
 } from './status-check.js';
+export { type McpTrustEnvelope, McpTrustStore, mcpTrustPathFor } from './trust-store.js';
 export {
   type DiscoveryResult,
   McpClientDiscoveryError,

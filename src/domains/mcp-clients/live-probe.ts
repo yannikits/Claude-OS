@@ -82,13 +82,26 @@ export type ProbeResult =
   | { kind: 'init-timeout'; durationMs: number; message: string }
   | { kind: 'crashed'; durationMs: number; exitCode: number | null; stderr: string }
   | { kind: 'protocol-error'; durationMs: number; message: string }
-  | { kind: 'spawn-failed'; durationMs: number; message: string };
+  | { kind: 'spawn-failed'; durationMs: number; message: string }
+  | { kind: 'trust-required'; durationMs: number; serverKey: string; message: string };
 
 export interface ProbeOpts {
   /** Gesamt-Timeout in ms (Default 5000). */
   readonly timeoutMs?: number;
   /** Tests injecten spawn. */
   readonly spawnFn?: typeof spawn;
+  /**
+   * M3 (2026-05-21 code-review): optionaler trust-check. Wenn gesetzt,
+   * wird `isTrusted(serverKey)` VOR dem spawn evaluiert. Liefert `false`
+   * → ProbeResult.kind = 'trust-required' OHNE jemals den Server-Process
+   * zu starten.
+   *
+   * `serverKey` ist der stable Identifier (typically `<host>:<entry.name>`)
+   * den der Caller (z. B. watcher) als trust-key benutzt.
+   */
+  readonly isTrusted?: (serverKey: string) => boolean;
+  /** Wenn `isTrusted` gesetzt ist, MUSS der Caller auch `serverKey` liefern. */
+  readonly serverKey?: string;
 }
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
@@ -144,6 +157,32 @@ export async function probeServer(
   const timeoutMs = opts.timeoutMs ?? 5000;
   const spawnImpl = opts.spawnFn ?? spawn;
   const start = Date.now();
+
+  // M3 (2026-05-21 code-review): trust-check VOR dem spawn. Wenn die
+  // serverKey nicht in der trust-list ist, KEIN spawn — wir wollen
+  // arbitrary-binaries nicht ausfuehren bevor User explizit zugestimmt
+  // hat. GUI zeigt dann ein "Trust this server?"-Modal und ruft
+  // `mcp.trust.acknowledge(serverKey)` was den naechsten probe-Call
+  // dann durchlaesst.
+  if (opts.isTrusted !== undefined) {
+    const serverKey = opts.serverKey;
+    if (serverKey === undefined || serverKey.length === 0) {
+      return {
+        kind: 'spawn-failed',
+        durationMs: Date.now() - start,
+        message: 'M3: probeServer mit isTrusted aber ohne serverKey aufgerufen — internal-bug',
+      };
+    }
+    if (!opts.isTrusted(serverKey)) {
+      return {
+        kind: 'trust-required',
+        durationMs: Date.now() - start,
+        serverKey,
+        message: `MCP-Server "${serverKey}" ist nicht in der trust-list — User-Acknowledge erforderlich vor erstem probe`,
+      };
+    }
+  }
+
   let child: ChildProcess;
   // m14 (2026-05-21 code-review): den probed MCP-Server NICHT mit full
   // sidecar-env starten — sonst sehen 3rd-party MCP-Server unsere
@@ -335,7 +374,15 @@ export async function probeServer(
  */
 export async function probeServers(
   entries: readonly McpServerEntry[],
-  opts: ProbeOpts & { concurrency?: number } = {},
+  opts: ProbeOpts & {
+    concurrency?: number;
+    /**
+     * M3: derived serverKey-per-entry, fuer trust-check vor jedem
+     * einzelnen spawn. Wenn nicht gesetzt, wird `entry.name` als
+     * fallback verwendet.
+     */
+    serverKeyFor?: (entry: McpServerEntry) => string;
+  } = {},
 ): Promise<ReadonlyArray<{ entry: McpServerEntry; result: ProbeResult }>> {
   const concurrency = opts.concurrency ?? 3;
   const queue = [...entries];
@@ -344,7 +391,15 @@ export async function probeServers(
     while (queue.length > 0) {
       const entry = queue.shift();
       if (entry === undefined) return;
-      const result = await probeServer(entry, opts);
+      // M3: bei isTrusted-Mode den serverKey pro Entry berechnen
+      const perEntryOpts: ProbeOpts =
+        opts.isTrusted !== undefined
+          ? {
+              ...opts,
+              serverKey: opts.serverKeyFor !== undefined ? opts.serverKeyFor(entry) : entry.name,
+            }
+          : opts;
+      const result = await probeServer(entry, perEntryOpts);
       out.push({ entry, result });
     }
   }

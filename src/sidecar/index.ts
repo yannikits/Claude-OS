@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { resolveRoot } from '../core/environment/index.js';
 import { resolveMachinePaths } from '../core/paths/index.js';
-import { startMcpWatcher } from '../domains/mcp-clients/index.js';
+import { McpTrustStore, mcpTrustPathFor, startMcpWatcher } from '../domains/mcp-clients/index.js';
 import { startScheduler } from '../domains/scheduler/index.js';
 import { ChatSessions } from './chat-sessions.js';
 import { createSidecarLogger } from './logger.js';
@@ -64,10 +64,17 @@ logger.info('sidecar: scheduler runner started (tick 60s)');
 const probeTimeoutFromEnv = Number.parseInt(process.env.CLAUDE_OS_MCP_PROBE_TIMEOUT_MS ?? '', 10);
 const probeTimeoutMs =
   Number.isFinite(probeTimeoutFromEnv) && probeTimeoutFromEnv > 0 ? probeTimeoutFromEnv : 15_000;
+// M3 (2026-05-21 code-review): trust-store fuer mcp-watcher. Nur
+// acknowledged servers werden ge-spawnt; alle anderen Probes liefern
+// `trust-required` und triggern eine GUI-Modal via Status-Event.
+const mcpTrustStore = new McpTrustStore({
+  filePath: mcpTrustPathFor(resolveMachinePaths().dataDir),
+});
 const mcpWatcherHandle = startMcpWatcher({
   emit: (event) => emitNotification('mcp-client://event', event),
   projectCwd: resolveRoot({}).path,
   probeTimeoutMs,
+  isTrusted: (serverKey) => mcpTrustStore.isAcknowledged(serverKey),
 });
 logger.info(
   { probeTimeoutMs },
