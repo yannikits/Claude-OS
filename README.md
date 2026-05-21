@@ -2,7 +2,7 @@
 
 OS-unabhängige Entwicklungs-Umgebung rund um Anthropic Claude. Tauri-GUI + Node-CLI + cloud-mount Vault-Sync.
 
-> **Status:** v1.0.0. Alle 8 Phasen (0–7) shipped. CI grün auf ubuntu/win/macos × cli/rust-shell/gui-typecheck. Bundle pipeline grün — MSI (Windows), DMG (macOS x86_64 + aarch64 universal), AppImage (Linux) als Release-Assets. UI-Smoke confirmed (Windows): Dashboard rendert mit live RPC-Daten, alle 7 Views functional, Drag-Drop end-to-end (drag → inbox.import → chokidar → Tauri-Event-Banner) — siehe [`docs/migration-from-portable.md`](docs/migration-from-portable.md) für Setup, [`gui/README.md`](gui/README.md) für GUI-Build. 529/532 Tests grün (3 long-running gated hinter `RUN_SLOW_TESTS=1`). Tracker: [`tasks/todo.md`](tasks/todo.md).
+> **Status:** v1.5.3 (siehe [`package.json`](package.json) für die kanonische Version, [`CHANGELOG.md`](CHANGELOG.md) für die Release-Historie). Alle 8 Phasen (0–7) shipped. CI grün auf ubuntu/win/macos × cli/rust-shell/gui-typecheck. Bundle pipeline grün — MSI (Windows), DMG (macOS x86_64 + aarch64 universal), AppImage (Linux) als Release-Assets. UI-Smoke confirmed (Windows): Dashboard rendert mit live RPC-Daten, alle 7 Views functional, Drag-Drop end-to-end (drag → inbox.import → chokidar → Tauri-Event-Banner) — siehe [`docs/migration-from-portable.md`](docs/migration-from-portable.md) für Setup, [`gui/README.md`](gui/README.md) für GUI-Build. 815/818 Tests grün (3 long-running gated hinter `RUN_SLOW_TESTS=1`). Tracker: [`tasks/todo.md`](tasks/todo.md).
 >
 > Vorgänger: `claude-portable` (USB-only Variante). Die alten Launch-Scripts liegen in `legacy/` und sind nicht mehr aktiv.
 
@@ -254,7 +254,7 @@ Alle wesentlichen Design-Entscheidungen sind in [`docs/architecture/adr/`](docs/
 ## Entwicklung
 
 ```bat
-npm test                          :: 514/515 grün (+1 slow gated)
+npm test                          :: 815/818 grün (+3 long-running gated)
 npm run build                     :: tsc -> dist/
 npm run check                     :: biome lint
 npm run ci                        :: biome ci + tsc + coverage
