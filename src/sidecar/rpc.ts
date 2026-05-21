@@ -84,8 +84,15 @@ export class RpcDispatcher {
     if (parsed.id === undefined) {
       try {
         await handler(parsed.params);
-      } catch {
-        // notification: fire-and-forget per JSON-RPC 2.0 §4.1
+      } catch (err) {
+        // M30 (2026-05-21 code-review): JSON-RPC §4.1 verlangt zwar
+        // fire-and-forget fuer notifications, aber TypeError /
+        // ReferenceError aus dem Handler sind Bugs die debugged werden
+        // sollten. Wir loggen auf stderr (geht zum Tauri-Supervisor)
+        // und verschlucken den Error trotzdem auf Wire-Ebene.
+        const msg = err instanceof Error ? err.message : String(err);
+        // biome-ignore lint/suspicious/noConsole: stderr is the diagnostic channel for the sidecar
+        console.error(`rpc notification handler error (method=${parsed.method}): ${msg}`);
       }
       return null;
     }
