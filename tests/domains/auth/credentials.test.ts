@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -8,6 +8,7 @@ import {
   isExpiringSoon,
   readCredentialsFile,
   resolveCredentialsPath,
+  validateAnthropicConfigDir,
 } from '../../../src/domains/auth/index.js';
 
 describe('resolveCredentialsPath', () => {
@@ -31,7 +32,91 @@ describe('resolveCredentialsPath', () => {
     });
     expect(path).toBe(join('/home/me', '.claude', '.credentials.json'));
   });
+
+  it('M10: canonicalisiert override via realpathSync (Symlink-Resolve)', () => {
+    const tmpBase = mkdtempSync(join(tmpdir(), 'claude-os-m10-'));
+    try {
+      const realDir = join(tmpBase, 'real');
+      const symlinkDir = join(tmpBase, 'link');
+      mkdirSync(realDir, { recursive: true });
+      try {
+        symlinkSync(realDir, symlinkDir, 'dir');
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EPERM' || code === 'EACCES') return; // skip on non-admin Windows
+        throw err;
+      }
+      const path = resolveCredentialsPath({
+        home: '/home/me',
+        env: { ANTHROPIC_CONFIG_DIR: symlinkDir },
+      });
+      // realpath aufgeloest → der returned path geht durch realDir, nicht symlinkDir
+      expect(path).toBe(join(realDir, '.credentials.json'));
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('M10: non-existent override behaelt raw path (caller ENOENT bei read)', () => {
+    const path = resolveCredentialsPath({
+      home: '/home/me',
+      env: { ANTHROPIC_CONFIG_DIR: '/totally/nonexistent/path-12345' },
+    });
+    expect(path).toBe(join('/totally/nonexistent/path-12345', '.credentials.json'));
+  });
 });
+
+describe('validateAnthropicConfigDir (M10)', () => {
+  it('returns null wenn override leer / unset', () => {
+    expect(validateAnthropicConfigDir({ home: '/home/me', env: {} })).toBeNull();
+    expect(
+      validateAnthropicConfigDir({ home: '/home/me', env: { ANTHROPIC_CONFIG_DIR: '' } }),
+    ).toBeNull();
+  });
+
+  it('returns null wenn override unter home dir liegt', () => {
+    const tmpBase = mkdtempSync(join(tmpdir(), 'claude-os-m10-val-'));
+    try {
+      const home = mkdirSyncP(join(tmpBase, 'home'));
+      const subdir = mkdirSyncP(join(home, '.claude-alt'));
+      expect(
+        validateAnthropicConfigDir({ home, env: { ANTHROPIC_CONFIG_DIR: subdir } }),
+      ).toBeNull();
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('returns warning wenn override outside home + nicht system-config-root', () => {
+    const tmpBase = mkdtempSync(join(tmpdir(), 'claude-os-m10-warn-'));
+    try {
+      const home = mkdirSyncP(join(tmpBase, 'home'));
+      const evil = mkdirSyncP(join(tmpBase, 'evil-attacker-controlled'));
+      const warning = validateAnthropicConfigDir({
+        home,
+        env: { ANTHROPIC_CONFIG_DIR: evil },
+      });
+      expect(warning).not.toBeNull();
+      expect(warning).toMatch(/OUTSIDE/);
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('returns warning wenn override path nicht existiert', () => {
+    const warning = validateAnthropicConfigDir({
+      home: '/home/me',
+      env: { ANTHROPIC_CONFIG_DIR: '/nonexistent-12345' },
+    });
+    expect(warning).not.toBeNull();
+    expect(warning).toMatch(/nicht-existierenden Pfad/);
+  });
+});
+
+function mkdirSyncP(p: string): string {
+  mkdirSync(p, { recursive: true });
+  return p;
+}
 
 describe('hasCiEnvCredentials', () => {
   it('returns true when CLAUDE_CODE_OAUTH_TOKEN is set', () => {
