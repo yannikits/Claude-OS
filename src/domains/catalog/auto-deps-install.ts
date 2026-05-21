@@ -20,9 +20,9 @@
 
 import { join } from 'node:path';
 import {
-  AmbiguousProviderError as AutoDepsAmbiguousProviderError,
+  AutoDepsAmbiguousProviderError,
   AutoDepsError,
-  MissingProviderError as AutoDepsMissingProviderError,
+  AutoDepsMissingProviderError,
   resolveAutoDeps,
 } from './auto-deps-resolver.js';
 import type { PluginManifest } from './capability-resolver.js';
