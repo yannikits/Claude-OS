@@ -23,8 +23,7 @@
       "!**/.gitnexus",
       "!**/graphify-out",
       "!**/three-brain-out",
-      "!**/tasks/lessons.md",
-      "!**/tasks/todo.md"
+      "!**/tasks"
     ]
   },
   "formatter": {

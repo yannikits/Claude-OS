@@ -36,7 +36,7 @@ interface TarEntry {
 }
 
 function octal(value: number, len: number): string {
-  return value.toString(8).padStart(len - 1, '0') + '\0';
+  return `${value.toString(8).padStart(len - 1, '0')}\0`;
 }
 
 function makeUstarBlock(entry: TarEntry): Buffer {

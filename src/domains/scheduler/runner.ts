@@ -19,6 +19,7 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { nextFire, type ParsedCron, parseCron } from './cron-parser.js';
 import { readSchedules } from './store.js';
 import type { ScheduleEntry } from './types.js';
@@ -242,8 +243,20 @@ export function startScheduler(opts: RunnerOpts): { stop: () => Promise<void> } 
     });
     inFlight.set(entry.id, child);
 
+    // m9 (2026-05-21 code-review): StringDecoder respektiert Multi-Byte-
+    // UTF-8-Zeichen die ueber Chunk-Grenzen verteilt sind. Plain
+    // `chunk.toString('utf8')` wuerde split-Bytes als Replacement-
+    // Character (U+FFFD) renden.
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+
     child.stdout?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+      stdoutBuffer += stdoutDecoder.write(chunk);
+      const parts = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = parts.pop() ?? '';
+      for (const line of parts) {
         if (line.length === 0) continue;
         opts.emit({
           type: 'output',
@@ -255,7 +268,10 @@ export function startScheduler(opts: RunnerOpts): { stop: () => Promise<void> } 
       }
     });
     child.stderr?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+      stderrBuffer += stderrDecoder.write(chunk);
+      const parts = stderrBuffer.split(/\r?\n/);
+      stderrBuffer = parts.pop() ?? '';
+      for (const line of parts) {
         if (line.length === 0) continue;
         opts.emit({
           type: 'output',

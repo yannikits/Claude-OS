@@ -92,6 +92,14 @@ async function readArchiveByExpectedHash(opts: InstallOpts): Promise<Buffer | nu
   }
 }
 
+/**
+ * m15 (2026-05-21 code-review): max-response-size cap. Verhindert dass
+ * ein 10GB-Tarball den Sidecar OOM-killt bevor der sha256-Check feuern
+ * kann. Default 200 MB (deutlich ueber dem groessten gesehenen Plugin
+ * von ~30 MB).
+ */
+const MAX_TARBALL_BYTES = 200 * 1024 * 1024;
+
 async function fetchArchive(opts: InstallOpts): Promise<Buffer> {
   const fetchFn = opts.fetchFn ?? defaultFetch();
   let response: Response;
@@ -107,7 +115,23 @@ async function fetchArchive(opts: InstallOpts): Promise<Buffer> {
       `fetch ${opts.url} returned HTTP ${response.status} ${response.statusText}`,
     );
   }
+  // m15: cap via Content-Length-Header wenn vorhanden; sonst bail bei
+  // arrayBuffer() wenn > MAX_TARBALL_BYTES.
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const declared = Number.parseInt(contentLength, 10);
+    if (Number.isFinite(declared) && declared > MAX_TARBALL_BYTES) {
+      throw new TarballInstallError(
+        `refused tarball ${opts.url}: Content-Length ${declared} > MAX ${MAX_TARBALL_BYTES} bytes`,
+      );
+    }
+  }
   const arr = await response.arrayBuffer();
+  if (arr.byteLength > MAX_TARBALL_BYTES) {
+    throw new TarballInstallError(
+      `refused tarball ${opts.url}: received ${arr.byteLength} bytes > MAX ${MAX_TARBALL_BYTES}`,
+    );
+  }
   return Buffer.from(arr);
 }
 

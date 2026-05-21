@@ -1,8 +1,15 @@
-# ADR-0014 — Code-Quality-Toolchain: biome v2.3 mit ESLint-Hybrid-Escape
+# ADR-0014 — Code-Quality-Toolchain: biome v2.x mit ESLint-Hybrid-Escape
 
-**Status:** Akzeptiert
+**Status:** Akzeptiert (Revision 2026-05-21 — pinned auf ^2.4.15)
 **Datum:** 2026-05-16
 **Bedingt durch:** Researcher-Spike vom 2026-05-15
+
+> **Revision 2026-05-21 (m2):** Title bezog sich urspruenglich auf
+> biome v2.3 (zum Zeitpunkt der ADR-Akzeptanz). Inzwischen sind wir auf
+> `^2.4.15` gepinnt (siehe `package.json`). Verhaltens-Aenderungen
+> seither: includes-Pattern statt files.ignore + assist.actions.source
+> .organizeImports statt organizeImports. Beide via `npx biome migrate`
+> in PR (commit 4909fb2) durchgezogen — keine semantische Drift.
 
 ## Kontext
 

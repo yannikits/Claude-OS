@@ -56,6 +56,7 @@ export function StderrDrawer({ subscribe = onSidecarStderr }: StderrDrawerProps)
     };
   }, [subscribe]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `lines` ist intentional — auto-scroll soll bei neuen lines firen, auch wenn der effect-body sie nicht direkt verwendet (er reagiert auf den State-Change).
   useEffect(() => {
     if (open && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
