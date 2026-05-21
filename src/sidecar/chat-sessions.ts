@@ -36,6 +36,22 @@ import { BinaryNotFoundError, resolveClaudeBinary } from '../domains/claude-brid
 const KILL_GRACE_MS = 2_000;
 const MAX_SESSIONS = 8;
 
+/**
+ * M1 (2026-05-21 code-review): wenn die claude-binary `.cmd`/`.bat` ist
+ * (Windows-Wrapper) und wir shell:true setzen muessen, escape Node 20+
+ * args via CVE-2024-27980-Fix. Defense-in-depth: explizit args mit
+ * shell-Metachars rejecten — Node-Eskapierung deckt 99 % aller Faelle,
+ * aber ein Defensive-Layer kostet nichts.
+ */
+const SHELL_INJECTION_METACHARS = /[&|<>"`^]/;
+
+export class ChatSessionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatSessionError';
+  }
+}
+
 interface Session {
   readonly id: string;
   readonly child: ChildProcessWithoutNullStreams;
@@ -72,6 +88,21 @@ export class ChatSessions {
     // (CVE-2024-27980). Plain `.exe` runs fine without shell — keep
     // the narrower default for real claude.exe deploys.
     const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary.path);
+
+    // M1 (2026-05-21 code-review): wenn shell:true aktiv ist, verbiete
+    // explizit Shell-Metachars in args. Node 20+ escaped diese korrekt
+    // (CVE-2024-27980-Fix), aber das ist Defense-in-depth — falls eine
+    // zukuenftige Node-Regression das aushebelt, blockt der Check.
+    if (needsShell) {
+      for (const arg of args) {
+        if (SHELL_INJECTION_METACHARS.test(arg)) {
+          throw new ChatSessionError(
+            `chat.spawn: arg contains shell metacharacter (refused for safety): "${arg}"`,
+          );
+        }
+      }
+    }
+
     const child = spawn(binary.path, [...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
