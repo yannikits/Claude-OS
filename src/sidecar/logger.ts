@@ -22,6 +22,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Logger, multistream, pino } from 'pino';
+import { REDACT_CENSOR, REDACT_PATHS } from '../core/logging/index.js';
 import { resolveMachinePaths } from '../core/paths/index.js';
 
 export interface CreateSidecarLoggerOpts {
@@ -59,8 +60,17 @@ export async function createSidecarLogger(
   opts: CreateSidecarLoggerOpts = {},
 ): Promise<SidecarLogger> {
   const level = resolveLevel(opts);
+  // M20 (2026-05-21 code-review): Sidecar war der einzige Pino-Caller
+  // OHNE `REDACT_PATHS`. Sidecar ist ABER die Hauptlog-Quelle (chat-
+  // bridge, scheduler, mcp-watcher) — jeder zukuenftige Redaction-Pfad
+  // in `core/logging/redact-paths.ts` muss hier durchschlagen. Wir
+  // teilen jetzt den `redact`-Block mit `createLogger`.
   const baseConfig = {
     level,
+    redact: {
+      paths: [...REDACT_PATHS],
+      censor: REDACT_CENSOR,
+    },
     base: undefined,
     timestamp: pino.stdTimeFunctions.isoTime,
   };
