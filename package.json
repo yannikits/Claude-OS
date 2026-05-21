@@ -20,7 +20,8 @@
     "check": "biome check .",
     "check:fix": "biome check --write .",
     "format": "biome format --write .",
-    "ci": "biome ci . && tsc --noEmit && vitest run --coverage",
+    "ci": "biome ci . && tsc --noEmit && vitest run --coverage && npm run smoke",
+    "smoke": "tsc && node scripts/smoke-cli.mjs",
     "prepare": "husky || true",
     "sidecar:build": "node scripts/build-sidecar.mjs"
   },
