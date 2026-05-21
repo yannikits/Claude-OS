@@ -140,7 +140,17 @@ export interface RunnerOpts {
 export function startScheduler(opts: RunnerOpts): { stop: () => Promise<void> } {
   const tickMs = opts.tickMs ?? 60_000;
   const now = opts.now ?? (() => new Date());
-  const setTimer = opts.setTimeoutFn ?? ((cb, ms) => setTimeout(cb, ms));
+  // M25 (2026-05-21 code-review): default-setTimer muss `.unref()` damit
+  // der Scheduler-tick-loop den Node-Prozess NICHT lebendig haelt wenn
+  // sonst nichts mehr offen ist. Test-Injection laesst .unref weg —
+  // FakeTimers brauchen es nicht.
+  const setTimer =
+    opts.setTimeoutFn ??
+    ((cb, ms) => {
+      const handle = setTimeout(cb, ms);
+      handle.unref();
+      return handle;
+    });
   const clearTimer = opts.clearTimeoutFn ?? ((h) => clearTimeout(h as NodeJS.Timeout));
   const spawnImpl = opts.spawnFn ?? spawn;
   const platform = opts.platform ?? process.platform;
