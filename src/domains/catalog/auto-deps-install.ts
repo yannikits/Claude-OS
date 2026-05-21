@@ -136,6 +136,43 @@ export async function installFromGithubWithAutoDeps(
   const existingManifests = new Map<string, PluginManifest>();
   existingManifests.set(targetManifest.id, targetManifest);
 
+  // Codex-Review HIGH/MEDIUM finding #3: existing catalog-entries
+  // hydraten damit der Resolver weiss welche Capabilities bereits durch
+  // installierte Plugins gedeckt sind. Ohne diese Hydration installiert
+  // auto-deps Duplikate oder schlaegt mit "missing provider" fehl wenn
+  // die Capability lokal eigentlich schon vorhanden ist.
+  //
+  // Wir lesen die Manifests aus dem existing lock.json (jedes lockEntry
+  // hat eine sha256 -> Tarball im cacheDir). Wenn ein Plugin noch nicht
+  // gelockt ist (z. B. weil catalog lock noch nicht lief), wird es
+  // einfach uebersprungen — pessimistic-by-default ist OK.
+  const existingLockPath = catalogPaths.lockPath;
+  try {
+    const existingLockMod = await import('./catalog-store.js');
+    const existingLock = existingLockMod.readCatalogLock(existingLockPath);
+    if (existingLock !== null) {
+      for (const lockEntry of existingLock.entries) {
+        if (lockEntry.sha256.length === 0) continue;
+        const installedTarball = join(opts.cacheDir, `${lockEntry.sha256}.tar.gz`);
+        try {
+          const installedManifest = await readPluginManifestFromTarball(installedTarball);
+          if (installedManifest.ok === true) {
+            // Bereits durch Target gesetzt? -> Target hat Vorrang.
+            if (!existingManifests.has(installedManifest.manifest.id)) {
+              existingManifests.set(installedManifest.manifest.id, installedManifest.manifest);
+            }
+          }
+        } catch {
+          // Tarball nicht lesbar -> Plugin nicht hydraten, Resolver
+          // sieht es als nicht-installiert. Saubere graceful degradation.
+        }
+      }
+    }
+  } catch {
+    // readCatalogLock kann throwen wenn die lock.json malformed ist —
+    // wir lassen den Resolver dann mit nur dem Target arbeiten.
+  }
+
   let resolution: Awaited<ReturnType<typeof resolveAutoDeps>>;
   try {
     resolution = await resolveAutoDeps({
@@ -162,7 +199,18 @@ export async function installFromGithubWithAutoDeps(
     throw err;
   }
 
-  // Catalog persistieren
+  // Codex-Review HIGH finding #2: TRANSAKTIONALE Persistence.
+  //
+  // Vorher: writeCatalog -> lockCatalog -> writeCatalogLock -> applyLock.
+  // Problem: bei lockCatalog-Failure wurde die catalog.json bereits
+  // ueberschrieben, aber die lock.json verweist noch auf alten Stand.
+  // Resultat: User hat Catalog mit Entries fuer die kein Lock existiert
+  // (Bindings koennen nicht resolvt werden, sync schlaegt fehl).
+  //
+  // Neue Reihenfolge: erst Lock IN-MEMORY bauen, erst dann beide Files
+  // gemeinsam persistieren. applyLock kommt danach — wenn es throwt sind
+  // catalog+lock zumindest konsistent zueinander und ein nachtraegliches
+  // `catalog sync` reicht zum Reparieren.
   const targetEntry: CatalogEntry = {
     id: targetManifest.id,
     kind: 'plugin',
@@ -181,9 +229,8 @@ export async function installFromGithubWithAutoDeps(
     mergedEntries.push(e);
   }
   const newCatalog = { version: 1 as const, entries: mergedEntries };
-  writeCatalog(catalogPaths.catalogPath, newCatalog);
 
-  // Lock + Sync
+  // Phase 1: Lock IN-MEMORY bauen — kein FS-Write bisher
   let newLock: Awaited<ReturnType<typeof lockCatalog>>;
   try {
     newLock = await lockCatalog({ catalog: newCatalog, cacheDir: opts.cacheDir });
@@ -193,7 +240,16 @@ export async function installFromGithubWithAutoDeps(
       'lock-build',
     );
   }
+
+  // Phase 2: BEIDE Files persistieren — catalog.json + catalog.lock.json
+  // sind ab jetzt konsistent zueinander.
+  writeCatalog(catalogPaths.catalogPath, newCatalog);
   writeCatalogLock(catalogPaths.lockPath, newLock.lock);
+
+  // Phase 3: applyLock — extrahiert Tarballs auf das FS. Wenn das
+  // fehlschlaegt, sind catalog+lock konsistent aber das FS evtl. nicht.
+  // applyLock ist idempotent (skip-on-existing), ein nachtraegliches
+  // `catalog sync` repariert.
   const applyResult = await applyLock({
     root: opts.root,
     catalog: newCatalog,

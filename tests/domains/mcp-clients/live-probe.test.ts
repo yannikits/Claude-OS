@@ -192,6 +192,37 @@ describe('probeServer — Fehler-Pfade', () => {
   });
 });
 
+describe('probeServer — Cleanup (Codex-Finding HIGH #1)', () => {
+  it('sendet SIGKILL wenn SIGTERM den Process nicht beendet (childExited-flag)', async () => {
+    // FakeChild der SIGTERM ignoriert: kill('SIGTERM') setzt zwar killed=true,
+    // emittiert aber KEIN exit-Event. Erst SIGKILL killed wirklich.
+    const fakeChild = makeFakeChild();
+    const killCalls: string[] = [];
+    fakeChild.kill = vi.fn((signal?: string) => {
+      killCalls.push(signal ?? 'SIGTERM');
+      if (signal === 'SIGKILL') {
+        // SIGKILL beendet wirklich
+        setImmediate(() => fakeChild.emit('exit', null, 'SIGKILL'));
+      }
+      // SIGTERM: no-op, kein exit-Event
+      return true;
+    });
+    const spawnFn = vi.fn(() => fakeChild);
+
+    // Trigger init-timeout damit finish() laeuft
+    const result = await probeServer(makeEntry(), {
+      spawnFn: spawnFn as never,
+      timeoutMs: 50,
+    });
+    expect(result.kind).toBe('init-timeout');
+
+    // Warten bis der SIGKILL-Fallback (1s) gefeuert hat
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(killCalls).toContain('SIGTERM');
+    expect(killCalls).toContain('SIGKILL');
+  });
+});
+
 describe('probeServers — parallel', () => {
   it('probt mehrere Server mit beschraenkter concurrency', async () => {
     const fake = () => {

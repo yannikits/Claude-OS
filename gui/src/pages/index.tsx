@@ -485,6 +485,12 @@ export function ChatPage() {
   // (PR #55, getestet im Screenshot vom 2026-05-20).
   const activeSessionIdRef = useRef<string | null>(null);
   const listenersReadyRef = useRef<Promise<unknown> | null>(null);
+  // Codex-Review MEDIUM finding #4: synchrone Spawn-Guard.
+  // `running`-state-check ist async-update — bei doppeltem Klick koennen
+  // 2 start()-Calls beide den check passieren bevor setRunning(true) feuert.
+  // Ref ist synchron → blockt sofort, kein await-Loophole.
+  const startInFlightRef = useRef(false);
+  const [starting, setStarting] = useState(false);
 
   const append = useCallback((stream: ChatLogEntry['stream'], text: string) => {
     idCounter.current += 1;
@@ -543,6 +549,12 @@ export function ChatPage() {
 
   const start = async () => {
     if (running) return;
+    // SYNCHRONE Guard via Ref — verhindert Double-Spawn bei schnellen
+    // Doppelklicks (Codex-Review #4). setRunning(true) ist async und
+    // wuerde erst beim naechsten render greifen.
+    if (startInFlightRef.current) return;
+    startInFlightRef.current = true;
+    setStarting(true);
     setError(null);
     const args = argsText.trim().length === 0 ? [] : argsText.trim().split(/\s+/);
     setLog([]);
@@ -566,6 +578,9 @@ export function ChatPage() {
       );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      startInFlightRef.current = false;
+      setStarting(false);
     }
   };
 
@@ -641,8 +656,13 @@ export function ChatPage() {
             Stop
           </button>
         ) : (
-          <button type="button" className="btn-primary" onClick={start} disabled={!sidecarOk}>
-            Spawn
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={start}
+            disabled={!sidecarOk || starting}
+          >
+            {starting ? 'Spawne …' : 'Spawn'}
           </button>
         )}
         <button

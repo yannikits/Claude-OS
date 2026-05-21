@@ -116,11 +116,22 @@ export async function probeServer(
   }
 
   let resolved = false;
+  let childExited = false;
   const stderrBuf: string[] = [];
   const stdoutLines: string[] = [];
   const pendingIds = new Set<number>([1, 2]);
 
+  // Track REAL exit (nicht nur "signal gesendet") fuer den SIGKILL-Fallback.
+  // `child.killed` ist nach erfolgreichem kill('SIGTERM') sofort true — das
+  // sagt nichts darueber aus ob der Process tatsaechlich gestorben ist.
+  // SIGTERM-resistante Server (z. B. Node-Prozesse die signal handler
+  // installieren) wuerden ohne diesen flag nie SIGKILL bekommen.
+  child.once('exit', () => {
+    childExited = true;
+  });
+
   return await new Promise<ProbeResult>((resolve) => {
+    let killFallbackTimer: NodeJS.Timeout | null = null;
     function finish(result: ProbeResult): void {
       if (resolved) return;
       resolved = true;
@@ -129,17 +140,24 @@ export async function probeServer(
       } catch {
         // child already exited
       }
-      setTimeout(() => {
-        if (child.killed === false) {
+      killFallbackTimer = setTimeout(() => {
+        if (!childExited) {
           try {
             child.kill('SIGKILL');
           } catch {
-            // ignore
+            // ignore — process verschwand zwischen check und kill
           }
         }
+        // Wenn der Process schon tot ist, ist das ein no-op — kein Cleanup
+        // mehr noetig, weil wir die Promise bereits resolved haben.
       }, 1000);
+      // Wenn Node beendet wird bevor der Fallback feuert, soll das den
+      // Process nicht festhalten.
+      killFallbackTimer.unref?.();
       resolve(result);
     }
+    // Belegen damit lint zufrieden ist (killFallbackTimer wird oben gesetzt).
+    void killFallbackTimer;
 
     const overallTimer = setTimeout(() => {
       finish({
