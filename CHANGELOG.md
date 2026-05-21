@@ -71,13 +71,16 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 - **M14** `sidecar/mtime-cache.ts` — neue `mtimeCached(path, loader, cache)`-Helper mit per-file `{mtimeMs, size}`-key + tombstone-Support. Wired in `catalog.list`, `vault.status` (config-Pfad, BusyFlag bleibt uncached), `schedule.list`. Spart ~5-20ms blocking-I/O pro Dashboard-Poll-RPC. 8 neue Tests (cache-hit/miss, mtime-change, size-change, missing-tombstone, transitions, multi-path-isolation). 823/826 vitest gruen (PR #76).
 
+### Architektur (Folge-Iteration nach Cleanup-Sprint)
+
+- **M21** `sidecar/methods.ts` Namespace-Split — 549 LOC → 84 LOC orchestrator + 9 per-Namespace-Module unter `methods/` (catalog/vault/inbox/settings/secrets/chat/schedule/mcp/agent). Plus `methods/_shared.ts` mit `MethodsContext` + `requireString`/`Boolean`-Helpers (ersetzt 14× kopiertes Validierungspattern) + `canonicalizeRoots`/`isUnder` (C2 helpers). Public API unveraendert. 823/826 vitest + 6/6 smoke gruen (PR #78).
+
 ### Deferred als Follow-ups
 
 - **M3** mcp-Trust-Prompt — braucht GUI-Design-Sprint.
 - **M5** secrets cross-process file-lock — braucht `proper-lockfile`-Dep oder Custom-OS-EXCL-Loop.
 - **M8** RPC-Nonce — braucht koordinierten Tauri-Shell-Pull (`gui/src-tauri/`).
 - **M18** `cli/commands/catalog.ts:actAutoDeps` Refactor zu `installFromGithubWithAutoDeps`-Call.
-- **M21** `sidecar/methods.ts` Split nach RPC-Namespace.
 
 ### Breaking Changes (User-Migration)
 
