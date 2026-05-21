@@ -30,6 +30,53 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { McpServerEntry } from './types.js';
 
+/**
+ * m14 (2026-05-21 code-review): Whitelist von runtime-essentials die
+ * an 3rd-party MCP-Server weitergegeben werden. ALLES andere
+ * (CLAUDE_OS_SECRETS_KEY, ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.) wird
+ * blockiert sodass nur die `entry.env`-explizit-deklarierten keys + die
+ * minimalen OS-essentials sichtbar sind.
+ */
+const MCP_ENV_PASSTHROUGH = new Set([
+  'PATH',
+  'Path',
+  'PATHEXT',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'SYSTEMROOT',
+  'SYSTEMDRIVE',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMFILES',
+  'PROGRAMFILES(X86)',
+  'COMSPEC',
+]);
+
+export function buildCuratedMcpEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  entryEnv: Readonly<Record<string, string>> | undefined,
+): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(parentEnv)) {
+    if (MCP_ENV_PASSTHROUGH.has(k) && v !== undefined) out[k] = v;
+  }
+  // Caller-supplied env (aus mcp.json) override / extend
+  if (entryEnv !== undefined) {
+    for (const [k, v] of Object.entries(entryEnv)) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 export type ProbeResult =
   | { kind: 'alive'; toolsCount: number; durationMs: number; protocolVersion: string }
   | { kind: 'init-timeout'; durationMs: number; message: string }
@@ -98,10 +145,16 @@ export async function probeServer(
   const spawnImpl = opts.spawnFn ?? spawn;
   const start = Date.now();
   let child: ChildProcess;
+  // m14 (2026-05-21 code-review): den probed MCP-Server NICHT mit full
+  // sidecar-env starten — sonst sehen 3rd-party MCP-Server unsere
+  // `CLAUDE_OS_SECRETS_KEY`, `ANTHROPIC_API_KEY`, GITHUB_TOKEN, etc.
+  // Nur die runtime-essentials (PATH, locale, HOME) + die in
+  // `entry.env` explizit deklarierten keys werden weitergegeben.
+  const curatedEnv = buildCuratedMcpEnv(process.env, entry.env);
   try {
     child = spawnImpl(entry.command, [...entry.args], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(entry.env ?? {}) },
+      env: curatedEnv,
       shell:
         entry.command.toLowerCase().endsWith('.cmd') ||
         entry.command.toLowerCase().endsWith('.bat'),

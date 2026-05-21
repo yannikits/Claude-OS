@@ -103,9 +103,15 @@ export class ChatSessions {
       }
     }
 
+    // m13 (2026-05-21 code-review): claude.exe ist ein 3rd-party-Binary
+    // — strippe `CLAUDE_OS_SECRETS_KEY` aus dem env damit der
+    // file-store-Master-Key nicht ueber den child-process leaken kann.
+    const childEnv = { ...process.env };
+    delete childEnv.CLAUDE_OS_SECRETS_KEY;
+
     const child = spawn(binary.path, [...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env: childEnv,
       shell: needsShell,
     });
 
@@ -140,12 +146,22 @@ export class ChatSessions {
     return { sessionId: id };
   }
 
-  write(sessionId: string, input: string): void {
+  /**
+   * Writes one input chunk to the session's stdin.
+   *
+   * m7 (2026-05-21 code-review): `stdin.write` returnt `false` wenn der
+   * internal Stream-Buffer voll ist. Ignoring the return wert kann OOM
+   * verursachen bei einem runaway-input-stream auf einem slow child.
+   * Wir respektieren das jetzt und retournen den back-pressure-Status,
+   * sodass Caller `'drain'`-Events abwarten koennen.
+   */
+  write(sessionId: string, input: string): { drained: boolean } {
     const session = this.requireSession(sessionId);
     if (!session.child.stdin.writable) {
       throw new Error(`chat.write: session ${sessionId} stdin not writable (already closed?)`);
     }
-    session.child.stdin.write(input);
+    const drained = session.child.stdin.write(input);
+    return { drained };
   }
 
   kill(sessionId: string): void {

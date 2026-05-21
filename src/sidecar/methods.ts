@@ -110,6 +110,15 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
     if (typeof params.id !== 'string' || params.id.length === 0) {
       throw new Error('catalog.removeEntry: params.id muss ein non-empty string sein');
     }
+    // m16 (2026-05-21 code-review): id-pattern matched gegen
+    // CatalogEntrySchema (`^[A-Za-z0-9._-]+$`). Defense gegen Inject-
+    // Attempts via crafted id (z. B. path-traversal-Segmente in
+    // catalog.json-Lookups).
+    if (!/^[A-Za-z0-9._-]+$/.test(params.id)) {
+      throw new Error(
+        `catalog.removeEntry: params.id "${params.id}" enthaelt invalid characters (allowed: A-Za-z0-9._-)`,
+      );
+    }
     const paths = catalogPathsFor(rootPath());
     try {
       const result = removeCatalogEntry(paths.catalogPath, params.id);
@@ -362,8 +371,10 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
       if (typeof params.input !== 'string') {
         throw new Error('chat.write: params.input must be a string');
       }
-      chat.write(params.sessionId, params.input);
-      return { ok: true as const };
+      const { drained } = chat.write(params.sessionId, params.input);
+      // m7: surface backpressure-status to RPC consumers — sie koennen
+      // auf "drained:false" ein Slow-Down einlegen (chunked-write).
+      return { ok: true as const, drained };
     });
     dispatcher.register('chat.kill', (rawParams: unknown) => {
       const params = (rawParams ?? {}) as { sessionId?: string };
