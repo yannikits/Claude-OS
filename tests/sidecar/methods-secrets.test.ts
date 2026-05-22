@@ -114,4 +114,74 @@ describe('secrets.list + secrets.delete RPC', () => {
     const r2 = await call('secrets.delete', {});
     expect(r2.error?.message).toMatch(/non-empty string/);
   });
+
+  describe('secrets.set RPC (v1.x.+1)', () => {
+    it('creates a new secret and reports updated=false', async () => {
+      const r = (await call('secrets.set', { key: 'fresh-key', value: 'fresh-value' })) as {
+        result: { key: string; backend: string; updated: boolean };
+      };
+      expect(r.result).toEqual({
+        key: 'fresh-key',
+        backend: 'encrypted-file',
+        updated: false,
+      });
+      // verify it landed
+      const after = (await call('secrets.list')) as {
+        result: { count: number; entries: { key: string }[] };
+      };
+      expect(after.result.count).toBe(1);
+      expect(after.result.entries[0]?.key).toBe('fresh-key');
+    });
+
+    it('updates an existing secret and reports updated=true', async () => {
+      await seedStore({ 'existing-key': 'old-value' });
+      const r = (await call('secrets.set', { key: 'existing-key', value: 'new-value' })) as {
+        result: { updated: boolean };
+      };
+      expect(r.result.updated).toBe(true);
+      // value-roundtrip via EncryptedFileStore.get()
+      const store = new EncryptedFileStore({
+        filePath: join(tmpData, 'secrets.enc'),
+        env: testEnv,
+      });
+      expect(await store.get('existing-key')).toBe('new-value');
+    });
+
+    it('accepts empty-string value (explicit empty rather than delete)', async () => {
+      const r = (await call('secrets.set', { key: 'maybe-empty', value: '' })) as {
+        result: { updated: boolean };
+      };
+      expect(r.result.updated).toBe(false);
+      const store = new EncryptedFileStore({
+        filePath: join(tmpData, 'secrets.enc'),
+        env: testEnv,
+      });
+      expect(await store.get('maybe-empty')).toBe('');
+    });
+
+    it('rejects non-string value with a clear error (and does NOT leak any value)', async () => {
+      const r = await call('secrets.set', { key: 'foo', value: 42 });
+      expect(r.error?.message).toMatch(/value must be a string/);
+      // assert the error string doesn't accidentally include the value
+      // representation as a guard against future regressions where
+      // err.message might surface params.
+      expect(r.error?.message).not.toContain('42');
+    });
+
+    it('returns secrets-backend-locked typed error when master key is missing', async () => {
+      await seedStore({ 'existing-key': 'foo' });
+      delete testEnv.CLAUDE_OS_SECRETS_KEY;
+      const r = await call('secrets.set', { key: 'new-key', value: 'whatever' });
+      expect(r.error?.message).toBe('secrets-backend-locked');
+    });
+
+    it('does not include the secret value in any returned error path', async () => {
+      // Test that even if something errors, the value never appears in error.message.
+      // Trigger an error via missing key, ensure the SUPER-secret value never leaks.
+      const SUPER_SECRET = 'XXXdo-not-leak-this-stringXXX';
+      const r = await call('secrets.set', { key: '', value: SUPER_SECRET });
+      expect(r.error?.message).toBeDefined();
+      expect(r.error?.message).not.toContain(SUPER_SECRET);
+    });
+  });
 });

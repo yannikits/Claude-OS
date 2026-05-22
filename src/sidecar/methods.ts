@@ -18,6 +18,7 @@ import type { loadVaultConfig } from '../domains/vault-sync/index.js';
 import type { ChatSessions } from './chat-sessions.js';
 import { type MethodsContext, rootPath } from './methods/_shared.js';
 import { registerAgentMethods } from './methods/agent.js';
+import { registerAuthMethods } from './methods/auth.js';
 import { registerCatalogMethods } from './methods/catalog.js';
 import { registerChatMethods } from './methods/chat.js';
 import { registerInboxMethods } from './methods/inbox.js';
@@ -87,7 +88,10 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
   registerSettingsMethods(dispatcher, ctx);
   registerSecretsMethods(dispatcher, ctx);
   if (opts.chatSessions !== undefined) registerChatMethods(dispatcher, opts.chatSessions);
-  if (opts.ptyChatSessions !== undefined) registerPtyMethods(dispatcher, opts.ptyChatSessions);
+  if (opts.ptyChatSessions !== undefined) {
+    registerPtyMethods(dispatcher, opts.ptyChatSessions);
+    registerAuthMethods(dispatcher, ctx, { ptyChatSessions: opts.ptyChatSessions });
+  }
   registerScheduleMethods(dispatcher, ctx);
   if (opts.mcpWatcher !== undefined) registerMcpMethods(dispatcher, opts.mcpWatcher);
   registerAgentMethods(dispatcher, ctx);

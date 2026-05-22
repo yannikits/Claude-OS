@@ -76,6 +76,14 @@ export type PtyNotificationEmitter = (method: string, params: unknown) => void;
 export interface PtySpawnOpts {
   readonly cols?: number;
   readonly rows?: number;
+  /**
+   * Additional env-vars merged into the child process env. Wird NACH der
+   * `CLAUDE_OS_SECRETS_KEY`-strip applied, sodass eine versehentliche
+   * Wiedereinfuehrung des secrets-keys via envOverrides moeglich waere —
+   * Caller-Verantwortung das nicht zu tun. Verwendet von `auth.login`
+   * fuer `ANTHROPIC_CONFIG_DIR` (profile-aware).
+   */
+  readonly envOverrides?: Readonly<Record<string, string>>;
 }
 
 export class PtyChatSessions {
@@ -125,6 +133,13 @@ export class PtyChatSessions {
     for (const [key, value] of Object.entries(process.env)) {
       if (key === 'CLAUDE_OS_SECRETS_KEY') continue;
       if (value !== undefined) childEnv[key] = value;
+    }
+    // envOverrides werden NACH der secrets-key-strip applied.
+    // Anwendungsfall: ANTHROPIC_CONFIG_DIR fuer profile-aware auth.login.
+    if (opts.envOverrides !== undefined) {
+      for (const [key, value] of Object.entries(opts.envOverrides)) {
+        childEnv[key] = value;
+      }
     }
 
     const cols = opts.cols ?? DEFAULT_COLS;

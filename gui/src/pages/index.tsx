@@ -3,8 +3,11 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import { AuthLoginModal } from '../components/auth-login-modal';
+import { SecretAddModal } from '../components/secret-add-modal';
 import {
   type AgentListResult,
+  activateProfile,
   addScheduleEntry,
   type CatalogInstallAutoDepsResult,
   type CatalogListResult,
@@ -709,13 +712,59 @@ function YesNo({ value }: { value: boolean }) {
 }
 
 export function SettingsPage() {
-  const { data, error, loading } = useRpc<SettingsReadResult>(() => getSettings());
+  const sidecarOk = useSidecarOk();
+  const [data, setData] = useState<SettingsReadResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [switchingProfile, setSwitchingProfile] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getSettings();
+      setData(result);
+      setError(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleProfileSwitch = useCallback(
+    async (name: string) => {
+      if (data === null || name === data.anthropic.activeProfile) return;
+      setSwitchingProfile(true);
+      setError(null);
+      try {
+        await activateProfile(name);
+        await reload();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSwitchingProfile(false);
+      }
+    },
+    [data, reload],
+  );
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const handleLoginModalClose = useCallback(() => {
+    setLoginModalOpen(false);
+    // Refetch settings — credentials.json may have been written by login flow.
+    void reload();
+  }, [reload]);
+
   return (
     <section className="page">
       <h1>Settings</h1>
       <p className="muted">
-        Read-only Anzeige. Änderungen aktuell nur per CLI (<code>claude-os auth …</code>,{' '}
-        <code>claude-os secrets …</code>).
+        Anthropic-Login + Profile-Switch via GUI. Andere Einstellungen weiterhin per CLI (
+        <code>claude-os auth …</code>, <code>claude-os secrets …</code>).
       </p>
       <Status loading={loading} error={error} />
       {data && (
@@ -729,23 +778,55 @@ export function SettingsPage() {
             <dt>$ANTHROPIC_CONFIG_DIR</dt>
             <dd>{data.anthropic.envOverride ?? <span className="muted">(unset)</span>}</dd>
             <dt>Aktives Profil</dt>
-            <dd>{data.anthropic.activeProfile ?? <span className="muted">(default)</span>}</dd>
-            <dt>Verfügbare Profile</dt>
             <dd>
               {data.anthropic.availableProfiles.length === 0 ? (
-                <span className="muted">keine</span>
+                <span className="muted">
+                  (default — keine Profile angelegt;{' '}
+                  <code>claude-os auth profile create &lt;name&gt;</code>)
+                </span>
               ) : (
-                data.anthropic.availableProfiles.map((p) => (
-                  <span key={p.name} className={p.active ? 'badge badge-ok' : 'badge badge-muted'}>
-                    {p.name}
-                  </span>
-                ))
+                <select
+                  className="profile-select"
+                  value={data.anthropic.activeProfile ?? ''}
+                  onChange={(e) => void handleProfileSwitch(e.target.value)}
+                  disabled={!sidecarOk || switchingProfile}
+                  title={
+                    sidecarOk
+                      ? 'Profil wechseln (schreibt auth-active-profile.json)'
+                      : 'Sidecar nicht erreichbar — Read-Only-Modus'
+                  }
+                >
+                  {data.anthropic.activeProfile === null && (
+                    <option value="" disabled>
+                      (kein Profil aktiv)
+                    </option>
+                  )}
+                  {data.anthropic.availableProfiles.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
               )}
+              {switchingProfile && <span className="muted"> · wechsle …</span>}
             </dd>
             <dt>.credentials.json vorhanden</dt>
             <dd>
               <YesNo value={data.anthropic.credentialsFileExists} />{' '}
-              <code className="muted">{data.anthropic.credentialsFile}</code>
+              <code className="muted">{data.anthropic.credentialsFile}</code>{' '}
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setLoginModalOpen(true)}
+                disabled={!sidecarOk}
+                title={
+                  sidecarOk
+                    ? 'Oeffnet claude auth login in einem embedded Terminal'
+                    : 'Sidecar nicht erreichbar — Read-Only-Modus'
+                }
+              >
+                {data.anthropic.credentialsFileExists ? 'Neu einloggen' : 'Login'}
+              </button>
             </dd>
           </dl>
 
@@ -792,6 +873,7 @@ export function SettingsPage() {
           </table>
         </>
       )}
+      {loginModalOpen && <AuthLoginModal onClose={handleLoginModalClose} />}
     </section>
   );
 }
@@ -802,6 +884,7 @@ export function SecretsPage() {
   const [loading, setLoading] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
   const sidecarOk = useSidecarOk();
 
   const refresh = useCallback(async () => {
@@ -842,15 +925,31 @@ export function SecretsPage() {
     <section className="page">
       <h1>Secrets</h1>
       <p className="muted">
-        Nur Namen — Values bleiben out-of-band. <code>set</code> / <code>get</code> nur per CLI (
-        <code>claude-os secrets set &lt;key&gt;</code>).
+        Set/Update via GUI (Wert per Tauri-IPC zum Sidecar). <code>get</code> bleibt CLI-only —
+        Werte verlassen niemals den Sidecar in die GUI hinein.
       </p>
       <Status loading={loading} error={error} />
       {actionError && <p className="banner banner-error">{actionError}</p>}
       {data && (
         <>
           <p className="muted">
-            Backend: <code>{data.backend}</code> · {data.count} Einträge
+            Backend: <code>{data.backend}</code> · {data.count} Einträge{' '}
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => setAddModalOpen(true)}
+              disabled={!sidecarOk || data.locked}
+              data-testid="secret-add-button"
+              title={
+                !sidecarOk
+                  ? 'Sidecar nicht erreichbar — Read-Only-Modus'
+                  : data.locked
+                    ? 'Backend gesperrt — Master-Key fehlt'
+                    : 'Neues Secret hinzufuegen oder existierendes ueberschreiben'
+              }
+            >
+              + Secret hinzufuegen
+            </button>
           </p>
           {data.locked ? (
             <p className="banner banner-error">
@@ -899,6 +998,14 @@ export function SecretsPage() {
             </table>
           )}
         </>
+      )}
+      {addModalOpen && (
+        <SecretAddModal
+          onClose={() => setAddModalOpen(false)}
+          onSaved={() => {
+            void refresh();
+          }}
+        />
       )}
     </section>
   );

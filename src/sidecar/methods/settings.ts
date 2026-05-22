@@ -1,5 +1,5 @@
 /**
- * Settings-Namespace RPCs: read.
+ * Settings-Namespace RPCs: read + activateProfile (v1.x.+1).
  * Split aus `sidecar/methods.ts` (M21).
  *
  * @module @sidecar/methods/settings
@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { ProfileManager } from '../../domains/auth/index.js';
 import { createSecretStore } from '../../domains/secrets/index.js';
 import type { RpcDispatcher } from '../rpc.js';
-import type { MethodsContext } from './_shared.js';
+import { type MethodsContext, requireString } from './_shared.js';
 
 export function registerSettingsMethods(dispatcher: RpcDispatcher, ctx: MethodsContext): void {
   dispatcher.register('settings.read', () => {
@@ -73,5 +73,25 @@ export function registerSettingsMethods(dispatcher: RpcDispatcher, ctx: MethodsC
       },
       claudeCodeSettings,
     };
+  });
+
+  /**
+   * Schaltet das aktive Anthropic-Profil um. Wirft wenn der Name kein
+   * bekanntes Profil ist (statt ein neues zu erzeugen — das bleibt
+   * CLI-only via `claude-os auth profile create`). Reuse: ProfileManager.
+   */
+  dispatcher.register('settings.activateProfile', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { name?: string };
+    const name = requireString(params.name, 'name', 'settings.activateProfile');
+    const machine = ctx.machinePaths();
+    const profileMgr = new ProfileManager({ dataRoot: machine.dataDir });
+    const known = profileMgr.list().some((p) => p.name === name);
+    if (!known) {
+      throw new Error(
+        `settings.activateProfile: unknown profile "${name}". Use \`claude-os auth profile create <name>\` first.`,
+      );
+    }
+    const profile = profileMgr.use(name);
+    return { activeProfile: profile.name };
   });
 }

@@ -104,6 +104,64 @@ describe('settings.read RPC', () => {
     ]);
   });
 
+  describe('settings.activateProfile', () => {
+    async function callActivate(name: string) {
+      const d = new RpcDispatcher();
+      registerMethods(d, { env: testEnv, home: tmpHome });
+      const result = await d.handle(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'settings.activateProfile',
+          params: { name },
+        }),
+      );
+      return result;
+    }
+
+    it('switches active profile when name is known', async () => {
+      const profilesDir = join(machineDataDir, 'auth-profiles');
+      mkdirSync(join(profilesDir, 'work'), { recursive: true });
+      mkdirSync(join(profilesDir, 'personal'), { recursive: true });
+      writeFileSync(
+        join(machineDataDir, 'auth-active-profile.json'),
+        JSON.stringify({ active: 'work' }),
+      );
+
+      const raw = (await callActivate('personal')) as { result: { activeProfile: string } };
+      expect(raw.result.activeProfile).toBe('personal');
+
+      // verify the marker was actually rewritten on disk
+      const settingsAfter = await (async () => {
+        const d = new RpcDispatcher();
+        registerMethods(d, { env: testEnv, home: tmpHome });
+        const r = await d.handle(
+          JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'settings.read' }),
+        );
+        return (r as { result: { anthropic: { activeProfile: string | null } } }).result;
+      })();
+      expect(settingsAfter.anthropic.activeProfile).toBe('personal');
+    });
+
+    it('rejects unknown profile with a helpful error message', async () => {
+      const profilesDir = join(machineDataDir, 'auth-profiles');
+      mkdirSync(join(profilesDir, 'work'), { recursive: true });
+
+      const raw = (await callActivate('nonexistent')) as {
+        error: { code: number; message: string };
+      };
+      expect(raw.error).toBeDefined();
+      expect(raw.error.message).toMatch(/unknown profile/);
+      expect(raw.error.message).toMatch(/claude-os auth profile create/);
+    });
+
+    it('rejects empty name', async () => {
+      const raw = (await callActivate('')) as { error: { message: string } };
+      expect(raw.error).toBeDefined();
+      expect(raw.error.message).toMatch(/non-empty string/);
+    });
+  });
+
   it('reports existence + size + mtime for ~/.claude/settings.local.json when present', async () => {
     const claudeDir = join(tmpHome, '.claude');
     mkdirSync(claudeDir, { recursive: true });
