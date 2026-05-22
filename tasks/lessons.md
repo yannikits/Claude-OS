@@ -13,6 +13,21 @@ Format pro Eintrag:
 
 ---
 
+## 2026-05-22 — Secret-Eingabe via Web-Renderer: type=password + clear-on-submit + IPC-Warning
+
+**Situation:** v1.x.+1 Secrets-Edit musste eine `secrets.set(key,value)`-Mutation via GUI exposen. Der Wert ist per Definition sensitiv (API-keys, OAuth-tokens) und musste durch den React-Renderer fliessen bevor er den Sidecar erreicht. DevTools koennen den `value`-State + den IPC-Call abgreifen waehrend der Wert in der App lebt. Default-Form-Inputs sammeln zusaetzliche Risiken: Browser-Save-Prompt, IME/spellcheck-Cloud-Sync, autofill aus password-manager-Side-Channels.
+
+**Lektion:** Drei harte Regeln fuer jede zukuenftige Secret-Eingabe in der GUI:
+1. **`<input type="password" autoComplete="new-password" spellCheck={false}>`** — `new-password` (nicht `off`) unterdrueckt sowohl Save-Prompt als auch Autofill aus dem password-Manager. `spellCheck=false` haelt den Wert vom Browser-Cloud-Spellcheck weg.
+2. **Value-State **explizit auf `''` setzen** nach erfolgreichem submit ODER on-close** — sonst lebt der Wert in React-Fiber-snapshots bis zum next-Render. `setValue('')` direkt vor `onClose()`/`onSaved()`.
+3. **Prominenter Warn-Banner** im Modal: "Wert geht durch Tauri-IPC und ist während der Eingabe in Browser-DevTools sichtbar". User-Education ist die einzige Mitigation fuer die DevTools-Race.
+
+Backend-side: SecretsLockedError-Klasse darf den Master-Key-Internals niemals leaken (ADR-0004 §51). Re-throw als typed `Error('secrets-backend-locked')` macht das Frontend dann selbst zustaendig fuer die UX-Message.
+
+**Anwendung:** Pattern dokumentiert in ADR-0022 und implementiert in `gui/src/components/secret-add-modal.tsx`. Bei zukuenftigen Mutations die sensitive payload fuehren (z. B. master-key-Wechsel, password-resets): gleiches Pattern. Browser-Settings-API koennte den DevTools-Risk weiter reduzieren — v2 evaluieren.
+
+---
+
 ## 2026-05-21 — Native modules in pkg-bundled Node: sideload als komplettes Package
 
 **Situation:** v1.x-PTY-Upgrade fuegte `node-pty` zum Sidecar hinzu. Erster Implementations-Versuch monkey-patched `node-pty/lib/utils.js loadNativeModule()` damit `.node`-Files aus einem env-Var-Pfad geladen werden. Beim ersten Run im pkg-Bundle: `Cannot find module 'node-pty/lib/utils.js'`. Root-cause: `@yao-pkg/pkg` macht static-analysis fuer `require('literal-string')`-Aufrufe — `createRequire(import.meta.url).require(x)` ist dynamisch und wird nicht getraced. node-pty landete NICHT im Snapshot. Zusaetzlich: selbst wenn es im Snapshot waere, koennten die `.node`-Files dort nicht funktionieren (native modules brauchen on-disk-Paths). Zweiter Issue: node-ptys interner `child_process.fork('conpty_console_list_agent.js')` re-spawned in einem pkg-Bundle die gesamte Sidecar-EXE statt das Helper-Script (weil `process.execPath` aufs Bundle zeigt) — `AttachConsole failed`-Crash beim Kill.

@@ -232,8 +232,8 @@ v1.0.0 ist GA. Diese Liste sammelt die natürlichen nächsten Schritte für kün
 ### v1.2 — echte Impl statt Stubs (mittleres Aufwand)
 
 - [x] **Chat-View** (MVP) — implementiert 2026-05-19 (PR #29). **Bewusste v1.2-Vereinfachung: line-buffered child_process statt PTY** (node-pty native-build-pain ist v1.x). Neue `src/sidecar/chat-sessions.ts` `ChatSessions` Klasse mit `spawn(args) → {sessionId}` / `write(sessionId, input)` / `kill(sessionId)` (SIGTERM mit 2s SIGKILL-Fallback). Notification-Emitter pipes `chat.output` / `chat.exit` als JSON-RPC-Notifications zum Tauri-Supervisor, der sie als Tauri-Events re-emittiert. `MAX_SESSIONS=8` ring-guard. Windows `.cmd`/`.bat` detection setzt `shell: true` (CVE-2024-27980 mitigation). Renderer `ChatPage` mit args-Input, Spawn/Stop, 500-Line-Ring-Buffer (stdout/stderr/meta-coloring), stdin-Enter-to-Send. +4 Tests. **Limitations dokumentiert**: keine TTY-detection (interaktive Password-Prompts), keine ANSI-Cursor-Control, line-buffered. → **Full xterm.js + node-pty geshipt in v1.x (siehe untenstehende v1.x — Full-TTY-Section).**
-- [x] **Secrets.list RPC** + UI — shipped 2026-05-18 in PRs #15 (Secrets-View) + #17 (locked-state UI + backend env value). `src/sidecar/methods.ts` registriert `secrets.list` (Keys + backend, niemals Values) und `secrets.delete`. `gui/src/pages/index.tsx SecretsPage` rendert Liste mit Delete-Button + Confirm-Dialog + Backend-Locked-Banner. v1.1 (PR #22) ergänzte `useSidecarOk()`-Disabled-State. Set/Update bleiben CLI-only (Value-in-Renderer-RAM vermeiden).
-- [x] **Settings-View** wired — shipped 2026-05-18 in PR #14. `settings.read` RPC liefert `{anthropic: {resolvedConfigDir, envOverride, activeProfile, availableProfiles, credentialsFile}, secrets: {backend, envOverride}, claudeCodeSettings: [{scope, name, path, exists, mtime, size}]}` read-only. UI rendert als kv-Listen + Tabelle. Mutation deferred bleibt v1.x.
+- [x] **Secrets.list RPC** + UI — shipped 2026-05-18 in PRs #15 (Secrets-View) + #17 (locked-state UI + backend env value). `src/sidecar/methods.ts` registriert `secrets.list` (Keys + backend, niemals Values) und `secrets.delete`. `gui/src/pages/index.tsx SecretsPage` rendert Liste mit Delete-Button + Confirm-Dialog + Backend-Locked-Banner. v1.1 (PR #22) ergänzte `useSidecarOk()`-Disabled-State. → **Set/Update extended in v1.x.+1 via SecretAddModal (siehe untenstehende v1.x.+1-Section, ADR-0022).**
+- [x] **Settings-View** wired — shipped 2026-05-18 in PR #14. `settings.read` RPC liefert `{anthropic: {resolvedConfigDir, envOverride, activeProfile, availableProfiles, credentialsFile}, secrets: {backend, envOverride}, claudeCodeSettings: [{scope, name, path, exists, mtime, size}]}` read-only. UI rendert als kv-Listen + Tabelle. → **Profile-Switch + Anthropic-Login extended in v1.x.+1 (siehe untenstehende v1.x.+1-Section, ADR-0022).**
 - [x] **pino-roll per-day rotation** für Sidecar-Logs — implementiert 2026-05-19. Neue `src/sidecar/logger.ts` exportiert `createSidecarLogger({logsDir?, level?, stderrOnly?})` → `Promise<SidecarLogger>`. Pipes pino in `multistream([{stream: process.stderr}, {stream: pinoRoll(...)}])` damit der Tauri-Supervisor weiterhin alle Lines via `sidecar://stderr`-Event sieht UND Persistenz nach `<logsDir>/sidecar.YYYY-MM-DD.log` (10 MB size-cap als Secondary-Guardrail, Daily-Rotation). LogsDir-Resolution: opts → `$CLAUDE_OS_LOGS_DIR` → `resolveMachinePaths().logsDir`. Bei pino-roll-Failure (Permissions, Disk full): graceful Fallback auf stderr-only mit Warn-Log. `src/sidecar/index.ts` wired Logger früh; Lifecycle-Events (logger-ready, watchers-running, shutdown-via-rpc, exit) jetzt strukturiert geloggt statt `process.stderr.write`. +3 Tests gegen tmpdir, +1 type shim `src/types/pino-roll.d.ts` (pino-roll v4 hat noch keine offiziellen Types).
 
 ### v1.3 — Cross-Platform-Härtung (20 h, M, deps: v1.0 GA)
@@ -302,6 +302,80 @@ sauber. Bestehende `chat.*`-RPC-Methoden funktionieren unveraendert
 - **pty.data ist single-stream** — keine stdout/stderr-Trennung wie bei
   chat.output. PTY-Semantik. Tools die das brauchen muessen weiter
   `chat.*` benutzen.
+
+### v1.x.+1 — GUI Auth-Login + Settings-Profile-Switch + Secrets-Edit (ADR-0022)
+
+**Ziel:** Drei zusammenhaengende UX-Luecken schliessen: User soll sich
+von der GUI bei Anthropic anmelden, zwischen Profilen wechseln und
+Secrets verwalten koennen — ohne CLI-Wechsel. Coexist mit allen
+existing CLI-Pfaden.
+
+- [x] **Phase 1 — Anthropic-Login via GUI-Modal** (Commit `4a9b982`).
+  Neue `src/sidecar/methods/auth.ts` mit `auth.status` (wrapt
+  `checkAuthState`, injectable binaryResolver+executor fuer Tests) und
+  `auth.login` (spawnt `claude auth login` via PtyChatSessions mit
+  profile-aware ANTHROPIC_CONFIG_DIR). `PtyChatSessions.spawn`
+  akzeptiert optionalen `envOverrides`-param (additiv, nach
+  CLAUDE_OS_SECRETS_KEY-strip ge-merged). Frontend: neuer
+  `AuthLoginModal`-Component mit embedded xterm.js, listenersReadyRef-
+  Race-Fix-Pattern aus ChatPage uebernommen, Esc-to-close, click-
+  outside-to-close, kill-on-close. SettingsPage umgebaut von useRpc
+  auf useState/reload() damit Modal-Close den Status frisch laedt.
+  Login-Button neben credentials.json-Status, useSidecarOk gated.
+  +8 backend tests, +3 gui smoke-tests.
+- [x] **Phase 2 — Settings Profile-Switch** (Commit `ffa793e`).
+  `src/sidecar/methods/settings.ts` neue `settings.activateProfile(name)`
+  RPC: validiert name als known profile (sonst Error mit Hinweis auf
+  `claude-os auth profile create`), ruft `ProfileManager.use()`. KEIN
+  create/delete in GUI (irreversible, bleibt CLI). Frontend:
+  Aktives-Profil ist jetzt `<select>` statt Plain-Text, onChange ruft
+  `settings.activateProfile` + refetched, switchingProfile-State
+  disabled das dropdown waehrend RPC laeuft. +3 tests.
+- [x] **Phase 3 — Secrets Set/Update + M5 Validation** (Commit `5ccbe70`).
+  Neue `secrets.set(key, value)` RPC: detect updated-vs-new ueber
+  `SecretStore.list()` (keys-only, kein Value-Leak), SecretsLockedError
+  wird als typed `'secrets-backend-locked'` re-thrown.
+  `secrets.delete` bekommt symmetrisches Locked-Handling. **M5
+  Cross-Process-Lock** war bereits in
+  `encrypted-file-store.ts:189-201 withFileLock()` implementiert
+  (proper-lockfile retries.factor=1.4, 30s stale-timeout) — nur in
+  diesem PR verifiziert. Frontend: neuer `SecretAddModal` mit
+  `<input type="password" autoComplete="new-password" spellCheck=false>`,
+  Warn-Banner ueber IPC/RAM-Pfad, value-state explizit `''` nach
+  submit-success ODER handleClose. SecretsPage "+ Secret hinzufuegen"-
+  Button neben dem count-Header, disabled wenn `!sidecarOk || locked`.
+  +6 backend tests, +4 gui modal tests.
+- [x] **Phase 4 — ADR-0022 + docs** (dieser Commit).
+  `docs/architecture/adr/0022-gui-auth-and-secrets-mutation.md`
+  dokumentiert die 7 Sub-Entscheidungen + Security-Tradeoffs.
+  todo.md + lessons.md + README aktualisiert.
+
+**Test-Kriterium:** Auf Windows 10 + installiertem MSI:
+- Settings-Tab → "Login" Button → Modal mit xterm zeigt `claude auth
+  login` Flow → OS-Browser oeffnet OAuth → User logs in →
+  "[exited code=0]" im Terminal → Modal Close → SettingsPage zeigt
+  `credentialsFileExists: true`
+- Profile-Dropdown ist sichtbar wenn ≥1 Profile existiert, switch
+  triggert sofortigen re-render mit neuem active-Marker
+- Secrets-Tab → "+ Secret hinzufuegen" → Modal mit Warn-Banner →
+  Key+Password-Value eingeben → submit → SecretsPage table zeigt
+  neues entry
+- Coexist: `claude-os auth login/profile use/secrets set` CLI
+  funktioniert unveraendert. Beide RPC-Sets (chat.* + neue) bleiben
+  parallel.
+
+**v1.x.+1-Abweichungen / Risiken (transparent):**
+
+- **Secret-Wert lebt waehrend Eingabe in Renderer-RAM** — Tauri-
+  WebView production-Build hat keine DevTools, dev-Build schon.
+  Mitigation via Warn-Banner + clear-on-submit. v2-Material: native
+  Tauri-Plugin-Dialog fuer password-input ohne Renderer-touch.
+- **Profile-create/delete bleiben CLI-only** — irreversible Actions
+  brauchen extra Confirmation-UX die wir noch nicht haben.
+- **`auth.status` RPC noch nicht UI-konsumiert** — angelegt fuer
+  Dashboard-Card; Folge-PR.
+- **Stale-Lock-Detection** koennte ein Doctor-Check werden — wenn
+  `<secretsPath>.lock` >60s alt, ist es vermutlich kaputt.
 
 ### v1.5+ — Plugin-Echo + Bestands-User-Sync
 

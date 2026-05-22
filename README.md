@@ -139,8 +139,8 @@ Desktop-App-Shell mit Claude-Desktop-Look-and-Feel (per [ADR-0001](docs/architec
 - **Agent Runs** — Letzte 50 Runs aus dem JSONL-Store
 - **Schedule** — Cron-Tasks anlegen/togglen/loeschen mit Live-Event-Feed (ADR-0019)
 - **MCP-Clients** — Live-Status aller in Claude Desktop / Claude Code konfigurierten MCP-Server (color-coded alive/init-timeout/crashed/protocol-error/spawn-failed)
-- **Secrets** — Keys-only-Liste (Values niemals in der GUI)
-- **Settings** — Read-only Config-Snapshot
+- **Secrets** — Keys-only-Liste + Add/Update via password-Modal (Values niemals lesbar in der GUI; siehe ADR-0022)
+- **Settings** — Anthropic-Login (embedded xterm-Modal mit OAuth-Browser-Callback) + Profile-Switch-Dropdown + Read-only Config-Snapshot (ADR-0022)
 
 ```
 +-------------------------------------+
@@ -230,6 +230,7 @@ Alle wesentlichen Design-Entscheidungen sind in [`docs/architecture/adr/`](docs/
 - [ADR-0019 — Sidecar Background-Services-Pattern (v1.5/v1.7)](docs/architecture/adr/0019-sidecar-background-services.md)
 - [ADR-0020 — Auto-Deps Fixed-Point-Resolution (v1.5)](docs/architecture/adr/0020-auto-deps-fixed-point-resolution.md)
 - [ADR-0021 — Full-TTY Chat-View via node-pty + xterm.js (v1.x)](docs/architecture/adr/0021-pty-upgrade-xterm-node-pty.md)
+- [ADR-0022 — GUI-Mutation fuer Auth-Login, Profile-Switch, Secrets-Edit (v1.x.+1)](docs/architecture/adr/0022-gui-auth-and-secrets-mutation.md)
 
 ## v1-Abweichungen (bekannt + transparent)
 
