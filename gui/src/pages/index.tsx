@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { AuthLoginModal } from '../components/auth-login-modal';
+import { SecretAddModal } from '../components/secret-add-modal';
 import {
   type AgentListResult,
   activateProfile,
@@ -883,6 +884,7 @@ export function SecretsPage() {
   const [loading, setLoading] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
   const sidecarOk = useSidecarOk();
 
   const refresh = useCallback(async () => {
@@ -923,15 +925,31 @@ export function SecretsPage() {
     <section className="page">
       <h1>Secrets</h1>
       <p className="muted">
-        Nur Namen — Values bleiben out-of-band. <code>set</code> / <code>get</code> nur per CLI (
-        <code>claude-os secrets set &lt;key&gt;</code>).
+        Set/Update via GUI (Wert per Tauri-IPC zum Sidecar). <code>get</code> bleibt CLI-only —
+        Werte verlassen niemals den Sidecar in die GUI hinein.
       </p>
       <Status loading={loading} error={error} />
       {actionError && <p className="banner banner-error">{actionError}</p>}
       {data && (
         <>
           <p className="muted">
-            Backend: <code>{data.backend}</code> · {data.count} Einträge
+            Backend: <code>{data.backend}</code> · {data.count} Einträge{' '}
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => setAddModalOpen(true)}
+              disabled={!sidecarOk || data.locked}
+              data-testid="secret-add-button"
+              title={
+                !sidecarOk
+                  ? 'Sidecar nicht erreichbar — Read-Only-Modus'
+                  : data.locked
+                    ? 'Backend gesperrt — Master-Key fehlt'
+                    : 'Neues Secret hinzufuegen oder existierendes ueberschreiben'
+              }
+            >
+              + Secret hinzufuegen
+            </button>
           </p>
           {data.locked ? (
             <p className="banner banner-error">
@@ -980,6 +998,14 @@ export function SecretsPage() {
             </table>
           )}
         </>
+      )}
+      {addModalOpen && (
+        <SecretAddModal
+          onClose={() => setAddModalOpen(false)}
+          onSaved={() => {
+            void refresh();
+          }}
+        />
       )}
     </section>
   );

@@ -573,6 +573,40 @@ code {
   cursor: not-allowed;
 }
 
+.modal-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.modal-form-row > span {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modal-form-row > input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 13px;
+}
+
+.modal-form-row > input:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.modal-form-row > input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Schedule-Event-Tags (Phase 3 GUI) */
 .schedule-tag {
   display: inline-block;

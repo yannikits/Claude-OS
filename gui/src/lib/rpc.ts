@@ -257,12 +257,30 @@ export interface SecretsDeleteResult {
   backend: SecretBackend;
 }
 
+export interface SecretsSetResult {
+  key: string;
+  backend: SecretBackend;
+  updated: boolean;
+}
+
 export async function listSecrets(): Promise<SecretsListResult> {
   return rpcCall<SecretsListResult>('secrets.list');
 }
 
 export async function deleteSecret(key: string): Promise<SecretsDeleteResult> {
   return rpcCall<SecretsDeleteResult>('secrets.delete', { key });
+}
+
+/**
+ * Setzt einen Secret-Wert (create-or-update). Value geht durch Tauri-
+ * IPC → Sidecar → SecretStore. Caller-Verantwortung:
+ *   1. Wert NICHT in React-State persistieren (clear-on-submit)
+ *   2. Backend-locked-Status (err.message === 'secrets-backend-locked')
+ *      separat behandeln und UX-Hint zeigen
+ *   3. NIEMALS den Value loggen
+ */
+export async function setSecret(key: string, value: string): Promise<SecretsSetResult> {
+  return rpcCall<SecretsSetResult>('secrets.set', { key, value });
 }
 
 export const FILES_DROPPED_EVENT = 'files://dropped';
