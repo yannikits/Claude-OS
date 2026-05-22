@@ -3,6 +3,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import { AuthLoginModal } from '../components/auth-login-modal';
 import {
   type AgentListResult,
   addScheduleEntry,
@@ -709,13 +710,41 @@ function YesNo({ value }: { value: boolean }) {
 }
 
 export function SettingsPage() {
-  const { data, error, loading } = useRpc<SettingsReadResult>(() => getSettings());
+  const sidecarOk = useSidecarOk();
+  const [data, setData] = useState<SettingsReadResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getSettings();
+      setData(result);
+      setError(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const handleLoginModalClose = useCallback(() => {
+    setLoginModalOpen(false);
+    // Refetch settings — credentials.json may have been written by login flow.
+    void reload();
+  }, [reload]);
+
   return (
     <section className="page">
       <h1>Settings</h1>
       <p className="muted">
-        Read-only Anzeige. Änderungen aktuell nur per CLI (<code>claude-os auth …</code>,{' '}
-        <code>claude-os secrets …</code>).
+        Anthropic-Login + Profile-Switch via GUI. Andere Einstellungen weiterhin per CLI (
+        <code>claude-os auth …</code>, <code>claude-os secrets …</code>).
       </p>
       <Status loading={loading} error={error} />
       {data && (
@@ -745,7 +774,20 @@ export function SettingsPage() {
             <dt>.credentials.json vorhanden</dt>
             <dd>
               <YesNo value={data.anthropic.credentialsFileExists} />{' '}
-              <code className="muted">{data.anthropic.credentialsFile}</code>
+              <code className="muted">{data.anthropic.credentialsFile}</code>{' '}
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setLoginModalOpen(true)}
+                disabled={!sidecarOk}
+                title={
+                  sidecarOk
+                    ? 'Oeffnet claude auth login in einem embedded Terminal'
+                    : 'Sidecar nicht erreichbar — Read-Only-Modus'
+                }
+              >
+                {data.anthropic.credentialsFileExists ? 'Neu einloggen' : 'Login'}
+              </button>
             </dd>
           </dl>
 
@@ -792,6 +834,7 @@ export function SettingsPage() {
           </table>
         </>
       )}
+      {loginModalOpen && <AuthLoginModal onClose={handleLoginModalClose} />}
     </section>
   );
 }

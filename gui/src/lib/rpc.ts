@@ -301,6 +301,29 @@ export async function onOutboxChanged(
   return listen<WatcherChangeEvent>(OUTBOX_CHANGED_EVENT, (e) => handler(e.payload));
 }
 
+// ---------- auth.* (v1.x.+1) ----------
+
+export type AuthSource = 'cli' | 'file' | 'env' | 'no-creds';
+
+export interface AuthStatusResult {
+  loggedIn: boolean;
+  source: AuthSource;
+  expiresAt?: string;
+  scopes?: string[];
+  profile?: string;
+  warning?: string;
+}
+
+export async function authStatus(): Promise<AuthStatusResult> {
+  return rpcCall<AuthStatusResult>('auth.status');
+}
+
+export async function authLogin(opts: { cols?: number; rows?: number } = {}): Promise<{
+  sessionId: string;
+}> {
+  return rpcCall<{ sessionId: string }>('auth.login', opts);
+}
+
 // ---------- pty.* (v1.x full-TTY) ----------
 
 export const PTY_DATA_EVENT = 'pty.data';
