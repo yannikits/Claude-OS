@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync as existsSyncTest,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -99,8 +105,8 @@ describe('settings.read RPC', () => {
     };
     expect(result.anthropic.activeProfile).toBe('work');
     expect(result.anthropic.availableProfiles).toEqual([
-      { name: 'personal', active: false },
-      { name: 'work', active: true },
+      { name: 'personal', active: false, configDir: join(profilesDir, 'personal') },
+      { name: 'work', active: true, configDir: join(profilesDir, 'work') },
     ]);
   });
 
@@ -159,6 +165,99 @@ describe('settings.read RPC', () => {
       const raw = (await callActivate('')) as { error: { message: string } };
       expect(raw.error).toBeDefined();
       expect(raw.error.message).toMatch(/non-empty string/);
+    });
+  });
+
+  describe('settings.createProfile (v1.x.+2)', () => {
+    async function callCreate(name: string) {
+      const d = new RpcDispatcher();
+      registerMethods(d, { env: testEnv, home: tmpHome });
+      return (await d.handle(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'settings.createProfile',
+          params: { name },
+        }),
+      )) as {
+        result?: { name: string; configDir: string; active: boolean };
+        error?: { message: string };
+      };
+    }
+
+    it('creates a new profile and surfaces its configDir', async () => {
+      const raw = await callCreate('work');
+      expect(raw.result?.name).toBe('work');
+      expect(raw.result?.configDir).toBe(join(machineDataDir, 'auth-profiles', 'work'));
+      expect(raw.result?.active).toBe(false);
+      // verify on disk
+      expect(existsSyncTest(join(machineDataDir, 'auth-profiles', 'work'))).toBe(true);
+    });
+
+    it('rejects duplicate-name with profile-exists', async () => {
+      mkdirSync(join(machineDataDir, 'auth-profiles', 'existing'), { recursive: true });
+      const raw = await callCreate('existing');
+      expect(raw.error?.message).toMatch(/profile-exists/);
+    });
+
+    it('rejects invalid-name-pattern (e.g. slashes, spaces)', async () => {
+      const r1 = await callCreate('has space');
+      expect(r1.error?.message).toMatch(/Invalid profile name|profile-exists/i);
+      const r2 = await callCreate('has/slash');
+      expect(r2.error?.message).toMatch(/Invalid profile name/i);
+    });
+
+    it('rejects empty name', async () => {
+      const raw = await callCreate('');
+      expect(raw.error?.message).toMatch(/non-empty string/);
+    });
+  });
+
+  describe('settings.deleteProfile (v1.x.+2)', () => {
+    async function callDelete(name: string) {
+      const d = new RpcDispatcher();
+      registerMethods(d, { env: testEnv, home: tmpHome });
+      return (await d.handle(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'settings.deleteProfile',
+          params: { name },
+        }),
+      )) as {
+        result?: { name: string; deleted: boolean; configDir: string };
+        error?: { message: string };
+      };
+    }
+
+    it('deletes a non-active profile and surfaces configDir', async () => {
+      const profilesDir = join(machineDataDir, 'auth-profiles');
+      mkdirSync(join(profilesDir, 'doomed'), { recursive: true });
+      writeFileSync(join(profilesDir, 'doomed', '.credentials.json'), '{}');
+
+      const raw = await callDelete('doomed');
+      expect(raw.result?.deleted).toBe(true);
+      expect(raw.result?.configDir).toBe(join(profilesDir, 'doomed'));
+      expect(existsSyncTest(join(profilesDir, 'doomed'))).toBe(false);
+    });
+
+    it('refuses to delete the active profile with helpful error', async () => {
+      const profilesDir = join(machineDataDir, 'auth-profiles');
+      mkdirSync(join(profilesDir, 'work'), { recursive: true });
+      writeFileSync(
+        join(machineDataDir, 'auth-active-profile.json'),
+        JSON.stringify({ active: 'work' }),
+      );
+      const raw = await callDelete('work');
+      expect(raw.error?.message).toMatch(/cannot delete active profile/);
+      expect(raw.error?.message).toMatch(/switch to another/);
+      // verify profile still there
+      expect(existsSyncTest(join(profilesDir, 'work'))).toBe(true);
+    });
+
+    it('rejects unknown-profile with unknown-profile error', async () => {
+      const raw = await callDelete('never-existed');
+      expect(raw.error?.message).toMatch(/unknown-profile/);
     });
   });
 

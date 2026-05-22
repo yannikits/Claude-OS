@@ -201,6 +201,7 @@ export async function listAgentRuns(
 export interface SettingsProfile {
   name: string;
   active: boolean;
+  configDir: string;
 }
 
 export interface ClaudeCodeSettingsFile {
@@ -234,6 +235,26 @@ export async function getSettings(): Promise<SettingsReadResult> {
 
 export async function activateProfile(name: string): Promise<{ activeProfile: string }> {
   return rpcCall<{ activeProfile: string }>('settings.activateProfile', { name });
+}
+
+export interface ProfileCreateResult {
+  name: string;
+  configDir: string;
+  active: boolean;
+}
+
+export async function createProfile(name: string): Promise<ProfileCreateResult> {
+  return rpcCall<ProfileCreateResult>('settings.createProfile', { name });
+}
+
+export interface ProfileDeleteResult {
+  name: string;
+  deleted: boolean;
+  configDir: string;
+}
+
+export async function deleteProfile(name: string): Promise<ProfileDeleteResult> {
+  return rpcCall<ProfileDeleteResult>('settings.deleteProfile', { name });
 }
 
 export type SecretBackend = 'keyring' | 'encrypted-file';

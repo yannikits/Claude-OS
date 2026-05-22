@@ -1,12 +1,17 @@
 /**
- * Settings-Namespace RPCs: read + activateProfile (v1.x.+1).
+ * Settings-Namespace RPCs: read + activateProfile (v1.x.+1) +
+ * createProfile + deleteProfile (v1.x.+2).
  * Split aus `sidecar/methods.ts` (M21).
  *
  * @module @sidecar/methods/settings
  */
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProfileManager } from '../../domains/auth/index.js';
+import {
+  AuthProfileExistsError,
+  AuthProfileMissingError,
+  ProfileManager,
+} from '../../domains/auth/index.js';
 import { createSecretStore } from '../../domains/secrets/index.js';
 import type { RpcDispatcher } from '../rpc.js';
 import { type MethodsContext, requireString } from './_shared.js';
@@ -63,7 +68,11 @@ export function registerSettingsMethods(dispatcher: RpcDispatcher, ctx: MethodsC
         resolvedConfigDir: resolvedAnthropicConfigDir,
         envOverride,
         activeProfile,
-        availableProfiles: profiles.map((p) => ({ name: p.name, active: p.active })),
+        availableProfiles: profiles.map((p) => ({
+          name: p.name,
+          active: p.active,
+          configDir: p.configDir,
+        })),
         credentialsFile,
         credentialsFileExists,
       },
@@ -93,5 +102,57 @@ export function registerSettingsMethods(dispatcher: RpcDispatcher, ctx: MethodsC
     }
     const profile = profileMgr.use(name);
     return { activeProfile: profile.name };
+  });
+
+  /**
+   * Legt ein neues Anthropic-Profil an (entspricht
+   * `claude-os auth profile create <name>`). Wirft `profile-exists`
+   * wenn der Name schon vergeben ist; wirft auf invalid-name-pattern
+   * (ProfileManager.create validiert via NAME_PATTERN intern).
+   */
+  dispatcher.register('settings.createProfile', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { name?: string };
+    const name = requireString(params.name, 'name', 'settings.createProfile');
+    const machine = ctx.machinePaths();
+    const profileMgr = new ProfileManager({ dataRoot: machine.dataDir });
+    try {
+      const profile = profileMgr.create(name);
+      return { name: profile.name, configDir: profile.configDir, active: profile.active };
+    } catch (err) {
+      if (err instanceof AuthProfileExistsError) {
+        throw new Error(`profile-exists: ${err.message}`);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * Loescht ein Anthropic-Profil inkl. `.credentials.json` darin.
+   * Refused wenn `name === active()` — User muss zuerst wechseln. Das
+   * verhindert ein silent-orphaning des active-Markers.
+   *
+   * Returnt `{name, deleted: true, configDir}` damit die GUI den
+   * gerade-geloeschten Pfad explizit im Success-Banner zeigen kann.
+   */
+  dispatcher.register('settings.deleteProfile', (rawParams: unknown) => {
+    const params = (rawParams ?? {}) as { name?: string };
+    const name = requireString(params.name, 'name', 'settings.deleteProfile');
+    const machine = ctx.machinePaths();
+    const profileMgr = new ProfileManager({ dataRoot: machine.dataDir });
+    if (profileMgr.active() === name) {
+      throw new Error(
+        `settings.deleteProfile: cannot delete active profile "${name}"; switch to another profile first.`,
+      );
+    }
+    const configDir = profileMgr.configDirFor(name);
+    try {
+      profileMgr.delete(name);
+      return { name, deleted: true as const, configDir };
+    } catch (err) {
+      if (err instanceof AuthProfileMissingError) {
+        throw new Error(`unknown-profile: ${err.message}`);
+      }
+      throw err;
+    }
   });
 }

@@ -4,6 +4,8 @@ import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { AuthLoginModal } from '../components/auth-login-modal';
+import { ProfileCreateModal } from '../components/profile-create-modal';
+import { ProfileDeleteModal } from '../components/profile-delete-modal';
 import { SecretAddModal } from '../components/secret-add-modal';
 import {
   type AgentListResult,
@@ -718,6 +720,11 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [switchingProfile, setSwitchingProfile] = useState(false);
+  const [createProfileModalOpen, setCreateProfileModalOpen] = useState(false);
+  const [deleteProfileTarget, setDeleteProfileTarget] = useState<{
+    name: string;
+    configDir: string;
+  } | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -780,10 +787,7 @@ export function SettingsPage() {
             <dt>Aktives Profil</dt>
             <dd>
               {data.anthropic.availableProfiles.length === 0 ? (
-                <span className="muted">
-                  (default — keine Profile angelegt;{' '}
-                  <code>claude-os auth profile create &lt;name&gt;</code>)
-                </span>
+                <span className="muted">(default — keine Profile angelegt)</span>
               ) : (
                 <select
                   className="profile-select"
@@ -807,9 +811,55 @@ export function SettingsPage() {
                     </option>
                   ))}
                 </select>
-              )}
+              )}{' '}
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setCreateProfileModalOpen(true)}
+                disabled={!sidecarOk}
+                data-testid="profile-create-button"
+                title={
+                  sidecarOk
+                    ? 'Neues Anthropic-Profil anlegen'
+                    : 'Sidecar nicht erreichbar — Read-Only-Modus'
+                }
+              >
+                + Profil anlegen
+              </button>
               {switchingProfile && <span className="muted"> · wechsle …</span>}
             </dd>
+            {data.anthropic.availableProfiles.length > 0 && (
+              <>
+                <dt>Profile verwalten</dt>
+                <dd>
+                  <ul className="profile-list" data-testid="profile-list">
+                    {data.anthropic.availableProfiles.map((p) => (
+                      <li key={p.name}>
+                        <code>{p.name}</code>
+                        {p.active && <span className="badge badge-ok">aktiv</span>}
+                        {!p.active && (
+                          <button
+                            type="button"
+                            className="btn-danger"
+                            onClick={() =>
+                              setDeleteProfileTarget({ name: p.name, configDir: p.configDir })
+                            }
+                            disabled={!sidecarOk}
+                            data-testid={`profile-delete-${p.name}`}
+                            title={`Profil "${p.name}" loeschen (inkl. .credentials.json)`}
+                          >
+                            Loeschen
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="muted" style={{ fontSize: '11px', marginTop: '4px' }}>
+                    Aktives Profil kann nicht geloescht werden — wechsle zuerst.
+                  </p>
+                </dd>
+              </>
+            )}
             <dt>.credentials.json vorhanden</dt>
             <dd>
               <YesNo value={data.anthropic.credentialsFileExists} />{' '}
@@ -874,6 +924,24 @@ export function SettingsPage() {
         </>
       )}
       {loginModalOpen && <AuthLoginModal onClose={handleLoginModalClose} />}
+      {createProfileModalOpen && (
+        <ProfileCreateModal
+          onClose={() => setCreateProfileModalOpen(false)}
+          onSaved={() => {
+            void reload();
+          }}
+        />
+      )}
+      {deleteProfileTarget !== null && (
+        <ProfileDeleteModal
+          name={deleteProfileTarget.name}
+          configDir={deleteProfileTarget.configDir}
+          onClose={() => setDeleteProfileTarget(null)}
+          onDeleted={() => {
+            void reload();
+          }}
+        />
+      )}
     </section>
   );
 }
