@@ -29,11 +29,36 @@ import type { PluginManifest } from './capability-resolver.js';
 import { catalogPathsFor, readCatalog, writeCatalog, writeCatalogLock } from './catalog-store.js';
 import { LockBuilderError, lockCatalog } from './lock-builder.js';
 import { createMarketplaceProviderLookup } from './marketplace-provider-lookup.js';
-import { fileLoader, MarketplaceRegistry } from './marketplace-registry.js';
+import {
+  fileLoader,
+  MarketplaceRegistry,
+  MarketplaceRegistryError,
+} from './marketplace-registry.js';
 import type { CatalogEntry } from './schema.js';
-import { parseSource, SourceParseError } from './source-resolver.js';
+import { type ParsedGithubSource, parseSource, SourceParseError } from './source-resolver.js';
 import { applyLock, type SyncApplyResult } from './sync-applier.js';
 import { readPluginManifestFromTarball } from './tarball-manifest-reader.js';
+
+/**
+ * Rebuild a canonical `github:` source-string from a ParsedGithubSource.
+ *
+ * Used when an initial `marketplace:` source got resolved via the
+ * registry — we persist the resolved github coordinate in catalog.json
+ * (so subsequent `catalog lock` / `catalog sync` runs reuse the same
+ * tarball without re-consulting the registry), while the user-typed
+ * `marketplace:` source is preserved in user-facing logs only.
+ *
+ * Order matches `source-resolver.parseSource`: `github:owner/repo[@ref][:subPath]`.
+ *
+ * Exported for unit-testing the round-trip property; production callers
+ * should use `installFromGithubWithAutoDeps` which handles the resolution.
+ */
+export function parsedGithubToSourceString(p: ParsedGithubSource): string {
+  let s = `github:${p.owner}/${p.repo}`;
+  if (p.ref !== undefined) s += `@${p.ref}`;
+  if (p.subPath !== undefined) s += `:${p.subPath}`;
+  return s;
+}
 
 export interface AutoDepsInstallOpts {
   /** Source-String (nur `github:` in v1.5 unterstuetzt). */
@@ -78,6 +103,11 @@ export class AutoDepsInstallError extends Error {
 export async function installFromGithubWithAutoDeps(
   opts: AutoDepsInstallOpts,
 ): Promise<AutoDepsInstallResult> {
+  // Registry wird sowohl fuer Marketplace:initial-Resolution (sofort
+  // unten) als auch fuer den Provider-Lookup (weiter unten) gebraucht
+  // — eine Instanz, ein cache.
+  const registry = new MarketplaceRegistry({ load: fileLoader(opts.registryPath) });
+
   // Parse Source
   let parsed: ReturnType<typeof parseSource>;
   try {
@@ -88,9 +118,32 @@ export async function installFromGithubWithAutoDeps(
       'source-parse',
     );
   }
+
+  // v1.5+ extension: marketplace: initial source wird ueber die
+  // Registry zu github: aufgeloest. Resolved github-Coordinate landet
+  // in catalog.json (subsequent `catalog lock` / `sync` cachen darauf
+  // ohne Registry-Roundtrip). Original `marketplace:`-String bleibt im
+  // user-facing Log, wird aber nicht persistiert.
+  let effectiveSource: string = opts.source;
+  if (parsed.kind === 'marketplace') {
+    let resolved: ParsedGithubSource;
+    try {
+      resolved = await registry.resolve(parsed.marketplace, parsed.plugin);
+    } catch (err) {
+      throw new AutoDepsInstallError(
+        `Marketplace resolution fehlgeschlagen fuer "${opts.source}": ${
+          err instanceof MarketplaceRegistryError ? err.message : String(err)
+        }`,
+        'marketplace-resolution',
+      );
+    }
+    parsed = resolved;
+    effectiveSource = parsedGithubToSourceString(resolved);
+  }
+
   if (parsed.kind !== 'github') {
     throw new AutoDepsInstallError(
-      `Nur github: Sources unterstuetzt (got ${parsed.kind})`,
+      `Nur github: oder marketplace: Sources unterstuetzt (got ${parsed.kind})`,
       'unsupported-source',
     );
   }
@@ -102,7 +155,7 @@ export async function installFromGithubWithAutoDeps(
       {
         id: `auto-deps-target-${parsed.owner}-${parsed.repo}`,
         kind: 'plugin' as const,
-        source: opts.source,
+        source: effectiveSource,
         enabled: true,
         scope: 'user' as const,
       },
@@ -134,8 +187,9 @@ export async function installFromGithubWithAutoDeps(
   }
   const targetManifest = targetManifestRead.manifest;
 
-  // Provider-Lookup + Resolver
-  const registry = new MarketplaceRegistry({ load: fileLoader(opts.registryPath) });
+  // Provider-Lookup nutzt die Registry-Instanz vom Anfang (s.o.) —
+  // cached Snapshot wird einmal geladen und fuer alle Lookups
+  // wiederverwendet.
   const providerLookup = createMarketplaceProviderLookup({
     registry,
     cacheDir: opts.cacheDir,
@@ -224,7 +278,7 @@ export async function installFromGithubWithAutoDeps(
   const targetEntry: CatalogEntry = {
     id: targetManifest.id,
     kind: 'plugin',
-    source: opts.source,
+    source: effectiveSource,
     enabled: true,
     scope: 'user',
   };
