@@ -24,7 +24,11 @@ import { platform } from 'node:os';
 import { relative, sep } from 'node:path';
 
 const IS_WINDOWS = platform() === 'win32';
-const REGEX_SPECIALS = '.+?^()|[]\\';
+// n7 (2026-05-23 todo-audit): `{` und `}` waren nicht escaped — ein
+// Glob-Pattern mit literalem `{1,2}`-Substring wuerde als Regex-
+// Quantifier interpretiert und entweder syntax-errorn oder falsch matchen
+// (Path `notes/note{1,2}.md` excluded statt literal-matched).
+const REGEX_SPECIALS = '.+?^()|[]{}\\';
 
 /** Wandelt ein Glob-Pattern in ein Regex um. `*` matched alles
  *  außer `/`, `**` matched cross-segment. Andere Regex-Specials

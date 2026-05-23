@@ -780,11 +780,11 @@ Screenshot-Befund: 5 staged Files inkl. `.graphify_step_ast.py` + `graphify-out/
 - [ ] n1 — `src/cli/commands/catalog.ts:175,181,186` mixed DE/EN Error-Strings (`'kein Marketplace-Provider fuer'`)
 - [ ] n2 — `biome-ignore`-Kommentar-Drift `"CLI output"` vs `"CLI presenter output by design"` — Shared-Helper-Phrasing standardisieren
 - [x] n3 — `src/cli/index.ts:101-122` Top-Level-catch zeigt Stack wenn `--verbose`/`-v` oder `CLAUDE_OS_VERBOSE=1` gesetzt (Fix shipped 2026-05-23). Argv-Scan vor Commander-Parse damit auch pre-action-Errors den Verbose-Mode triggern.
-- [ ] n4 — `src/domains/mcp-clients/live-probe.ts:160` `void killFallbackTimer` — Variable in `finish()` deklarieren statt Lint-Suppressor
+- [x] n4 — `src/domains/mcp-clients/live-probe.ts:237-260` `killFallbackTimer` ist jetzt function-lokal in `finish()` (`const` statt closure-level `let`); Lint-Suppressor `void killFallbackTimer` entfernt. Shipped 2026-05-23.
 - [ ] n5 — `src/domains/scheduler/cron-parser.ts:204-213` 31-Felder-Wildcard-Heuristik fragil; `wildcard: boolean` auf `ParsedCron` sauberer
-- [ ] n6 — `src/domains/agent-runs/repository.ts:89-94` `show` macht `query().find()` — materialisiert ganzen gefilterten Array
-- [ ] n7 — `src/domains/migration/copy-tree.ts` `globToRegex` escapt `{` `}` nicht in REGEX_SPECIALS
-- [ ] n8 — `src/domains/secrets/keyring-store.ts:107-119` `probeKeyring` lässt Sentinel-Entry bei delete-fail im Credential Manager
+- [x] n6 — Audit 2026-05-23: `query()` ohne args retournt `this.records` direkt (kein Copy/Filter); `.find()` iteriert mit Early-Exit. Es wird NICHTS materialisiert — der Original-Befund war ein Miss-Read. Optimierung waere lediglich ein index-by-runId Map, premature fuer aktuelle Record-Counts. Geschlossen ohne Code-Change.
+- [x] n7 — `src/domains/migration/copy-tree.ts:27` REGEX_SPECIALS erweitert um `{}`; Pfade mit literalem `{1,2}`-Substring matchen jetzt korrekt statt syntax-errorn (waeren als Regex-Quantifier interpretiert). +1 Regression-Test in `copy-tree.test.ts`. Shipped 2026-05-23.
+- [x] n8 — `src/domains/secrets/keyring-store.ts:106-130` `probeKeyring` versucht bis zu 3× zu loeschen bevor die Sentinel-Entry akzeptiert wird. Reduziert Probability dass das probe-Token dauerhaft im OS-Credential-Manager liegt. Shipped 2026-05-23.
 
 ### Dependencies
 

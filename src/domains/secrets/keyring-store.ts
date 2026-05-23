@@ -108,10 +108,20 @@ export function probeKeyring(): boolean {
   try {
     const entry = new Entry(SERVICE_NAME, probeKey);
     entry.setPassword('ok');
-    try {
-      entry.deletePassword();
-    } catch {
-      // Probe value lingers but capability is established.
+    // n8 (2026-05-23 todo-audit): bis zu 3 delete-Versuche bevor die
+    // Sentinel-Entry akzeptiert wird. Vermeidet dass das probe-Token
+    // dauerhaft im OS-Credential-Manager liegt wenn der erste delete
+    // race'd (selten bei macOS Keychain, gelegentlich bei D-Bus
+    // Secret-Service unter Last). Best-effort — Capability-Detection
+    // war zum Zeitpunkt schon erfolgreich (setPassword hat geklappt),
+    // also returnen wir `true` auch wenn alle 3 Versuche fehlschlagen.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        entry.deletePassword();
+        break;
+      } catch {
+        // try again — manche keyring-backends sind transient flaky
+      }
     }
     return true;
   } catch {
