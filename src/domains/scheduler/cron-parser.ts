@@ -52,6 +52,17 @@ export interface ParsedCron {
   readonly dayOfMonth: ReadonlySet<number>;
   readonly month: ReadonlySet<number>;
   readonly dayOfWeek: ReadonlySet<number>;
+  /**
+   * n5 (2026-05-23 todo-audit): explizite Wildcard-Markierung pro Field
+   * statt der frueheren `.size === <max>`-Heuristik. Letztere konnte
+   * eine voll-aufgezaehlte Liste (z. B. `1-31`) faelschlich als
+   * Wildcard interpretieren, was die `matchesDayClause`-OR/AND-Logik
+   * korrumpierte. Wir markieren ein Field als Wildcard nur wenn das
+   * urspruengliche Token `*` ODER `* / N` (step-wildcard, ohne Spaces
+   * im echten Token) war.
+   */
+  readonly wildcardDayOfMonth: boolean;
+  readonly wildcardDayOfWeek: boolean;
 }
 
 function parseInteger(token: string, context: string): number {
@@ -138,6 +149,20 @@ function parseField(raw: string, range: FieldRange, fieldName: string): Set<numb
   return out;
 }
 
+/**
+ * n5 (2026-05-23 todo-audit): true wenn JEDES kommagetrennte Token in
+ * `raw` ein literales `*` ist (mit optionalem step-suffix). Eine
+ * voll-aufgezaehlte Liste wie `1-31` oder `0,1,2,...,30` ist explizit
+ * KEIN Wildcard — sie expandiert nur zufaellig auf dieselbe Anzahl
+ * Werte, soll aber von der dayClause-Logik als restriktiv behandelt
+ * werden.
+ */
+function fieldIsWildcard(raw: string): boolean {
+  const tokens = raw.split(',').map((t) => t.trim());
+  if (tokens.length === 0) return false;
+  return tokens.every((t) => t === '*' || /^\*\/\d+$/.test(t));
+}
+
 export function parseCron(expression: string): ParsedCron {
   const fields = expression.trim().split(/\s+/);
   if (fields.length !== 5) {
@@ -159,6 +184,8 @@ export function parseCron(expression: string): ParsedCron {
     dayOfMonth: parseField(dayRaw, FIELDS[2] as FieldRange, FIELD_NAMES[2]),
     month: parseField(monthRaw, FIELDS[3] as FieldRange, FIELD_NAMES[3]),
     dayOfWeek: parseField(weekdayRaw, FIELDS[4] as FieldRange, FIELD_NAMES[4]),
+    wildcardDayOfMonth: fieldIsWildcard(dayRaw),
+    wildcardDayOfWeek: fieldIsWildcard(weekdayRaw),
   };
 }
 
@@ -210,10 +237,13 @@ export function nextFire(
 }
 
 function matchesDayClause(parsed: ParsedCron, day: number, weekday: number): boolean {
-  // Wenn das Feld 31 Werte hat, ist es ein `*` (jeder Wert) — dann
-  // wird's nicht restriktiv behandelt.
-  const dayIsRestrictive = parsed.dayOfMonth.size !== 31;
-  const weekdayIsRestrictive = parsed.dayOfWeek.size !== 7;
+  // n5 (2026-05-23 todo-audit): "restrictive" = wenn das urspruengliche
+  // Token KEIN Wildcard war. Vorher haben wir `.size !== max` als Proxy
+  // benutzt, was eine voll-aufgezaehlte Liste (z. B. `1-31`) faelschlich
+  // als Wildcard interpretiert haette. Jetzt nutzen wir den expliziten
+  // `wildcard*`-Flag aus dem Parser.
+  const dayIsRestrictive = !parsed.wildcardDayOfMonth;
+  const weekdayIsRestrictive = !parsed.wildcardDayOfWeek;
   const dayMatch = parsed.dayOfMonth.has(day);
   const weekdayMatch = parsed.dayOfWeek.has(weekday);
   if (dayIsRestrictive && weekdayIsRestrictive) return dayMatch || weekdayMatch;

@@ -109,3 +109,48 @@ describe('nextFire — Berechnungen', () => {
     expect(next?.toISOString()).toBe('2026-05-20T07:01:00.000Z');
   });
 });
+
+describe('n5: wildcard-flag vs aufgezaehlte Liste', () => {
+  it('Wildcard `*` setzt wildcardDayOfMonth/Week true', () => {
+    const p = parseCron('0 0 * * *');
+    expect(p.wildcardDayOfMonth).toBe(true);
+    expect(p.wildcardDayOfWeek).toBe(true);
+  });
+
+  it('Step-Wildcard `*/N` zaehlt auch als Wildcard', () => {
+    const p = parseCron('0 0 */2 * */3');
+    expect(p.wildcardDayOfMonth).toBe(true);
+    expect(p.wildcardDayOfWeek).toBe(true);
+  });
+
+  it('Explizite Range `1-31` ist KEIN Wildcard, auch wenn dieselben Werte expandiert werden', () => {
+    const p = parseCron('0 0 1-31 * 0-6');
+    expect(p.dayOfMonth.size).toBe(31);
+    expect(p.dayOfWeek.size).toBe(7);
+    expect(p.wildcardDayOfMonth).toBe(false);
+    expect(p.wildcardDayOfWeek).toBe(false);
+  });
+
+  it('Restriktive Range (z. B. nur weekday 1-5) wird korrekt erkannt', () => {
+    const p = parseCron('0 8 * * 1-5');
+    expect(p.wildcardDayOfMonth).toBe(true);
+    expect(p.wildcardDayOfWeek).toBe(false);
+  });
+
+  it('nextFire mit "1-31 * 0-6" (beide explizit, OR-clause) feuert nur an matching Tagen', () => {
+    // "1-31" deckt jeden Tag des Monats ab UND "0-6" deckt jeden Wochentag ab.
+    // Beide Felder sind restriktiv → POSIX OR-Logik → match falls dayMatch
+    // OR weekdayMatch. Da beide Sets alle moeglichen Werte enthalten, ist
+    // jeder Slot Match — verhalten faktisch wie `* * *`.
+    const parsed = parseCron('0 8 1-31 * 0-6');
+    const from = new Date(Date.UTC(2026, 4, 20, 7, 0, 0));
+    const next = nextFire(parsed, from);
+    expect(next?.toISOString()).toBe('2026-05-20T08:00:00.000Z');
+  });
+
+  it('Single-Value `15` ist nicht-Wildcard (regression: dayOfMonth.size === 1)', () => {
+    const p = parseCron('0 0 15 * *');
+    expect(p.wildcardDayOfMonth).toBe(false);
+    expect(p.dayOfMonth).toEqual(new Set([15]));
+  });
+});
