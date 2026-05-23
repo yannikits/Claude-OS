@@ -50,10 +50,16 @@ export class RpcDispatcher {
 
   /**
    * M8: aktiviert nonce-Pruefung fuer alle nachfolgenden `handle()`-
-   * Calls. Vor diesem Call ist der Dispatcher offen (back-compat fuer
-   * sidecar-Startup BEFORE handshake-write, in dem ping/shutdown noch
-   * unauthenticated arbeiten muessen). Tauri-Supervisor liest den Nonce
-   * aus dem stderr-handshake (`{"type":"sidecar-ready","nonce":"..."}`).
+   * Calls. Vor diesem Call ist der Dispatcher offen — das ist ein
+   * Implementation-Detail fuer Tests die mehrere RPC-Methoden registern
+   * koennen bevor sie nonce-checking enable wollen. Im Real-World-
+   * Sidecar (`src/sidecar/index.ts`) wird `setExpectedNonce()` immer
+   * vor `runRpcServer()` aufgerufen — es gibt also NIE ein Fenster wo
+   * unauthenticated requests durchkommen (Codex review 2026-05-24
+   * fand den vorigen Comment-Wording "ping/shutdown muessen pre-
+   * handshake arbeiten" als misleading; das ist NICHT der real-world
+   * flow). Tauri-Supervisor liest den Nonce aus dem stderr-handshake
+   * (`{"type":"sidecar-ready","nonce":"..."}`).
    */
   setExpectedNonce(nonce: string): void {
     if (nonce.length === 0) {
@@ -71,6 +77,16 @@ export class RpcDispatcher {
    * non-stdio transports (MCP server, in-process tests) so they share the
    * same handler registry as the Tauri sidecar without re-implementing
    * domain plumbing.
+   *
+   * **Trust boundary** (Codex review 2026-05-24): `invoke()` BYPASSES
+   * M8 nonce-auth. Das ist beabsichtigt fuer in-process Tests, ABER:
+   * der MCP-Server (`src/mcp/server.ts`) nutzt diesen Pfad ebenfalls,
+   * und MCP exponiert mutating tools (`claude-os.inbox.import`). MCP-
+   * Clients (Claude Desktop, Claude Code) werden vom MCP-stdio-parent
+   * model als trusted angenommen — DAS ist die Trust-Boundary fuer
+   * MCP-Tool-Calls, NICHT M8. Wenn das Threat-Model je untrusted MCP-
+   * Clients einschliesst, braucht es eine eigene MCP-Trust-Layer
+   * (separates ADR, parallel zu ADR-0024 mcp-trust-prompt-model).
    *
    * @throws {Error} when the method is unknown (`MethodNotFound`)
    * @throws whatever the handler throws (no JSON-RPC error-envelope wrap)
