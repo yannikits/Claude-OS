@@ -475,10 +475,12 @@ Eine Explore-getriebene Audit-Pass durch das Code-Review-Section unten (Lines 67
 **Echt noch offen (nicht shipped):**
 
 - ~~**M3**: mcp.json SHA256-Trust-Prompt-Model~~ → geshipt 2026-05-23 (`feat/m3-gui-trust-modal`). Backend (TrustStore + watcher-gate + RPC) war bereits da; GUI-Modal nachgeliefert. McpClientsPage zeigt "Vertrauen pruefen …"-Button bei `trust-required`-Status.
-- **M8**: rpc.ts per-launch nonce/token Caller-Auth — non-trivial Tauri-Parent-Setup-Change.
+- **M8**: rpc.ts per-launch nonce/token Caller-Auth — non-trivial Tauri-Parent-Setup-Change (4-6h Aufwand, braucht Codex-Review wegen Security-Surface).
 - ~~**m1**: ADR-0016 embedded TODO entfernen~~ → geshipt 2026-05-23 in `chore/m1-mcp-server-version`: `src/mcp/server.ts` `resolveDefaultServerVersion()` liest package.json runtime (M40-Pattern), ADR-0016 §Konstraints updated.
 - **m12**: PBKDF2 → scrypt/Argon2 fuer naechste Format-Version (v2 Material).
-- **n2-n8**: Diverse Nits, niedrige Prio.
+- ~~**n1-n8**~~ → alle 8 nits 2026-05-23 geschlossen (n1 obsolet/no-DE-string, n2 biome-ignore standardisiert, n3 verbose-stack, n4 closure-local, n5 wildcard-flag, n6 audit-closed, n7 globToRegex `{}`-escape, n8 keyring 3x-retry).
+
+**Per Stand 2026-05-23 evening: nur 2 echte Items offen** — M8 (security, non-trivial) und m12 (v2-material). Alles andere ist entweder geshipt oder external-dep-blocked (Phase 8a/8b — Apple-Dev-Account, OV-Cert).
 
 Die Checkboxen unten in den M/m/n-Sections bleiben aus historischen Gruenden auf `[ ]` — diese Audit-Summary ist der autoritative Status.
 
