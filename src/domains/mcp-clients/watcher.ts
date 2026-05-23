@@ -202,9 +202,20 @@ export function startMcpWatcher(opts: WatcherOpts): WatcherHandle {
   async function reprobe(serverKey: string): Promise<WatcherStatusEntry | null> {
     const prev = cache.get(serverKey);
     if (prev === undefined) return null;
+    // M3 hardening (Codex review 2026-05-24, BUG-Fix): reprobe MUSS
+    // den isTrusted-Gate auch durchsetzen — sonst kann ein Caller
+    // (z. B. via `mcp.clients.reprobe`-RPC) den Trust-Gate
+    // umgehen indem er einen unacknowledged-server reprobet.
+    // Spiegelt das gleiche Pattern wie runTick() (s. o.).
     const results = await probeImpl([prev.entry], {
       timeoutMs: probeTimeoutMs,
       concurrency: 1,
+      ...(opts.isTrusted === undefined
+        ? {}
+        : {
+            isTrusted: opts.isTrusted,
+            serverKeyFor: serverKeyOf,
+          }),
     });
     const first = results[0];
     if (first === undefined) return null;
