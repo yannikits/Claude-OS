@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { AuthLoginModal } from '../components/auth-login-modal';
+import { McpTrustModal } from '../components/mcp-trust-modal';
 import { ProfileCreateModal } from '../components/profile-create-modal';
 import { ProfileDeleteModal } from '../components/profile-delete-modal';
 import { SecretAddModal } from '../components/secret-add-modal';
@@ -22,6 +23,7 @@ import {
   listCatalog,
   listSchedules,
   listSecrets,
+  type McpClientStatusEntry,
   type McpClientsStatusResult,
   onMcpClientEvent,
   onPtyData,
@@ -1404,6 +1406,10 @@ export function McpClientsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reprobing, setReprobing] = useState<string | null>(null);
+  // M3 (2026-05-23): trust-modal-target. Wenn != null, oeffnet das
+  // McpTrustModal mit den Entry-Details. Nach Acknowledge wird der
+  // Watcher per reprobe getriggert und das Modal geschlossen.
+  const [trustTarget, setTrustTarget] = useState<McpClientStatusEntry | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -1506,18 +1512,35 @@ export function McpClientsPage() {
                     </td>
                     <td className="muted">{s.probedAt}</td>
                     <td>
-                      <button
-                        type="button"
-                        disabled={!sidecarOk || reprobing !== null}
-                        title={
-                          sidecarOk
-                            ? 'Sofort neu proben statt auf Watcher-Tick warten'
-                            : 'Read-Only-Modus'
-                        }
-                        onClick={() => handleReprobe(s.key)}
-                      >
-                        {reprobing === s.key ? 'Probe …' : 'Re-Probe'}
-                      </button>
+                      {s.result.kind === 'trust-required' ? (
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          disabled={!sidecarOk}
+                          title={
+                            sidecarOk
+                              ? 'Server pruefen und vertrauen — Trust-Dialog oeffnen'
+                              : 'Read-Only-Modus'
+                          }
+                          onClick={() => setTrustTarget(s)}
+                          data-testid={`mcp-trust-open-${s.key}`}
+                        >
+                          Vertrauen pruefen …
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!sidecarOk || reprobing !== null}
+                          title={
+                            sidecarOk
+                              ? 'Sofort neu proben statt auf Watcher-Tick warten'
+                              : 'Read-Only-Modus'
+                          }
+                          onClick={() => handleReprobe(s.key)}
+                        >
+                          {reprobing === s.key ? 'Probe …' : 'Re-Probe'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1525,6 +1548,17 @@ export function McpClientsPage() {
             </table>
           )}
         </>
+      )}
+      {trustTarget && trustTarget.result.kind === 'trust-required' && (
+        <McpTrustModal
+          serverKey={trustTarget.key}
+          entry={trustTarget.entry}
+          message={trustTarget.result.message}
+          onClose={() => setTrustTarget(null)}
+          onAcknowledged={() => {
+            void reload();
+          }}
+        />
       )}
     </section>
   );

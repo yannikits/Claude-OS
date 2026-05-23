@@ -98,7 +98,13 @@ export async function removeCatalogEntry(id: string): Promise<CatalogRemoveResul
 
 export const MCP_CLIENT_EVENT = 'mcp-client://event';
 
-export type McpProbeKind = 'alive' | 'init-timeout' | 'crashed' | 'protocol-error' | 'spawn-failed';
+export type McpProbeKind =
+  | 'alive'
+  | 'init-timeout'
+  | 'crashed'
+  | 'protocol-error'
+  | 'spawn-failed'
+  | 'trust-required';
 
 export interface McpServerEntry {
   name: string;
@@ -114,7 +120,8 @@ export type McpProbeResult =
   | { kind: 'init-timeout'; durationMs: number; message: string }
   | { kind: 'crashed'; durationMs: number; exitCode: number | null; stderr: string }
   | { kind: 'protocol-error'; durationMs: number; message: string }
-  | { kind: 'spawn-failed'; durationMs: number; message: string };
+  | { kind: 'spawn-failed'; durationMs: number; message: string }
+  | { kind: 'trust-required'; durationMs: number; serverKey: string; message: string };
 
 export interface McpClientStatusEntry {
   key: string;
@@ -153,6 +160,41 @@ export async function onMcpClientEvent(
   handler: (e: McpClientEventPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<McpClientEventPayload>(MCP_CLIENT_EVENT, (e) => handler(e.payload));
+}
+
+// ---------- mcp.trust.* (M3 — trust-prompt-model, v1.x) ----------
+
+export interface McpTrustEntry {
+  serverKey: string;
+  acknowledgedAt: string;
+}
+
+export interface McpTrustListResult {
+  entries: McpTrustEntry[];
+}
+
+export interface McpTrustAckResult {
+  ok: true;
+  serverKey: string;
+  acknowledgedAt: string | null;
+}
+
+export interface McpTrustRevokeResult {
+  ok: true;
+  serverKey: string;
+  revoked: boolean;
+}
+
+export async function listMcpTrust(): Promise<McpTrustListResult> {
+  return rpcCall<McpTrustListResult>('mcp.trust.list');
+}
+
+export async function acknowledgeMcpTrust(serverKey: string): Promise<McpTrustAckResult> {
+  return rpcCall<McpTrustAckResult>('mcp.trust.acknowledge', { serverKey });
+}
+
+export async function revokeMcpTrust(serverKey: string): Promise<McpTrustRevokeResult> {
+  return rpcCall<McpTrustRevokeResult>('mcp.trust.revoke', { serverKey });
 }
 
 export interface VaultBusyState {
