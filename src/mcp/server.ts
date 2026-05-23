@@ -16,11 +16,34 @@
  * @module mcp/server
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { RpcDispatcher } from '../sidecar/rpc.js';
 import { findToolByName, MCP_TOOLS } from './tools.js';
+
+/**
+ * m1 (2026-05-23 todo-audit, closes ADR-0016 §Konstraints embedded TODO):
+ * resolveVersion liest package.json zur Laufzeit, sodass `serverVersion`
+ * nicht jeden Release manuell synchronisiert werden muss. Spiegelt das
+ * M40-Pattern aus `cli/index.ts`. Bei Build-Layout-Aenderung (dist/mcp/
+ * → woanders) muss der `../../package.json`-Pfad angepasst werden.
+ */
+function resolveDefaultServerVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '../../package.json'), 'utf8')) as {
+      version?: unknown;
+    };
+    if (typeof pkg.version === 'string' && pkg.version.length > 0) return pkg.version;
+  } catch {
+    /* fall through to fallback */
+  }
+  return 'unknown';
+}
 
 export interface CreateMcpServerOpts {
   /** Optional injection of the dispatcher (tests). Defaults to a fresh dispatcher with all sidecar methods registered. */
@@ -48,7 +71,7 @@ export async function createMcpServer(opts: CreateMcpServerOpts = {}): Promise<S
   const server = new Server(
     {
       name: opts.serverName ?? 'claude-os',
-      version: opts.serverVersion ?? '1.5.3',
+      version: opts.serverVersion ?? resolveDefaultServerVersion(),
     },
     {
       capabilities: { tools: {} },

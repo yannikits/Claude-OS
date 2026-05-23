@@ -476,7 +476,7 @@ Eine Explore-getriebene Audit-Pass durch das Code-Review-Section unten (Lines 67
 
 - **M3**: mcp.json SHA256-Trust-Prompt-Model — UX-friction, noch nicht designed.
 - **M8**: rpc.ts per-launch nonce/token Caller-Auth — non-trivial Tauri-Parent-Setup-Change.
-- **m1**: ADR-0016 embedded TODO entfernen.
+- ~~**m1**: ADR-0016 embedded TODO entfernen~~ → geshipt 2026-05-23 in `chore/m1-mcp-server-version`: `src/mcp/server.ts` `resolveDefaultServerVersion()` liest package.json runtime (M40-Pattern), ADR-0016 §Konstraints updated.
 - **m12**: PBKDF2 → scrypt/Argon2 fuer naechste Format-Version (v2 Material).
 - **n2-n8**: Diverse Nits, niedrige Prio.
 
@@ -758,7 +758,7 @@ Screenshot-Befund: 5 staged Files inkl. `.graphify_step_ast.py` + `graphify-out/
 
 ### Minor
 
-- [ ] m1 — `docs/architecture/adr/0016-mcp-single-server-bridge.md:71` embedded TODO "serverVersion '1.2.1', sync to package.json" → Task oder schließen
+- [x] m1 — `src/mcp/server.ts` `resolveDefaultServerVersion()` liest `package.json#version` zur Laufzeit (M40-Pattern); ADR-0016 §Konstraints embedded-TODO entfernt + auf "geshipt"-Note umgeschrieben. Shipped 2026-05-23.
 - [ ] m2 — `docs/architecture/adr/0014-code-quality-biome.md` Titel "biome v2.3" vs. pinned `^2.4.15` → Title-Update oder Revision-Note
 - [ ] m3 — `README.md:94` "mcp clients ready (v1.6)" bei project 1.5.3 → relabel "v1.5"
 - [ ] m4 — `README.md:85` `vault schedule --enable/--disable` Syntax gegen `vault.ts`-commander-Definition prüfen
@@ -779,7 +779,7 @@ Screenshot-Befund: 5 staged Files inkl. `.graphify_step_ast.py` + `graphify-out/
 
 - [ ] n1 — `src/cli/commands/catalog.ts:175,181,186` mixed DE/EN Error-Strings (`'kein Marketplace-Provider fuer'`)
 - [ ] n2 — `biome-ignore`-Kommentar-Drift `"CLI output"` vs `"CLI presenter output by design"` — Shared-Helper-Phrasing standardisieren
-- [ ] n3 — `src/cli/index.ts:46-49` Top-Level-catch loggt nur `err.message`, kein Stack. Fix: Stack bei `--verbose`
+- [x] n3 — `src/cli/index.ts:101-122` Top-Level-catch zeigt Stack wenn `--verbose`/`-v` oder `CLAUDE_OS_VERBOSE=1` gesetzt (Fix shipped 2026-05-23). Argv-Scan vor Commander-Parse damit auch pre-action-Errors den Verbose-Mode triggern.
 - [ ] n4 — `src/domains/mcp-clients/live-probe.ts:160` `void killFallbackTimer` — Variable in `finish()` deklarieren statt Lint-Suppressor
 - [ ] n5 — `src/domains/scheduler/cron-parser.ts:204-213` 31-Felder-Wildcard-Heuristik fragil; `wildcard: boolean` auf `ParsedCron` sauberer
 - [ ] n6 — `src/domains/agent-runs/repository.ts:89-94` `show` macht `query().find()` — materialisiert ganzen gefilterten Array
