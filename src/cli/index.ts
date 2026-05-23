@@ -98,7 +98,26 @@ async function main(): Promise<void> {
   await program.parseAsync(process.argv);
 }
 
+/**
+ * n3 (2026-05-23 todo-audit): --verbose oder -v zeigt zusaetzlich den
+ * Error-Stack. Commander parsed das normalerweise zu globalOpts.verbose,
+ * aber wenn main() vor der Action-Phase throwt, koennen wir die parsed
+ * opts nicht mehr lesen — daher direkter argv-Scan. CLAUDE_OS_VERBOSE
+ * als zweiter Pfad fuer Skripte die argv nicht beeinflussen koennen.
+ */
+function wantsVerboseError(): boolean {
+  if (process.env.CLAUDE_OS_VERBOSE === '1') return true;
+  return process.argv.slice(2).some((a) => a === '-v' || a === '--verbose');
+}
+
 main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : String(err));
+  if (err instanceof Error) {
+    console.error(err.message);
+    if (wantsVerboseError() && err.stack !== undefined) {
+      console.error(err.stack);
+    }
+  } else {
+    console.error(String(err));
+  }
   process.exit(1);
 });
