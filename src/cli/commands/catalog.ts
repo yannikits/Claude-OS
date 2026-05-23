@@ -54,8 +54,9 @@ interface InstallOpts {
  * M18 (2026-05-21 code-review): Map `AutoDepsInstallError.code` auf die
  * historischen exit-codes des CLI. Domain-Funktion ist code-agnostisch;
  * CLI behaelt die etablierten Codes (4=missing-provider, 5=auto-deps-
- * error, 6=ambiguous, 7=lock-build, 1=alles andere) damit Skripte die
- * `claude-os catalog install --auto-deps` wrappen back-compat bleiben.
+ * error, 6=ambiguous, 7=lock-build, 8=marketplace-resolution, 1=alles
+ * andere) damit Skripte die `claude-os catalog install --auto-deps`
+ * wrappen back-compat bleiben.
  */
 function exitCodeForAutoDepsError(code: string): number {
   switch (code) {
@@ -67,6 +68,8 @@ function exitCodeForAutoDepsError(code: string): number {
       return 6;
     case 'lock-build':
       return 7;
+    case 'marketplace-resolution':
+      return 8;
     default:
       return 1;
   }
@@ -96,20 +99,22 @@ async function actAutoDeps(globals: GlobalOpts, raw: string, opts: InstallOpts):
     });
   } catch (err) {
     if (err instanceof AutoDepsInstallError) {
-      // Spezielle Behandlung fuer "unsupported-source" (CLI-friendly Text)
+      // Spezielle Behandlung fuer "unsupported-source" (CLI-friendly Text).
+      // v1.5+: github: und marketplace: werden unterstuetzt; local: nicht.
       if (err.code === 'unsupported-source') {
         printErr(
-          'catalog install --auto-deps: nur github: Sources unterstuetzt (marketplace/local: deferred zu v1.6)',
+          'catalog install --auto-deps: nur github: oder marketplace: Sources unterstuetzt (local: deferred zu v1.6)',
         );
         process.exit(2);
       }
       // source-parse, target-fetch, target-manifest, missing-provider,
-      // ambiguous-provider, auto-deps-error, lock-build
+      // ambiguous-provider, auto-deps-error, lock-build, marketplace-resolution
       const prefix =
         err.code === 'missing-provider' ||
         err.code === 'ambiguous-provider' ||
         err.code === 'auto-deps-error' ||
-        err.code === 'lock-build'
+        err.code === 'lock-build' ||
+        err.code === 'marketplace-resolution'
           ? '[FAIL] auto-deps: '
           : 'catalog install --auto-deps: ';
       printErr(`${prefix}${err.message}`);

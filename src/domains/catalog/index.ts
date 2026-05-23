@@ -9,6 +9,7 @@ export {
   type AutoDepsInstallOpts,
   type AutoDepsInstallResult,
   installFromGithubWithAutoDeps,
+  parsedGithubToSourceString,
 } from './auto-deps-install.js';
 export {
   AutoDepsAmbiguousProviderError,
