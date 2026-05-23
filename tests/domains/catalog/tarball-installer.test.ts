@@ -158,4 +158,106 @@ describe('installFromTarball', () => {
     expect(result.alreadyCached).toBe(false);
     expect(readFileSync(result.cachedPath).equals(bytes)).toBe(true);
   });
+
+  describe('M4 — Host-Allowlist (default fetch only)', () => {
+    /**
+     * Diese Tests benutzen explizit KEIN fetchFn-Injection — damit der
+     * Production-Pfad mit dem URL-Allowlist-Check getroffen wird. Da
+     * wir die default fetch nicht reichen lassen wollen (Netzwerk-
+     * Aufruf), reicht der Check VOR der fetch und failt vorher.
+     */
+    it('refused non-allowlist https-host vor jedem network call', async () => {
+      await expect(
+        installFromTarball({
+          url: 'https://attacker.example.com/tarball.tar.gz',
+          cacheDir,
+          destination,
+          // KEIN fetchFn → triggert M4-Check
+        }),
+      ).rejects.toThrow(/refused tarball URL.*host "attacker.example.com" not in allowlist/);
+    });
+
+    it('refused http: scheme (downgrade-attacks)', async () => {
+      await expect(
+        installFromTarball({
+          url: 'http://codeload.github.com/owner/repo/tar.gz/HEAD',
+          cacheDir,
+          destination,
+        }),
+      ).rejects.toThrow(/refused tarball URL.*protocol "http:" requires https: or file:/);
+    });
+
+    it('akzeptiert codeload.github.com per default', async () => {
+      // URL ist valid, aber der echte fetch wuerde HTTP-404 retournen
+      // (das ist OK — wir verifizieren nur dass der Allowlist-Check
+      // PASSED, NICHT dass der fetch erfolgreich ist).
+      // Default-fetch wird ausgeloest, der Test failt mit network-
+      // bezogenem Error (NICHT mit "refused tarball URL").
+      let err: unknown;
+      try {
+        await installFromTarball({
+          url: 'https://codeload.github.com/nonexistent-org-12345/nonexistent-repo-xyz/tar.gz/HEAD',
+          cacheDir,
+          destination,
+        });
+      } catch (e) {
+        err = e;
+      }
+      // Akzeptierter Error-Typ: irgendwas anderes als URL-rejection.
+      expect(err).toBeInstanceOf(TarballInstallError);
+      expect((err as Error).message).not.toMatch(/refused tarball URL/);
+    }, 30_000);
+
+    it('opts.allowedHosts override erlaubt self-hosted Mirror', async () => {
+      // Url-DNS-resolve schlaegt fehl (Hostname existiert nicht) — wir
+      // verifizieren nur dass der M4-Allowlist-Check passierte und der
+      // network-fetch zur Stage kam.
+      let err: unknown;
+      try {
+        await installFromTarball({
+          url: 'https://my.mirror.org.nonexistent-tld-99/owner/repo.tar.gz',
+          cacheDir,
+          destination,
+          allowedHosts: ['my.mirror.org.nonexistent-tld-99'],
+        });
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(TarballInstallError);
+      expect((err as Error).message).not.toMatch(/refused tarball URL/);
+    }, 30_000);
+
+    it('file:// schema ist immer erlaubt (ohne allowlist-check)', async () => {
+      // file://-URL zu nicht-existierender Datei → network-fetch-error
+      // aber NICHT URL-rejection.
+      let err: unknown;
+      try {
+        await installFromTarball({
+          url: 'file:///nonexistent/path/tarball.tar.gz',
+          cacheDir,
+          destination,
+        });
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(TarballInstallError);
+      expect((err as Error).message).not.toMatch(/refused tarball URL/);
+    });
+
+    it('opts.allowedHosts = [] deaktiviert den check (caller takes responsibility)', async () => {
+      let err: unknown;
+      try {
+        await installFromTarball({
+          url: 'https://any.host.example.test/tarball.tar.gz',
+          cacheDir,
+          destination,
+          allowedHosts: [],
+        });
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(TarballInstallError);
+      expect((err as Error).message).not.toMatch(/refused tarball URL/);
+    }, 30_000);
+  });
 });

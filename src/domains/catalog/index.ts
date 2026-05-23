@@ -148,6 +148,7 @@ export {
   type SyncSkipReason,
 } from './sync-applier.js';
 export {
+  DEFAULT_ALLOWED_HOSTS as DEFAULT_TARBALL_ALLOWED_HOSTS,
   type InstallResult,
   installFromTarball,
   TarballInstallError,

@@ -43,6 +43,20 @@ interface InstallOpts {
   readonly fetchFn?: FetchFn;
   /** Strip N leading path components on extract (tar `strip`). Default 0. */
   readonly stripComponents?: number;
+  /**
+   * M4 (2026-05-23 todo-audit): Host-Allowlist gegen SSRF.
+   *
+   * Default-Behaviour ist `DEFAULT_ALLOWED_HOSTS` (codeload.github.com)
+   * und greift NUR wenn `opts.fetchFn` nicht gesetzt ist — tests injizieren
+   * ihre eigene fetch und uebernehmen die Verantwortung fuer URL-Safety.
+   * Production-Code-Path nutzt die default fetch + den lock.
+   *
+   * Override fuer self-hosted Mirrors: opts.allowedHosts = ['my.mirror.org'].
+   * Leeres Array deaktiviert den Check (only use mit kontrolliertem URL-Inflow).
+   * `file:` Schema ist immer erlaubt (lokale Tests + zukuenftige local:
+   * source-types).
+   */
+  readonly allowedHosts?: readonly string[];
 }
 
 export interface InstallResult {
@@ -100,7 +114,45 @@ async function readArchiveByExpectedHash(opts: InstallOpts): Promise<Buffer | nu
  */
 const MAX_TARBALL_BYTES = 200 * 1024 * 1024;
 
+/**
+ * M4 (2026-05-23 todo-audit): Default Host-Allowlist fuer Tarball-Fetches.
+ *
+ * `codeload.github.com` ist was `githubTarballUrl()` in
+ * `source-resolver.ts` baut — der einzige Production-Code-Path der
+ * tarball-installer ueber die default fetch ruft. Self-hosted Mirrors
+ * koennen die default-list ueber `opts.allowedHosts` ueberschreiben.
+ */
+export const DEFAULT_ALLOWED_HOSTS: readonly string[] = ['codeload.github.com'];
+
+function validateTarballUrl(rawUrl: string, allowedHosts: readonly string[]): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new TarballInstallError(`invalid tarball URL: ${rawUrl}`);
+  }
+  // file:// ist immer erlaubt — lokale Tests + zukuenftige local: source-types
+  if (parsed.protocol === 'file:') return;
+  if (parsed.protocol !== 'https:') {
+    throw new TarballInstallError(
+      `refused tarball URL "${rawUrl}": protocol "${parsed.protocol}" requires https: or file:`,
+    );
+  }
+  // empty allowlist = caller explicitly disabled check
+  if (allowedHosts.length === 0) return;
+  if (!allowedHosts.includes(parsed.hostname)) {
+    throw new TarballInstallError(
+      `refused tarball URL "${rawUrl}": host "${parsed.hostname}" not in allowlist [${allowedHosts.join(', ')}]`,
+    );
+  }
+}
+
 async function fetchArchive(opts: InstallOpts): Promise<Buffer> {
+  // M4: Host-Allowlist greift NUR fuer default fetch — tests injizieren
+  // ihre eigene fetch und uebernehmen URL-Safety-Verantwortung.
+  if (opts.fetchFn === undefined) {
+    validateTarballUrl(opts.url, opts.allowedHosts ?? DEFAULT_ALLOWED_HOSTS);
+  }
   const fetchFn = opts.fetchFn ?? defaultFetch();
   let response: Response;
   try {
