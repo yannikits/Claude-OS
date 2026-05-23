@@ -68,7 +68,7 @@ Bei der v1.4-Spike-Planung stellte sich die Frage: per-domain (ADR-0007 wie gepl
 
 - **Neue Domain-RPC-Methods:** wenn sie via MCP sichtbar sein sollen, muss `MCP_TOOLS` händisch erweitert werden. Vergisst man das, ist die Method nur im Tauri-Sidecar erreichbar (graceful, kein Error).
 - **Mutating-Tools:** jedes neue mutating MCP-Tool braucht **explizite Sicherheitsanalyse** im PR (Value-in-RAM-Risiko, Idempotenz, FS-Pfad-Sanitization). Default `additionalProperties: false` im inputSchema ist Pflicht.
-- **Versions-Bump:** der `serverVersion` in `createMcpServer` ist aktuell hardcoded `'1.2.1'`. Bei jeder Release sollten wir das auf die aktuelle `package.json#version` synchronisieren — tracked als m1-followup (`mcp/server.ts` koennte `resolveVersion()`-Pattern aus `cli/index.ts` (M40) wiederverwenden).
+- **Versions-Bump:** `serverVersion` in `createMcpServer` defaultet auf `resolveDefaultServerVersion()` (closes m1-followup 2026-05-23) — liest `package.json#version` zur Laufzeit ueber das gleiche `import.meta.url`+`readFileSync`-Pattern wie M40 in `cli/index.ts`. Kein manueller Sync pro Release mehr noetig. Caller kann via `opts.serverVersion` weiterhin uebersteuern (Tests + spezielle Tagging-Szenarien).
 
 ## Alternativen verworfen
 

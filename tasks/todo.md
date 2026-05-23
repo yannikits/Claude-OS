@@ -476,7 +476,7 @@ Eine Explore-getriebene Audit-Pass durch das Code-Review-Section unten (Lines 67
 
 - **M3**: mcp.json SHA256-Trust-Prompt-Model — UX-friction, noch nicht designed.
 - **M8**: rpc.ts per-launch nonce/token Caller-Auth — non-trivial Tauri-Parent-Setup-Change.
-- **m1**: ADR-0016 embedded TODO entfernen.
+- ~~**m1**: ADR-0016 embedded TODO entfernen~~ → geshipt 2026-05-23 in `chore/m1-mcp-server-version`: `src/mcp/server.ts` `resolveDefaultServerVersion()` liest package.json runtime (M40-Pattern), ADR-0016 §Konstraints updated.
 - **m12**: PBKDF2 → scrypt/Argon2 fuer naechste Format-Version (v2 Material).
 - **n2-n8**: Diverse Nits, niedrige Prio.
 
@@ -758,7 +758,7 @@ Screenshot-Befund: 5 staged Files inkl. `.graphify_step_ast.py` + `graphify-out/
 
 ### Minor
 
-- [ ] m1 — `docs/architecture/adr/0016-mcp-single-server-bridge.md:71` embedded TODO "serverVersion '1.2.1', sync to package.json" → Task oder schließen
+- [x] m1 — `src/mcp/server.ts` `resolveDefaultServerVersion()` liest `package.json#version` zur Laufzeit (M40-Pattern); ADR-0016 §Konstraints embedded-TODO entfernt + auf "geshipt"-Note umgeschrieben. Shipped 2026-05-23.
 - [ ] m2 — `docs/architecture/adr/0014-code-quality-biome.md` Titel "biome v2.3" vs. pinned `^2.4.15` → Title-Update oder Revision-Note
 - [ ] m3 — `README.md:94` "mcp clients ready (v1.6)" bei project 1.5.3 → relabel "v1.5"
 - [ ] m4 — `README.md:85` `vault schedule --enable/--disable` Syntax gegen `vault.ts`-commander-Definition prüfen
