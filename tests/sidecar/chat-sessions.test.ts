@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSessionError, ChatSessions } from '../../src/sidecar/chat-sessions.js';
 
 /**
@@ -155,5 +155,65 @@ describe('ChatSessions', () => {
     // Kill etwaige gestartete session, damit afterEach sauber bleibt
     // (besonders auf Windows ohne fake-claude wird der spawn evtl
     // BinaryNotFoundError werfen — das ist OK, nicht ChatSessionError).
+  });
+
+  describe('Phase e — chat.* deprecation-warning (ADR-0021 §6)', () => {
+    it('emittiert single-shot Deprecation-Hinweis beim ersten spawn', async () => {
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const chat = new ChatSessions(() => {});
+        const { sessionId } = chat.spawn([]);
+        chat.kill(sessionId);
+        await new Promise((r) => setTimeout(r, 100));
+
+        const calls = stderrSpy.mock.calls
+          .map((c) => String(c[0]))
+          .filter((s) => s.includes('[deprecated] chat.*'));
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatch(/pty\.\*/);
+        expect(calls[0]).toMatch(/ADR-0021/);
+      } finally {
+        stderrSpy.mockRestore();
+      }
+    });
+
+    it('emittiert KEINEN zweiten Hinweis beim zweiten spawn derselben Instanz', async () => {
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const chat = new ChatSessions(() => {});
+        const first = chat.spawn([]);
+        const second = chat.spawn([]);
+        chat.kill(first.sessionId);
+        chat.kill(second.sessionId);
+        await new Promise((r) => setTimeout(r, 100));
+
+        const calls = stderrSpy.mock.calls
+          .map((c) => String(c[0]))
+          .filter((s) => s.includes('[deprecated] chat.*'));
+        expect(calls).toHaveLength(1);
+      } finally {
+        stderrSpy.mockRestore();
+      }
+    });
+
+    it('jede neue ChatSessions-Instanz emittiert wieder einmal (per-instance one-shot)', async () => {
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const a = new ChatSessions(() => {});
+        const b = new ChatSessions(() => {});
+        const sa = a.spawn([]);
+        const sb = b.spawn([]);
+        a.kill(sa.sessionId);
+        b.kill(sb.sessionId);
+        await new Promise((r) => setTimeout(r, 100));
+
+        const calls = stderrSpy.mock.calls
+          .map((c) => String(c[0]))
+          .filter((s) => s.includes('[deprecated] chat.*'));
+        expect(calls).toHaveLength(2);
+      } finally {
+        stderrSpy.mockRestore();
+      }
+    });
   });
 });
