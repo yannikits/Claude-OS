@@ -189,6 +189,27 @@ Sidecar laeuft headless im Tauri-shell-Subprocess. Kein TTY-Prompt
 moeglich. CLI-only-User-Setups muessen direkt mcp-trust.json editieren
 (siehe Konstraint oben).
 
+## Anhang — Codex M3-Review-Findings + Hardening 2026-05-24
+
+Codex M3-Review fand **1 echten BUG + 4 concerns** an der M3-GUI-Shipping
+(PR #113). Alle adressiert in `feature/m3-hardening-codex-followup`:
+
+| # | Severity | Finding | Status |
+|---|----------|---------|--------|
+| 1 | **BUG** | `watcher.reprobe()` rief `probeImpl` OHNE `isTrusted`/`serverKeyFor` → GUI-via-`mcp.clients.reprobe`-RPC konnte den Trust-Gate umgehen. | **Fixed** — `watcher.ts:202-213` spiegelt jetzt das gleiche `isTrusted`-Pattern wie `runTick()`. +1 Regression-Test. |
+| 2 | CONCERN | Bidi/control/zero-width-chars in `command`/`args` koennen User-Sicht visuell spoofen (z. B. `cmd.exe ‮evil.exe` rendert als `cmd.exe exe.live`). | **Fixed** — `mcp-trust-modal.tsx` `sanitizeForDisplay()` ersetzt evil-Unicode durch sichtbare Escapes `[U+202E]`. +1 Test mit RTL-Override-Char. |
+| 3 | CONCERN | `args.join(' ')` verlor Argument-Grenzen — `["safe", "--evil opt"]` wuerde als `"safe --evil opt"` joinen und User saehe falsche Token-Anzahl. | **Fixed** — per-token render mit ` · `-Trenn-Zeichen. +1 Test mit args die Spaces enthalten. |
+| 4 | CONCERN | Esc + backdrop-click waren ungeteset (Trust-Boundary-Vertrag "dismiss != acknowledge"). | **Fixed** — +2 Tests fuer Esc-keydown und backdrop-click bestaetigen no-acknowledge-no-RPC. |
+| 5 | CONCERN | `trust-store.ts:22-24` Doc-Wording "wuerde RE-trusten lassen muessen" widersprach Implementation (kein RE-prompt bei command-change). | **Fixed** — Doc-Wording explizit umgeschrieben + ADR-0024 §6-Verweis. |
+
+**Race noch offen (LOW)**: Reprobe-vs-tick-race. Wenn ein Watcher-Tick
+gestartet wird, dann der User acknowledges + reprobet, kann der noch-
+laufende Tick den fresh-trusted-Status mit dem alten `trust-required`-
+Cache-Eintrag ueberschreiben. Codex empfahl entweder `tickInFlight`-
+guard oder per-Server-Generation-Counter. **Deferred zu Folge-PR** —
+real-world Impact begrenzt auf 60s-Latenz (naechster Tick korrigiert
+sich selbst).
+
 ## Anhang — Trust-Boundary-Mapping (Codex M8-Review-Followup, 2026-05-24)
 
 Codex M8-Review hat eine wichtige Klarstellung geliefert die hier
