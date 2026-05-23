@@ -189,6 +189,31 @@ Sidecar laeuft headless im Tauri-shell-Subprocess. Kein TTY-Prompt
 moeglich. CLI-only-User-Setups muessen direkt mcp-trust.json editieren
 (siehe Konstraint oben).
 
+## Anhang — Trust-Boundary-Mapping (Codex M8-Review-Followup, 2026-05-24)
+
+Codex M8-Review hat eine wichtige Klarstellung geliefert die hier
+dokumentiert wird damit die Trust-Boundaries nicht verschwimmen:
+
+| Surface | Auth-Mechanismus | Trust-Modell |
+|---------|------------------|--------------|
+| Tauri-Frontend → Sidecar (via `rpc_call` Tauri-command) | M8 nonce-handshake (per-spawn, 32hex) | Renderer trusted because Tauri-isolation; Supervisor injects nonce |
+| Sidecar → MCP-Servers (via `live-probe`) | M3 trust-prompt-model (this ADR) | Per-server user-acknowledgement before any spawn |
+| MCP-Client (Claude Desktop, Claude Code) → MCP-Server-Surface (`dispatcher.invoke()`) | **NONE — implicit trust via stdio-parent model** | MCP-spawning-client (z. B. Claude Desktop) ist trusted-by-design |
+| In-process Tests → Dispatcher (`dispatcher.invoke()`) | **NONE — same-process bypass** | Test-Code ist trusted |
+
+**Implication**: das M3 trust-prompt-model schuetzt Claude-OS DAVOR dass
+es ein malicious 3rd-party MCP-Server-Binary spawnt. Es schuetzt NICHT
+davor dass ein MCP-Client (der unsere MCP-Server-API ruft) mit
+mutating tools wie `claude-os.inbox.import` Unfug anstellt. Wenn ein
+zukuenftiges Threat-Model untrusted MCP-Clients einschliesst, braucht
+es eine separate Trust-Layer mit eigenem ADR — z. B. per-Tool
+Allowlist oder Per-Client-Auth-Token in `src/mcp/server.ts`.
+
+Aktuell akzeptierte Risk-Position: MCP-Clients sind trusted weil das
+MCP-stdio-parent-Modell bedeutet dass nur Prozesse mit User-Rechten den
+Sidecar als MCP-Server spawnen koennen (sie haben dann ohnehin
+File-System-Zugriff den `inbox.import` lediglich orchestriert).
+
 ## Referenzen
 
 - M3 in `tasks/todo.md` Audit-Summary (Lines 477+, Lines 703)

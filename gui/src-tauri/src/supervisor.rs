@@ -24,6 +24,13 @@ pub fn next_backoff(strike: usize) -> Option<Duration> {
     BACKOFF_LADDER.get(strike).copied()
 }
 
+/// M8 hardening (Codex review 2026-05-24): `randomBytes(16).toString('hex')`
+/// produziert genau 32 lowercase hex chars. Wir akzeptieren nichts anderes
+/// — kein arbitrary string, kein leerer wert, kein uppercase-mix.
+pub fn is_valid_nonce(s: &str) -> bool {
+    s.len() == 32 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 #[derive(Deserialize)]
 struct RpcEnvelope {
     #[serde(default)]
@@ -92,9 +99,32 @@ impl SidecarRpc {
     }
 
     /// M8: called by the stderr router when it parses the
-    /// `{"type":"sidecar-ready","nonce":"..."}` handshake line. Idempotent.
-    async fn set_nonce(&self, nonce: String) {
-        *self.nonce.lock().await = Some(nonce);
+    /// `{"type":"sidecar-ready","nonce":"..."}` handshake line.
+    ///
+    /// M8 hardening (Codex review 2026-05-24): **first-handshake-only**.
+    /// Wenn eine zweite handshake-line auftaucht (z. B. weil ein
+    /// stderr-Replay-Angriff oder ein malicious sidecar plant den nonce
+    /// zu rotieren), wird sie ignoriert + geloggt. Plus format-Check:
+    /// nonce muss `^[0-9a-f]{32}$` matchen (32-hex aus dem Sidecar-
+    /// `randomBytes(16).toString('hex')`-Generator).
+    ///
+    /// Returns `true` wenn der nonce gesetzt wurde, `false` bei reject.
+    async fn set_nonce(&self, nonce: String) -> bool {
+        if !is_valid_nonce(&nonce) {
+            eprintln!(
+                "[supervisor] rejected handshake: nonce format invalid (expected 32 lowercase hex)"
+            );
+            return false;
+        }
+        let mut guard = self.nonce.lock().await;
+        if guard.is_some() {
+            eprintln!(
+                "[supervisor] rejected second handshake: first-handshake-only policy (M8 hardening)"
+            );
+            return false;
+        }
+        *guard = Some(nonce);
+        true
     }
 
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
@@ -159,7 +189,14 @@ async fn spawn_and_run(app: &AppHandle, state: &Arc<SupervisorState>) -> RpcErro
     let cmd = match app.shell().sidecar("claude-os-sidecar") {
         Ok(c) => c
             .env("CLAUDE_OS_SECRETS_BACKEND", "encrypted-file")
-            .env("CLAUDE_OS_PORTABLE", "1"),
+            .env("CLAUDE_OS_PORTABLE", "1")
+            // M8 hardening (Codex review 2026-05-24): force `auto` so a
+            // user-set `CLAUDE_OS_RPC_NONCE=disabled` (or a malicious
+            // env-override that pins a known nonce) cannot defeat the
+            // gate on Tauri-supervised sidecars. Devs who run the
+            // sidecar manually (without Tauri) keep the env-control
+            // for tests / debugging.
+            .env("CLAUDE_OS_RPC_NONCE", "auto"),
         Err(e) => return RpcError::Io(format!("sidecar() failed: {e}")),
     };
 
@@ -178,6 +215,16 @@ async fn spawn_and_run(app: &AppHandle, state: &Arc<SupervisorState>) -> RpcErro
     let app_for_router = app.clone();
     let router = tokio::spawn(async move {
         let mut buf = String::new();
+        // M8 hardening (Codex review 2026-05-24): separate stderr-buffer.
+        // Vorher hat der stderr-Arm jeden `CommandEvent::Stderr(bytes)`
+        // als ganze Line behandelt — wenn pino oder ein anderer Writer
+        // den Output ueber Chunk-Grenzen splittet (z. B. die handshake-
+        // JSON wird in zwei `Stderr`-Events geliefert), wurde der
+        // handshake silently verfehlt und der nonce nie gesetzt.
+        // Jetzt buffern wir stderr identisch zu stdout: an `\n` splitten,
+        // partial-tail zurueck in den Buffer, jede komplette Line
+        // einzeln verarbeiten.
+        let mut stderr_buf = String::new();
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(bytes) => {
@@ -204,38 +251,56 @@ async fn spawn_and_run(app: &AppHandle, state: &Arc<SupervisorState>) -> RpcErro
                     }
                 }
                 CommandEvent::Stderr(bytes) => {
-                    let line = String::from_utf8_lossy(&bytes).trim().to_string();
-                    // M8 (2026-05-21 code-review): parse sidecar-ready
-                    // handshake. The line is JSON with shape:
-                    // {"type":"sidecar-ready","nonce":"<hex>","pid":N}
-                    // The handshake is always emitted BEFORE any other
-                    // stderr line by the sidecar — we don't need to
-                    // gate further calls beyond setting the nonce.
-                    // (rust 2021 / 1.77: let-chains nicht stabilisiert —
-                    // wir nesten if-let statt && let zu chainen.)
-                    let handled_handshake = if let Ok(json) = serde_json::from_str::<Value>(&line) {
-                        if json.get("type").and_then(Value::as_str) == Some("sidecar-ready") {
-                            if let Some(nonce) = json.get("nonce").and_then(Value::as_str) {
-                                rpc_for_router.set_nonce(nonce.to_string()).await;
-                                eprintln!("[supervisor] sidecar-ready handshake received");
-                                true
+                    stderr_buf.push_str(&String::from_utf8_lossy(&bytes));
+                    while let Some(nl) = stderr_buf.find('\n') {
+                        let line_owned: String = stderr_buf.drain(..=nl).collect();
+                        let line = line_owned.trim().to_string();
+                        if line.is_empty() {
+                            continue;
+                        }
+                        // M8 (2026-05-21 code-review, hardened 2026-05-24):
+                        // parse sidecar-ready handshake. The line is JSON
+                        // with shape:
+                        // {"type":"sidecar-ready","nonce":"<32hex>","pid":N}
+                        // Hardening: nonce-format-validation +
+                        // first-handshake-only sind in `set_nonce()`
+                        // erzwungen. Replays oder format-violations
+                        // werden dort silently abgelehnt + geloggt.
+                        // (rust 2021 / 1.77: let-chains nicht stabilisiert —
+                        // wir nesten if-let statt && let zu chainen.)
+                        let handled_handshake =
+                            if let Ok(json) = serde_json::from_str::<Value>(&line) {
+                                if json.get("type").and_then(Value::as_str)
+                                    == Some("sidecar-ready")
+                                {
+                                    if let Some(nonce) = json.get("nonce").and_then(Value::as_str) {
+                                        let accepted =
+                                            rpc_for_router.set_nonce(nonce.to_string()).await;
+                                        if accepted {
+                                            eprintln!(
+                                                "[supervisor] sidecar-ready handshake accepted"
+                                            );
+                                        }
+                                        accepted
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
                             } else {
                                 false
-                            }
-                        } else {
-                            false
+                            };
+                        if handled_handshake {
+                            // Don't forward the handshake to the renderer
+                            // as a regular stderr-event — it's an internal
+                            // protocol detail.
+                            continue;
                         }
-                    } else {
-                        false
-                    };
-                    if handled_handshake {
-                        // Don't forward the handshake to the renderer
-                        // as a regular stderr-event — it's an internal
-                        // protocol detail.
-                        continue;
+                        eprintln!("[sidecar.stderr] {line}");
+                        let _ = app_for_router
+                            .emit(SIDECAR_STDERR_EVENT, json!({ "line": line }));
                     }
-                    eprintln!("[sidecar.stderr] {line}");
-                    let _ = app_for_router.emit(SIDECAR_STDERR_EVENT, json!({ "line": line }));
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!(
@@ -324,5 +389,65 @@ mod tests {
     fn sidecar_event_names_are_stable() {
         assert_eq!(SIDECAR_FAILED_EVENT, "sidecar://failed");
         assert_eq!(SIDECAR_STDERR_EVENT, "sidecar://stderr");
+    }
+
+    // -------- M8 hardening (Codex review 2026-05-24) --------
+
+    #[test]
+    fn m8_is_valid_nonce_accepts_32_lowercase_hex() {
+        // Beispiel-output von randomBytes(16).toString('hex')
+        assert!(is_valid_nonce("0123456789abcdef0123456789abcdef"));
+        assert!(is_valid_nonce("ffffffffffffffffffffffffffffffff"));
+        assert!(is_valid_nonce("00000000000000000000000000000000"));
+    }
+
+    #[test]
+    fn m8_is_valid_nonce_rejects_wrong_length() {
+        assert!(!is_valid_nonce(""));
+        assert!(!is_valid_nonce("0123456789abcdef0123456789abcde")); // 31
+        assert!(!is_valid_nonce("0123456789abcdef0123456789abcdefa")); // 33
+    }
+
+    #[test]
+    fn m8_is_valid_nonce_rejects_uppercase_or_non_hex() {
+        assert!(!is_valid_nonce("0123456789ABCDEF0123456789abcdef")); // uppercase
+        assert!(!is_valid_nonce("0123456789abcdef0123456789abcdeg")); // 'g' not hex
+        assert!(!is_valid_nonce("0123456789abcdef0123456789abcde "));  // trailing space
+        assert!(!is_valid_nonce("0123456789abcdef0123456789abcde\n")); // trailing newline
+    }
+
+    /// set_nonce ist async; tokio::test-Runtime fuer den lock
+    #[tokio::test]
+    async fn m8_set_nonce_first_only_rejects_replay() {
+        let rpc = SidecarRpc::new_for_test_without_child();
+        let first = "0123456789abcdef0123456789abcdef".to_string();
+        let second = "fedcba9876543210fedcba9876543210".to_string();
+
+        assert!(rpc.set_nonce(first.clone()).await);
+        assert_eq!(rpc.nonce.lock().await.as_deref(), Some(first.as_str()));
+
+        // Second call must be rejected and the original nonce preserved
+        assert!(!rpc.set_nonce(second).await);
+        assert_eq!(rpc.nonce.lock().await.as_deref(), Some(first.as_str()));
+    }
+
+    #[tokio::test]
+    async fn m8_set_nonce_rejects_invalid_format_without_setting() {
+        let rpc = SidecarRpc::new_for_test_without_child();
+        assert!(!rpc.set_nonce("not-hex-and-too-short".to_string()).await);
+        assert!(rpc.nonce.lock().await.is_none());
+    }
+
+    impl SidecarRpc {
+        /// Test-only constructor — bypasses `CommandChild` requirement
+        /// since the nonce/handshake logic is pure state-handling.
+        fn new_for_test_without_child() -> Arc<Self> {
+            Arc::new(Self {
+                next_id: AtomicU64::new(1),
+                pending: Mutex::new(HashMap::new()),
+                child: Mutex::new(None),
+                nonce: Mutex::new(None),
+            })
+        }
     }
 }
