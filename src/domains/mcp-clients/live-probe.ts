@@ -233,7 +233,6 @@ export async function probeServer(
   });
 
   return await new Promise<ProbeResult>((resolve) => {
-    let killFallbackTimer: NodeJS.Timeout | null = null;
     function finish(result: ProbeResult): void {
       if (resolved) return;
       resolved = true;
@@ -242,7 +241,10 @@ export async function probeServer(
       } catch {
         // child already exited
       }
-      killFallbackTimer = setTimeout(() => {
+      // n4 (2026-05-23 todo-audit): killFallbackTimer ist jetzt
+      // function-lokal — closure-level let + `void`-Lint-Suppressor
+      // war nicht noetig (Variable wird nur hier gelesen+geschrieben).
+      const killFallbackTimer = setTimeout(() => {
         if (!childExited) {
           try {
             child.kill('SIGKILL');
@@ -258,8 +260,6 @@ export async function probeServer(
       killFallbackTimer.unref?.();
       resolve(result);
     }
-    // Belegen damit lint zufrieden ist (killFallbackTimer wird oben gesetzt).
-    void killFallbackTimer;
 
     const overallTimer = setTimeout(() => {
       finish({

@@ -65,6 +65,25 @@ describe('copyTree — happy path', () => {
     expect(existsSync(join(dst, 'a.log'))).toBe(false);
   });
 
+  it('n7: literal `{` und `}` in Filenames + Excludes funktionieren als plain chars', async () => {
+    const src = join(workDir, 'src');
+    mkdirSync(src, { recursive: true });
+    // Filenames mit literalem `{`/`}` — vorher: globToRegex wuerde die als
+    // Regex-Quantifier interpretieren und crash/falsch-matchen.
+    writeFileSync(join(src, 'note{1}.md'), 'one', 'utf8');
+    writeFileSync(join(src, 'note{1,2}.md'), 'multi', 'utf8');
+    writeFileSync(join(src, 'plain.md'), 'plain', 'utf8');
+
+    const dst = join(workDir, 'dst');
+    // Exclude mit literalem `{}` — sollte als Plain-String matched werden,
+    // NICHT als Regex-Quantifier (was syntax-errorn wuerde).
+    await copyTree({ source: src, destination: dst, exclude: ['note{1,2}.md'] });
+
+    expect(existsSync(join(dst, 'note{1}.md'))).toBe(true);
+    expect(existsSync(join(dst, 'plain.md'))).toBe(true);
+    expect(existsSync(join(dst, 'note{1,2}.md'))).toBe(false);
+  });
+
   it('verweigert Default das Überschreiben einer bestehenden Ziel-Datei', async () => {
     const src = join(workDir, 'src');
     mkdirSync(src, { recursive: true });
