@@ -1,0 +1,63 @@
+MIT License
+
+Copyright (c) 2026 Yannik Leibfritz / Die ITeen-Schmiede
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
+Attribution Notice
+==================
+
+This project draws inspiration from, but does not contain code from, the
+following projects. If you contribute code derived from any of them, ensure
+license compatibility and update this notice.
+
+- OpenClaw (Steinberger) — MIT-licensed.
+  Inspired: `workspace/skills/<name>/SKILL.md` pattern; the
+  CLAUDE.md / AGENTS.md / SOUL.md / TOOLS.md document separation;
+  Local-First-Gateway / Companion-App pattern.
+
+- Hermes Agent (NousResearch) — Apache-2.0.
+  Inspired: FTS5-based session search with LLM summarization (see ADR-0025);
+  ThreadPoolExecutor parallel tool-call pattern (adapted to Promise.all in TS).
+  Note: the ProviderTransport-ABC pattern from Hermes was explicitly NOT
+  adopted here — see ADR-0003 for the claude.exe-delegation decision.
+
+- Claude Code / Anthropic SDK — Anthropic-licensed.
+  The bundled `bin/claude.exe` binary is included as a runtime dependency.
+  See ADR-0003 (Hybrid-CLI Delegation) and ADR-0011 (Anthropic-CLI Auth
+  Integration) for the delegation contract.
+
+- Tauri 2.x — MIT / Apache-2.0 dual-licensed.
+  Used as the GUI framework (ADR-0001) and Sidecar IPC layer (ADR-0006).
+
+- `@modelcontextprotocol/sdk` — MIT.
+  Used for MCP-Server and Tool-Registry (ADR-0007 / ADR-0016).
+
+- `@napi-rs/keyring` — MIT.
+  Used for OS-Keychain integration (ADR-0004).
+
+- `@sinclair/typebox` — MIT.
+  Used for schema validation (ADR-0012).
+
+For private repos derived from or depending on this codebase
+(`claude-os-msp`, `house-watch` — see ADR-0030), the MIT license of this
+codebase applies to the consumed portions. The private repos themselves
+remain proprietary ("All rights reserved" by default) per ADR-0029.
