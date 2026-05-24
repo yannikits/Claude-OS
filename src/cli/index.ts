@@ -49,6 +49,10 @@ program
   .description('Claude Develop Environment OS — Tauri GUI + Node CLI + cloud-mount vault sync')
   .version(resolveVersion())
   .option('--root <path>', 'Override claude-os root path (default: $CLAUDE_OS_ROOT or repo-detect)')
+  .option(
+    '--vault <path>',
+    'Override Obsidian vault root for memory commands (default: $CLAUDE_OS_VAULT_PATH from .env)',
+  )
   .option('--json', 'Output as JSON (for machine consumption)')
   .option('-v, --verbose', 'Verbose logging');
 
@@ -69,6 +73,7 @@ const SUBCOMMAND_LOADERS: Record<string, Loader> = {
   mcp: async (p) => (await import('./commands/mcp.js')).registerMcpCommand(p),
   migrate: async (p) => (await import('./commands/migrate.js')).registerMigrateCommand(p),
   schedule: async (p) => (await import('./commands/schedule.js')).registerScheduleCommand(p),
+  workspace: async (p) => (await import('./commands/workspace.js')).registerWorkspaceCommand(p),
 };
 
 async function loadAll(p: Command): Promise<void> {

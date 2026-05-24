@@ -932,3 +932,63 @@ ROADMAP sagte ursprünglich _"120s-Hangs durch Wrapper-Timeout abgefangen"_ — 
 - **Kein Wrapper-Timeout eingeführt** — verstößt gegen Memory 569/577/578. Heartbeat-Logging ist die korrekte Eskalations-Form (User sieht 30s-Stille im pino-Log, kann manuell Ctrl-C drücken).
 - **Kein Smoke-Test gegen reale `claude.exe`** — wäre nice-to-have aber zu OS-/Account-spezifisch für CI. Die long-running-Test deckt die Wrapper-Mechanik ab; binary-resolution hat eigene Unit-Tests.
 - **Kein macOS spawn-helper-chmod-Fix** — bekanntes node-pty-Issue, gehört in eigene PT-Tail-Iteration mit `sidecar:build`-Step der `chmod +x` auf `spawn-helper` setzt.
+
+---
+
+## Phase 2a (ROADMAP) — Workspace-Domain + CLI (2026-05-25)
+
+**Quelle:** `ROADMAP.md` §Phase-2 (Memory MVP), Sub-Phase 2a per Plan vom 2026-05-25.
+**Branch:** `feature/phase-2a-workspace-domain`.
+**Plan-Klärungen vorab:** Variante B (Delegation an claude.exe per ADR-0003), 6 sequenzielle Sub-PRs.
+
+**Anlass:** Phase 2 Memory MVP. 2a legt die Foundation: workspace-aware paths, active-workspace persistence, CLI list/use/current/where. Notes-IO (2b) und Retrieval (2c) bauen darauf auf.
+
+### Architektur-Klarstellung
+
+Zwei orthogonale Roots, beide existieren parallel:
+
+- **`claude-os-root`** (ADR-0002, existing in `core/environment/`): install-tree mit `bin/claude.exe`, `config/`, `inbox/`, `outbox/`. Resolved via `CLAUDE_OS_ROOT` env oder `.claude-os-root`-Marker.
+- **`vault-root`** (ADR-0031, NEW): Obsidian-Vault-Location wo `Claude-OS/workspaces/<ws>/` lebt. Resolved via `CLAUDE_OS_VAULT_PATH` env (aus `.env`).
+
+Beide Konzepte sind getrennt, eines kann ohne das andere funktionieren (install-only commands wie `doctor`/`secrets` brauchen kein vault).
+
+### Geliefert
+
+| Bereich | Files |
+|---|---|
+| `.env`-Loading | `src/core/config/{types,env-loader,index}.ts` (dotenv@^17.4.2) + `docs/environment.md` (statt `.env.example` wegen permission-deny auf dotfiles) |
+| Workspace-Domain | `src/domains/workspace/{types,paths,vault-resolver,state,audit-log,index}.ts` |
+| CLI | `src/cli/commands/workspace.ts` (current/list/use/where) + `src/cli/index.ts` (`--vault` global, SUBCOMMAND_LOADERS) + `src/cli/output.ts` (GlobalOpts `vault?`) |
+| Tests | `tests/core/config/env-loader.test.ts` (5) + `tests/domains/workspace/{paths,state,vault-resolver}.test.ts` (10+8+6 = 24) — **gesamt 29 neue Tests, 942/945 grün** |
+
+### Sicherheits-/Design-Entscheidungen
+
+- **Workspace-ID-Validation** strikt: `personal | msp-internal | msp-customers/<id>` mit `<id>` matching `/^[a-z0-9][a-z0-9_-]*$/`. Reject traversal (`../escape`), uppercase, spaces, leading-dash. Tested mit 8 reject-Cases.
+- **Atomic state-write**: tempfile-+ rename via `<dataDir>/workspace-state.json` mit mode 0o600. Carry-over Pattern aus busy-flag (Phase 2c).
+- **Corrupt-state fail-loud**: malformed JSON ODER fehlende fields throw `WorkspaceError`, kein silent reset. Lesson 2026-05-22 (corrupt vault-sync-state.json wurde damals zur Hard-Fail-Policy gemacht — gleiches Verhalten hier).
+- **Lenient read, strict write**: `readActiveWorkspace` akzeptiert legacy/unknown ids (returnt sie als-is), `writeActiveWorkspace` validiert immer. Migration-safe gegen zukünftige ID-Format-Änderungen.
+- **`personal` immer im list-output**: ADR-0031-Default. Fresh vault returnt es als virtuellen Entry (`path: null`); wenn andere workspaces existieren ohne `personal`-dir wird es vorangestellt.
+- **Audit-Log minimal v1**: nur pino-structured `workspace.switch`-event. Full SECURITY.md §4 audit-store ist Phase 6+ Material, kann später aus log-files back-filled werden.
+
+### v1-Abweichungen (transparent)
+
+- **`docs/environment.md` statt `.env.example`** — User hat permission-deny auf dotfile-zugriff (good security hygiene). Doku-only file dient als template-Vorlage.
+- **`--vault` als global option** statt nur workspace-specific — konsistent mit `--root`-Pattern (auch global obwohl manche commands es nicht brauchen).
+- **Keine lazy-bootstrap** für workspace-dirs auf `use` — Phase 2b's notes.write wird sie on-demand erstellen (kein Sinn leere dirs zu erzeugen bevor was reingeschrieben wird).
+- **`_unsorted` als synthetic-id reserviert** für Phase 2b — wird hier noch nicht surfaced, aber im types-Modul angelegt damit notes-domain es ohne types-PR nutzen kann.
+
+### Verifikation
+
+```
+npx tsc --noEmit          exit 0 (alle neuen Module typed)
+npx biome ci .            0 errors, 0 warnings (nach 1 auto-fix-pass für import-ordering)
+npx vitest run            942/945 grün, 3 skipped (long-running gated)
+                          neue tests: 5+10+8+6 = 29 (alle grün, 340ms)
+```
+
+### Was bewusst nicht hier landet (folgt in 2b–2f)
+
+- **Notes-IO + Frontmatter-Schema** → Phase 2b
+- **Linear-Scan-Retrieval** → Phase 2c
+- **Workspace-mutation via Sidecar-RPC** → Phase 2f (GUI)
+- **ARCHITECTURE.md §4 'Wrapper-Timeout' Drift** — auch fehlerhaft (widerspricht Memory 569/577/578 wie der Phase-1-ROADMAP-Eintrag). Eigene mini-PR.

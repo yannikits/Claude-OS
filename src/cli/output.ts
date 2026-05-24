@@ -18,6 +18,8 @@ import { type ResolvedRoot, RootNotFoundError, resolveRoot } from '../core/envir
 
 export interface GlobalOpts {
   readonly root?: string;
+  /** Override CLAUDE_OS_VAULT_PATH for this invocation (ADR-0031). */
+  readonly vault?: string;
   readonly json?: boolean;
 }
 
