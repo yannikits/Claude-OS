@@ -233,13 +233,23 @@ if (-not $Execute) {
 # ----------------------------------------------------------------------------
 
 # Step 1: backup
+#
+# The backup zips only the items that will actually be moved ($ToMove).
+# Skipped items (.git, .obsidian, agentdb.rvf*, ruvector.db, .claude, …)
+# stay at the vault root and are not at risk during this migration, so
+# including them in the backup adds noise — and worse, runtime-state
+# files like ruvector.db are frequently locked by live processes, which
+# would crash a wholesale `Compress-Archive *` on a live vault.
 if (-not $NoBackup) {
-  Write-Host "Creating backup zip..."
-  # Compress-Archive does not handle .git submodule files or special files well,
-  # but for a vault (markdown + assets) it's fine.
-  Compress-Archive -Path (Join-Path $VaultPath '*') -DestinationPath $BackupZip -CompressionLevel Optimal -Force
-  $size = [math]::Round((Get-Item $BackupZip).Length / 1MB, 1)
-  Write-Host "  OK  $BackupZip ($size MB)" -ForegroundColor Green
+  if ($ToMove.Count -eq 0) {
+    Write-Host "Backup skipped: no movable items, nothing at risk." -ForegroundColor DarkGray
+  } else {
+    Write-Host "Creating backup zip (movables only — $($ToMove.Count) item(s); skipped/stray entries stay at vault root and are not at risk)..."
+    $sourcePaths = $ToMove | ForEach-Object { $_.FullName }
+    Compress-Archive -Path $sourcePaths -DestinationPath $BackupZip -CompressionLevel Optimal -Force
+    $size = [math]::Round((Get-Item $BackupZip).Length / 1MB, 1)
+    Write-Host "  OK  $BackupZip ($size MB)" -ForegroundColor Green
+  }
 }
 
 # Step 2: create directory skeleton

@@ -71,10 +71,24 @@ Du musst manuell:
 
 ### Schritt 4 — Rollback (falls etwas schiefläuft)
 
+Das Backup enthält **nur die verschobenen Items** (nicht den ganzen Vault), weil Skip-Items am Vault-Root unverändert bleiben und nicht im Risiko stehen — und Runtime-State-Files wie `ruvector.db` sind oft von laufenden Prozessen gelockt (vollständiges `Compress-Archive *` würde dann crashen).
+
+Rollback:
+
 ```powershell
-# Backup-Pfad aus dem Migration-Output
-Expand-Archive -Path "<vault-parent>\vault-backup-<timestamp>.zip" -DestinationPath "<vault-parent>\vault-restore" -Force
-# Manuell vergleichen, vault/ ersetzen wenn ok
+# 1. Backup-Pfad aus dem Migration-Output
+$bk = "<vault-parent>\vault-backup-<timestamp>.zip"
+
+# 2. Extrahieren in temp-Ordner
+Expand-Archive -Path $bk -DestinationPath "<vault-parent>\vault-restore" -Force
+
+# 3. Verschobene Items zurück ins Vault-Root verschieben
+#    (manuell prüfen, dann z.B.:)
+Get-ChildItem "<vault-parent>\vault-restore" -Force |
+  Move-Item -Destination "<vault-root>" -Force
+
+# 4. Claude-OS/ wieder entfernen wenn nötig
+Remove-Item "<vault-root>\Claude-OS" -Recurse -Force
 ```
 
 Die Migration ist nicht idempotent — ein zweiter `-Execute`-Lauf bricht ab, wenn `Claude-OS/` bereits existiert.
