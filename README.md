@@ -198,6 +198,16 @@ Voraussetzung: Rust-Toolchain via [rustup](https://rustup.rs/) + plattformspezif
 
 ## Weitere Docs
 
+**Foundation (verbindlich):**
+
+- [`CLAUDE.md`](CLAUDE.md) — Verhaltensgrundlage für Claude Code (Plan-First, Verification, Lessons-Loop, Verbote, Hierarchie)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — Stack-Wahrheit, Trust-Boundaries, Memory-Layer, Failure-Modes, ADR-Index
+- [`ROADMAP.md`](ROADMAP.md) — MVP-Definition, Phasen, DoD, Ist-Stand, Video-Insights
+- [`SECURITY.md`](SECURITY.md) — Threat-Model, Data-Classification, NAPI-RS Keyring, Audit-JSONL, Self-Improving-Skill-Lifecycle, MSP-Tenant-Isolation, DSGVO
+- [`docs/gitnexus.md`](docs/gitnexus.md) — Code-Intelligence-Workflow (Impact-Analysis vor Symbol-Edits)
+
+**Setup + Operation:**
+
 - **[`docs/setup-guide.md`](docs/setup-guide.md) — Detaillierte Schritt-für-Schritt Setup-Anleitung (Szenario A: App, B: + CLI, C: + Dev) inkl. Troubleshooting**
 - [`docs/cloud-providers.md`](docs/cloud-providers.md) — Setup für OneDrive, Drive, Dropbox, Nextcloud, rclone, abraunegg/onedrive
 - [`docs/migration-from-portable.md`](docs/migration-from-portable.md) — 7-Schritte-Migration von claude-portable v0.x (USB) zu claude-os v1
@@ -205,12 +215,16 @@ Voraussetzung: Rust-Toolchain via [rustup](https://rustup.rs/) + plattformspezif
 - [`docs/linux-updates.md`](docs/linux-updates.md) — AppImage Self-Update via zsync (v1.3+)
 - [`docs/mcp-integration.md`](docs/mcp-integration.md) — claude-os als MCP-Server für Claude Desktop / Claude Code (v1.4+)
 - [`gui/README.md`](gui/README.md) — Tauri-Shell + Sidecar build
+- [`.env.example`](.env.example) — Runtime-Env-Var-Surface
+
+**Tracking + Decisions:**
+
 - [`tasks/todo.md`](tasks/todo.md) — Phase-Tracker, Reviews, Deferrals, v1.x Roadmap
 - [`tasks/lessons.md`](tasks/lessons.md) — cross-session pattern-Sammlung
 - [`docs/specs/auto-deps-flag.md`](docs/specs/auto-deps-flag.md) — Spec für `catalog install --auto-deps` (Phase 5p/5q/5r)
 - [`docs/integration-plan-cowork-os.md`](docs/integration-plan-cowork-os.md) — Cowork-OS-Video-Analyse + Feature-Roadmap (#1 + #3 shipped)
 - [`docs/troubleshooting/stop-hook-hang.md`](docs/troubleshooting/stop-hook-hang.md) — Diagnose-Doc + Script für Claude-Code Stop-Hook-Hänger
-- [`docs/architecture/adr/`](docs/architecture/adr/) — 20 ADRs (siehe unten)
+- [`docs/architecture/adr/`](docs/architecture/adr/) — 31 ADRs (Index in `ARCHITECTURE.md` §11)
 
 ## Architektur-Entscheidungen
 
@@ -268,4 +282,6 @@ Test-Tracker: [`tasks/todo.md`](tasks/todo.md), Lessons aus Korrekturen: [`tasks
 
 ## Lizenz
 
-MIT (siehe `package.json`).
+MIT — siehe [`LICENSE`](LICENSE). Begründung und Attribution-Notizen für Hermes / OpenClaw / Tauri / MCP-SDK / NAPI-RS Keyring / TypeBox sind dort dokumentiert; die License-Entscheidung selbst steht in [ADR-0029](docs/architecture/adr/0029-license-mit-public-core.md).
+
+Für private abgeleitete Repos (`claude-os-msp`, `house-watch` per [ADR-0030](docs/architecture/adr/0030-repo-strategy-hybrid.md)) gilt proprietär ("All rights reserved").
