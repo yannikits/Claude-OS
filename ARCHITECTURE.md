@@ -87,7 +87,7 @@ MSP-Bridges und House-Watch konsumieren `Claude-portable` als npm-Dependency ode
 
 **Kein eigenes Provider-Interface.** Die AI-Interaktion läuft per Delegation an `bin/claude.exe` (ADR-0003 Hybrid-CLI). Stream-JSON, Tool-Use, Plan-Mode, Slash-Commands liegen vollständig in Anthropics Hand.
 
-- **Modul:** `src/domains/claude-bridge/` — Subprocess-Spawn-Lifecycle, Wrapper-Timeout (180s default, SIGTERM+SIGKILL-Eskalation), Heartbeat-Logging
+- **Modul:** `src/domains/claude-bridge/` — Subprocess-Spawn-Lifecycle via `stdio:'inherit'` (by-design kein Buffer-Hang, **kein** Wrapper-Timeout — Memory 569/577/578), SIGINT-Propagation mit 5s-Grace → SIGKILL (double-Ctrl-C eskaliert sofort), Heartbeat-Logging alle 10s als pino-strukturiertes Event
 - **Interaktive Sessions:** node-pty + xterm.js (ADR-0021)
 - **Auth:** Read-only auf Anthropic-CLI-Credentials, State-Check via `claude auth status`, Refresh-Mutex (ADR-0011)
 - **Multi-Profile:** `$ANTHROPIC_CONFIG_DIR` sandboxt pro-Profil-Spawns (ADR-0011 §4)

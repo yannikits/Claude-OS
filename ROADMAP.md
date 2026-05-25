@@ -10,7 +10,7 @@ Phasen sind sequenziell. Phase überspringen nur via ADR in `tasks/adr/`. Defini
 - [ ] Tauri-GUI öffnet sich, zeigt Eingabefeld + Workspace-Indicator
 - [ ] Vault-Path aus `.env` gelesen, Verbindung verifiziert, Default-Workspace `personal` aktiv
 - [ ] Top-K-Retrieval läuft (initial Linear-Scan, FTS später)
-- [ ] Anthropic-Call mit Context-Injection geht raus (Modell-ID aus `.env`)
+- [ ] Prompt mit Context-Injection wird komponiert und an `bin/claude.exe` delegiert (ADR-0003 — kein eigenes Provider-Interface, kein eigenes API-Key-Management, kein hardgenageltes Modell. Modell-Auswahl liegt bei `claude.exe` selbst.)
 - [ ] Response wird angezeigt
 - [ ] "Speichern als Note" schreibt Markdown mit Frontmatter
 - [ ] Recall in Folge-Session findet die Note
