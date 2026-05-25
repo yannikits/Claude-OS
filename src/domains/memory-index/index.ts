@@ -13,6 +13,16 @@ export {
   openIndex,
   saveIndex,
 } from './database.js';
+export {
+  getIndexedMtime,
+  type IndexerLog,
+  indexNote,
+  type RebuildOpts,
+  type RebuildStats,
+  rebuildAll,
+  removeNote,
+  walkVaultNotes,
+} from './indexer.js';
 export { ensureIndexDir, resolveIndexDbPath } from './paths.js';
 export {
   READ_SCHEMA_VERSION_SQL,
