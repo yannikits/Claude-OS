@@ -46,6 +46,16 @@ ruvector.db-*
 Thumbs.db
 *.swp
 
+# Windows-DOS-Reserved-Names (vermeidet, dass accidental PowerShell-Redirects wie
+# `... > nul` als trackable files in GitHub Desktop "Stage all" landen — siehe
+# tasks/lessons.md 2026-05-26)
+nul
+con
+prn
+aux
+com[1-9]
+lpt[1-9]
+
 # Sidecar runtime dirs (created when claude-os runs against the repo root in dev)
 inbox/
 outbox/

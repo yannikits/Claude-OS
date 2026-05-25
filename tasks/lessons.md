@@ -13,6 +13,27 @@ Format pro Eintrag:
 
 ---
 
+## 2026-05-26 — GitHub Desktop maskiert Pre-Commit-Hook-Failure als PATH-Dump
+
+**Situation:** GitHub Desktop zeigt beim Commit-Versuch auf `feature/phase-8-tauri-updater-scaffold` einen "Commit failed"-Dialog, dessen Body-Text aussieht wie die `PATH`-Environment-Variable (`c:/windows/system32:c:/windows:...`). Kein Hinweis auf die wirkliche Ursache. Hintergrund: GitHub Desktop hatte über "Stage all" 13 artifact-files in den index aufgenommen, die in vorherigen Session-Turns durch PowerShell-redirect-mishaps und Tool-Output-Captures als Filenames entstanden waren — z.B. `('')`, `,`, `-`, `255)`, `d.name)).toEqual(['valid'])`, `void`, `{,-`, `{}))`, `nul` (Windows-DOS-Reserved-Name) sowie ein double-encoded UTF-8-Mojibake-Name `ÔÇö` (originally em-dash, durch CP-850↔UTF-8-roundtrip korrumpiert). Der Pre-Commit-Hook (husky → biome ci / lint-staged) erstickte an Filenames mit `(`, `)`, `,`, `'`, `[`, `]` oder am DOS-Device-Name `nul`. GitHub Desktop fing den stderr nicht sauber ab und renderte stattdessen die Tool-PATH-Variable als Failure-Message.
+
+**Lektion:**
+1. **Bei "Commit failed"-Dialog in GitHub Desktop mit PATH-artigem Inhalt zuerst `git status --short` in der Shell:** echte Diagnose. GUI-output ist nicht trust-worthy bei Hook-Failures unter Windows.
+2. **Periodisch `git status` checken während Multi-Step-Sessions** — nicht erst nach `git add` über GUI. PowerShell-Tool-Captures wie `... | Out-File foo`, `Set-Content bar`, accidental redirect `> nul` können untracked files mit kaputten Namen erzeugen, die später beim GUI-Mass-Stage explodieren.
+3. **Cleanup-Pattern für weird filenames:**
+   - Reguläre Namen mit Sonderzeichen: `Remove-Item -LiteralPath '<name>' -Force` und `git rm -f --cached -- '<name>'`.
+   - **Mojibake-Namen (double-encoded UTF-8):** `git config core.quotepath false` aktivieren, dann `git ls-files -z | %{ [Text.Encoding]::UTF8.GetString(...) }` für die echten Codepoints. Bei `ÔÇö`: die 3 Latin-1-Chars `[char]0xD4 + [char]0xC7 + [char]0xF6` an git übergeben — git speichert die UTF-8-Bytes davon (`C3 94 C3 87 C3 B6`), nicht den von dir intuitiv erwarteten em-dash.
+   - **Windows-Reserved-Names (`nul`, `con`, `prn`, `aux`, `com1`..`lpt9`):** `Remove-Item` schlägt fehl, weil PowerShell den Pfad als DOS-Device interpretiert. Workaround: UNC-Prefix `\\?\$cwd\nul` über `cmd /c "del ..."` ausführen — `\\?\` schaltet Win32-Path-Parsing aus.
+4. **Hygiene-Regel:** PowerShell-Output IMMER über strukturierte API-Pfade capturen (`-OutVariable`, `Tee-Object`, `Out-File <explicit-path>`), NIE über `>` mit Variable die leer sein könnte (`> $maybeEmpty` → `> ""` → file mit Namen `""` o.ä.). Tool-outputs aus dem Bash-Tool unter Windows checken: ob `$LASTEXITCODE`-Ausgaben oder stray `echo "---"` als Filenames landen.
+
+**Anwendung:**
+- Jede Session in der ich mehrfach PowerShell-Pipes mit Captures verwende — am Ende `git status --short` als Cleanup-Check.
+- Bei Vault- oder Repo-Migrationen mit Unicode/Umlaut-Namen: `core.quotepath false` als first-step setzen.
+- Wenn der User GitHub Desktop oder GitKraken nutzt und ein cryptisches "Commit failed" meldet → IMMER zuerst `git status` in der Shell, niemals der GUI vertrauen.
+- Begleit-Hygiene: `.gitignore` um `nul`, `con`, `prn`, `aux` ergänzen damit weird auto-creates nie staged werden.
+
+---
+
 ## 2026-05-25 — Literal-space in JS regex char-class wird zu NUL-Byte umgewandelt
 
 **Situation:** Beim Schreiben von `src/domains/notes/paths.ts` (Phase 2b) habe ich einen Filename-Validation-Regex `/[\\/: ]/` angelegt — mit echtem Space-Zeichen zwischen `:` und `]`. Test `'has space.md'` failte. Lokale REPL bestätigte: der Regex sollte das Space matchen. Untersuchung mit `node -e` zeigte die echten Bytes im File: codepoint 0 (NUL) statt codepoint 32 (Space). Das `Read`-Tool zeigte den Inhalt mit Space (NUL → Space normalisiert für display), während der Compiler/Runtime die echten Bytes las und der Regex damit nur `\, /, :, NUL` matchte. Folgefehler: `Edit`-Tool kann ein old_string mit Space nicht matchen wenn die file echte NUL-bytes hat — das macht in-place-fix unmöglich, das ganze File muss mit `Write` neu geschrieben werden.
