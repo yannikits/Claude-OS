@@ -32,6 +32,36 @@ cargo check
 | 6f | 7 Views (4 wired, 3 stubs) | shipped |
 | 6g | Drag-Drop + inbox/outbox Watcher | shipped |
 | 6h | Bundling (MSI/DMG/AppImage) + E2E | shipped |
+| 2f | Memory-Page + WorkspaceIndicator + SaveAsNoteModal + `workspace.*` / `notes.*` / `retrieval.*` RPCs (Memory MVP GUI surface per ADR-0031) | shipped (PR #143) |
+| 3f | Sidecar `MemoryIndexService` (sql.js FTS4 lifecycle) + `memory.stats` / `memory.rebuild` RPCs. Lazy-tolerant boot — service stays disabled if `CLAUDE_OS_VAULT_PATH` is unset, GUI renders the hint instead of crashing. | shipped (in PR #145 stack — to be split out post-merge) |
+
+## Memory-Page (Phase 2f Memory-MVP-GUI)
+
+Die `Memory`-Page (in der Sidebar zwischen `Dashboard` und `Chat`) ist die GUI-Variante des Memory-MVP-Workflows:
+
+- **Workspace-Indicator** (Dropdown rechts oben): zeigt active Workspace + erlaubt switch via `workspace.use`-RPC. Subscribed `workspace://switched` für cross-page-Konsistenz (auch das Dashboard zeigt den Indicator).
+- **Search-bar**: BM25-Suche über Vault-Notes via `retrieval.search` RPC (Phase 2c BM25-scorer; nach Phase-3-merge optional FTS4-backed via `searchWithFallback`). Optionen: `top-K`, `include ephemeral`, `recursive`.
+- **Result-list**: ranked hits mit score / path / classification / matched terms / body preview.
+- **"+ Neue Notiz"-Button**: öffnet `SaveAsNoteModal` (filename / body / classification / type / tags / tenant / overwrite). Schreibt via `notes.save` RPC; nach Save automatisch re-search wenn eine query active war.
+
+`Save-as-Note`-Modal ist auch standalone wiederverwendbar (z. B. später vom Chat-View, um eine AI-Antwort als Note zu kapseln).
+
+### Vault-Setup für die GUI
+
+Ohne `CLAUDE_OS_VAULT_PATH` in `.env` zeigt der WorkspaceIndicator `Workspace: nicht konfiguriert (CLAUDE_OS_VAULT_PATH fehlt)`. Sidecar bootet in disabled-mode (`memory.stats` → `enabled: false`) — die App stürzt nicht ab, sondern rendert den Hint. Vault-Setup:
+
+```dotenv
+# .env im Repo-Root
+CLAUDE_OS_VAULT_PATH=D:\OneDrive\Obsidian Vault
+# optional:
+CLAUDE_OS_DEFAULT_WORKSPACE=personal
+```
+
+Details: [`docs/environment.md`](../docs/environment.md). Layout per ADR-0031:
+
+```
+<CLAUDE_OS_VAULT_PATH>/Claude-OS/workspaces/<workspaceId>/...
+```
 
 ## Sidecar bauen (Phase 6b)
 
