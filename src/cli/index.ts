@@ -74,6 +74,8 @@ const SUBCOMMAND_LOADERS: Record<string, Loader> = {
   migrate: async (p) => (await import('./commands/migrate.js')).registerMigrateCommand(p),
   schedule: async (p) => (await import('./commands/schedule.js')).registerScheduleCommand(p),
   workspace: async (p) => (await import('./commands/workspace.js')).registerWorkspaceCommand(p),
+  ask: async (p) => (await import('./commands/ask.js')).registerAskCommand(p),
+  'save-note': async (p) => (await import('./commands/save-note.js')).registerSaveNoteCommand(p),
 };
 
 async function loadAll(p: Command): Promise<void> {

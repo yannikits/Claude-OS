@@ -1131,3 +1131,104 @@ npx vitest run            1024/1027 grün, 3 skipped (long-running gated)
 - **FTS5-Index + watchdog** → Phase 3 (ADR-0025)
 - **Recency-Boost + Classification-Trust-Weighting** → Phase 3+
 - **Embedding-basiertes Semantic-Search** → kein ADR, kein Plan — wenn überhaupt v2
+
+---
+
+## Phase 2e (ROADMAP) — CLI `ask` + `save-note` (2026-05-25)
+
+**Quelle:** `ROADMAP.md` §Phase-2 (Memory MVP), Sub-Phase 2e per Plan vom 2026-05-25.
+**Branch:** `feature/phase-2e-cli-ask-and-save-note`.
+**Aufbauend auf:** Phase 2a (workspace) + 2b (notes) + 2c (retrieval) + Phase-1-Bridge.
+
+**Anlass:** End-to-End-MVP-Workflow via CLI. `ask` komponiert vault-context + Frage und delegiert an `claude.exe -p` (ADR-0003, MVP-DoD §4 nach Phase-2d-Fix). `save-note` schreibt AI-Antwort oder beliebigen Markdown-Body als frontmatter-validated Note in den active Workspace.
+
+### Geliefert
+
+| Bereich | Files |
+|---|---|
+| Ask-Domain | `src/domains/ask/{types,prompt-composer,index}.ts` — `composePrompt(query, hits, opts)` pure-function, char-budget-aware drop-from-tail + per-note-truncation |
+| CLI `ask` | `src/cli/commands/ask.ts` — Pipeline: resolveVault → readActiveWorkspace → searchWorkspace → composePrompt → spawnClaudeBridge. Flags: `--workspace`, `--top-k`, `--no-context`, `--include-ephemeral`, `--dry-run` |
+| CLI `save-note` | `src/cli/commands/save-note.ts` — body via `--body \| --from-file \| --from-stdin`. Flags: `--workspace`, `--type`, `--tags`, `--classification`, `--tenant`, `--overwrite`. Defaults: classification=personal, schema_version=1, workspace=active |
+| CLI-Wire | `src/cli/index.ts` — `ask` + `save-note` zu SUBCOMMAND_LOADERS lazy-importiert |
+| Tests | `tests/domains/ask/prompt-composer.test.ts` — **9 neue Tests, 1032/1036 grün** (3 skipped long-running gated) |
+
+### Prompt-Composer-Layout
+
+```
+# Context (from workspace: <id>)
+
+Below are notes from your Obsidian vault that scored highest against
+the user's question. Use them as background when answering. They are
+not authoritative — if they contradict the question, ask for
+clarification rather than guessing.
+
+## Note: <forward-slash-path>
+<body, truncated to perNoteCharLimit + [... note truncated] marker>
+
+...
+
+# User question
+
+<query>
+```
+
+- Default `perNoteCharLimit = 4_000` (~1k tokens/note body)
+- Default `totalCharLimit = 24_000` (~6k tokens; CLI arg-limit is the practical ceiling)
+- Drops hits from tail wenn budget gesprengt; per-note hart-trunkiert mit Marker
+- Empty hits → nur User-Question (kein Context-Block, kein Header)
+- All-hits-exceed-budget → fallback auf nur-User-Question (kein crash)
+- Windows-backslash → forward-slash in path-rendering (prompt-readability)
+
+### Sicherheits-/Design-Entscheidungen
+
+- **Pure composer** — `composePrompt` ohne FS/Network. 9 tests pinnen layout + truncation + fallback-Branches.
+- **`-p` flag delegation** statt stdin-pipe — Anthropic-CLI `-p "<prompt>"` ist die one-shot-API. Vermeidet bridge-stdio-mode-änderung. Limit: shell-arg-Länge (Windows ~8KB, Linux ~128KB). `totalCharLimit=24_000` ist defensiv unter Windows-Limit.
+- **`--dry-run` als DX-killer-feature** — User kann composed prompt SEHEN bevor er Token-cost-causing delegation triggert. Auch nutzbar für Debugging: "warum hat retrieval Note X gewählt?" → check context-block.
+- **`--no-context`** für raw-prompt-Pass-through — wenn retrieval keine relevanten Notes liefert oder User explizit context-free-Antwort will.
+- **`save-note` body-source-Priorität**: `--body` > `--from-file` > `--from-stdin`. Genau eine source muss gegeben sein. Error wenn keine — refuse silent empty-body-write.
+- **classification validation in CLI**: typed Union-Check vor `writeNote`. Fail-fast mit allow-list in error message.
+- **`--tenant`-Pflicht durchgereicht** — CLI nimmt es als arg an, writer-validation (Phase 2b) wirft `FrontmatterValidationError` wenn nicht gesetzt aber workspace `msp-customers/<id>` ist.
+- **`--overwrite` default false** — writer (Phase 2b) wirft NotesError bei existing file ohne overwrite. Schutz gegen accidental clobber.
+- **`--json` für ask + --json für claude.exe**: ask warnt wenn `--json` mit non-dry-run kombiniert wird (claude.exe nutzt `stdio:'inherit'`, streamt direkt). Für JSON-output muss `--dry-run` aktiv sein.
+
+### v1-Abweichungen (transparent)
+
+- **`claude.exe -p "<prompt>"` als arg**, nicht via stdin — einfacher zu wiren, kein bridge-stdio-change. Limit ist Shell-arg-Länge — 24KB defensive cap. Wenn Phase-3+ längere Contexts braucht, dann stdin-pipe-Mode oder tempfile-Übergabe.
+- **Kein conversation-state** — `ask` ist one-shot. Folge-Fragen sind separate Aufrufe ohne shared history. Multi-turn ist Phase 6 (GUI-Chat-View via Sidecar-PTY) Material.
+- **Kein streaming-output-presenter** — `stdio:'inherit'` streamt claude.exe-output direkt zum terminal. Wenn User `--json` mit non-dry-run will: warn-message + fortsetzen ohne JSON-wrapping (claude.exe-Format gilt).
+- **save-note kein clipboard-source** — `--from-stdin` reicht für `pbpaste \| claude-os save-note ...` Pipe-Pattern. Native clipboard-API (`@napi-rs/clipboard`) ist v1.x falls echte Reibungspunkte auftauchen.
+- **Keine retry-on-network-failure** — wenn claude.exe down ist, exit-code wird propagiert. User kann manual retry. Auto-retry ist gefährlich (kann Token-billing duplizieren bei stream-cutoff-mid-response).
+
+### Verifikation
+
+```
+npx tsc --noEmit          exit 0
+npx biome ci .            0 errors, 0 warnings (nach auto-fix-pass)
+npx vitest run            1032/1036 grün, 3 skipped (long-running gated)
+                          neue tests: prompt-composer 9
+```
+
+Smoke (post-merge, real bin/claude.exe auf User-Maschine):
+
+```
+# 1. setup vault + workspace once
+export CLAUDE_OS_VAULT_PATH=/path/to/vault
+claude-os workspace use personal
+
+# 2. write a few notes
+echo "Migration runs Sonntag 0300. Affects all DCs." | claude-os save-note migration-sun-0300.md --from-stdin --type session
+
+# 3. ask with vault-context
+claude-os ask "when is the migration?"
+  # -> claude.exe gets composed prompt with the note above as context
+  # -> answers using injected note
+```
+
+### Was bewusst nicht hier landet (folgt in 2f)
+
+- **GUI: Workspace-Indicator widget + Save-as-Note button** → Phase 2f
+- **Sidecar-RPC `workspace.*` / `notes.save` / `retrieval.search`** → Phase 2f
+- **Tauri-event auf workspace-switch** → Phase 2f
+- **Multi-turn / conversation-state** → Phase 6 (PTY-chat)
+- **stdin-pipe-Mode für längere prompts** → v1.x bei Bedarf
+- **Clipboard-source für save-note** → v1.x bei Reibung
