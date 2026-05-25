@@ -16,6 +16,11 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+# Phase 8 — Auto-Update per ADR-0028. Inactive by default
+# (tauri.conf.json plugins.updater.active=false); enable in your fork
+# after generating a signing keypair via `tauri signer generate` and
+# replacing the pubkey placeholder. See docs/tauri-updater-setup.md.
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "process", "sync", "time"] }

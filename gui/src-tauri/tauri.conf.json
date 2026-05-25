@@ -39,6 +39,20 @@
     "resources": ["binaries/node-pty/**/*"],
     "category": "DeveloperTool",
     "shortDescription": "claude-os desktop shell",
-    "longDescription": "Tauri shell for claude-os — vault sync, catalog, agent runs, secrets."
+    "longDescription": "Tauri shell for claude-os — vault sync, catalog, agent runs, secrets.",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "active": false,
+      "endpoints": [
+        "https://github.com/yannikits/Claude-portable/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE-WITH-BASE64-PUBKEY-FROM-tauri-signer-generate",
+      "dialog": false,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
