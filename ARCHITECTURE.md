@@ -39,12 +39,36 @@ Claude-portable/                      # Public, MIT, dieses Repo
 │   ├── gitnexus.md                   # Code-Intelligence-Workflow
 │   └── ...                           # weitere Docs
 ├── src/
-│   ├── core/                         # Provider-Bridge, Session, Compression
+│   ├── core/
+│   │   ├── audit/                    # Append-only JSONL audit-log (Phase 6 foundation)
+│   │   ├── config/                   # .env loader + AppEnv (Phase 2a)
+│   │   ├── doctor/                   # Self-diagnostic checks
+│   │   ├── environment/              # claude-os-root resolver (ADR-0002)
+│   │   ├── git-metadata/             # External git-dir migrator
+│   │   ├── logging/                  # pino factory + redact-paths
+│   │   ├── paths/                    # Platform-aware per-machine paths
+│   │   ├── schemas/                  # TypeBox environment-manifest
+│   │   └── validation/               # TypeBox/Ajv error formatter
 │   ├── domains/                      # DDD bounded contexts
-│   │   ├── claude-bridge/            # Anthropic-Integration
-│   │   └── vault-sync/               # Obsidian-Sync + FTS5
+│   │   ├── agent-runs/               # JSONL agent-run log + index
+│   │   ├── ask/                      # Prompt-Composer für claude.exe-Delegation (Phase 2e)
+│   │   ├── auth/                     # Anthropic CLI auth state-check (ADR-0011)
+│   │   ├── catalog/                  # Skill/Plugin/MCP marketplace + lock
+│   │   ├── claude-bridge/            # Anthropic-claude.exe-Bridge (ADR-0003)
+│   │   ├── mcp-clients/              # MCP-Server-Watcher + Trust-Store (ADR-0024)
+│   │   ├── memory-index/             # sql.js FTS4 + indexer + watcher + search (Phase 3)
+│   │   ├── notes/                    # Frontmatter-validated Markdown-Notes (Phase 2b)
+│   │   ├── retrieval/                # BM25 linear-scan + fallback dispatcher (Phase 2c+3e)
+│   │   ├── scheduler/                # Cron-style scheduler (v1.5)
+│   │   ├── secrets/                  # KeyringStore + EncryptedFileStore (ADR-0004)
+│   │   ├── skill-lifecycle/          # Lessons-reader + draft-generator (Phase 5 foundation)
+│   │   ├── skills/                   # SKILL.md loader + BM25 matcher (Phase 4)
+│   │   ├── tenant/                   # Tenant-Isolation guards (Phase 6 foundation per ADR-0027)
+│   │   ├── update-orchestrator/      # Tiered auto-update (ADR-0005)
+│   │   ├── vault-sync/               # Branch-aware snapshot-sync (obsidian-git-pattern)
+│   │   └── workspace/                # Multi-Workspace per ADR-0031 (Phase 2a)
 │   ├── mcp/                          # MCP-Server + Tool-Registry
-│   ├── sidecar/                      # Tauri-Sidecar-Bridge
+│   ├── sidecar/                      # Tauri-Sidecar-Bridge (JSON-RPC NDJSON)
 │   └── cli/                          # Commander-Entrypoints
 ├── gui/                              # Tauri (src-tauri/ + Vite-Frontend)
 ├── workspace/
@@ -71,17 +95,43 @@ MSP-Bridges und House-Watch konsumieren `Claude-portable` als npm-Dependency ode
 
 ## 3. Domain Boundaries (DDD)
 
-| Context | Repo | Verantwortung | Externe Dependencies |
-|---|---|---|---|
-| `claude-bridge` | public | Anthropic + MCP | `@anthropic-ai/sdk`, MCP-SDK |
-| `vault-sync` | public | Obsidian-Vault als Memory | filesystem, sql.js |
-| `mcp` | public | MCP-Server, Tool-Registry | `@sinclair/typebox` |
-| `sidecar` | public | Tauri-Sidecar-IPC | Tauri runtime |
-| `cli` | public | Commander-Subcommands | (keine cross-domain) |
-| `tanss-bridge` etc. | **private MSP-Repo** | API-Clients mit Approval-Gates | `SECURITY.md`-Compliance |
-| `house-watch` | **private House-Repo** | Immobilien-Crawler | defuddle, eigene Parser |
+### Core (`src/core/*`)
 
-**Regel:** Domains rufen einander nur über definierte Public-Interfaces an. Keine direkten Datenstruktur-Imports zwischen `domains/*`.
+| Context | Verantwortung | Externe Dependencies |
+|---|---|---|
+| `audit` | Append-only JSONL audit-log per UTC-day, file mode 0o600 (Phase 6 foundation per ADR-0027 + SECURITY.md §4) | (none — pure fs + os.hostname) |
+| `config` | `.env`-Loader via dotenv, typed `AppEnv` view of `CLAUDE_OS_VAULT_PATH` etc. (Phase 2a) | `dotenv` |
+| `doctor` | 5-Check self-diagnostic suite (Mount, Node-Version, Git, bin/claude, Schreibrechte) | (none) |
+| `environment` | `claude-os-root` resolver via marker/env/repo-detect, cloud-provider detection (ADR-0002) | `simple-git` (in git-metadata) |
+| `logging` | pino factory mit Redaction-Path-Liste (Pflicht-Code-Review-Gate für neue paths) | `pino` |
+| `paths` | Platform-aware per-machine paths (`%APPDATA%/claude-os/` vs `~/.config/claude-os/`) | (none) |
+| `validation` | TypeBox/Ajv error formatter (JSON-Pointer → dotted-bracket) | `@sinclair/typebox` |
+
+### Domains (`src/domains/*`)
+
+| Context | Repo | Verantwortung | Phase / ADR |
+|---|---|---|---|
+| `agent-runs` | public | JSONL agent-run log + index | (existing) |
+| `ask` | public | Prompt-Composer für claude.exe-Delegation: query + retrieval-hits → composed prompt | Phase 2e (ADR-0003) |
+| `auth` | public | Anthropic-CLI Auth State-Check, Multi-Profile via `$ANTHROPIC_CONFIG_DIR` | ADR-0011 |
+| `catalog` | public | Skill/Plugin/MCP Marketplace + Lock | (existing) |
+| `claude-bridge` | public | Anthropic-`claude.exe`-Subprocess-Bridge: spawn lifecycle, heartbeat, SIGINT-grace, secrets-strip | ADR-0003 + ADR-0021 |
+| `mcp-clients` | public | MCP-Server-Watcher + Trust-Store (Acknowledge-Modal) | ADR-0024 |
+| `memory-index` | public | sql.js FTS4 + indexer + chokidar-watcher + BM25-search drop-in | Phase 3 (ADR-0025) |
+| `notes` | public | Frontmatter-validated Markdown-Notes (TypeBox-Schema) — read lenient, write strict | Phase 2b (ADR-0031) |
+| `retrieval` | public | Phase-2c BM25 linear-scan + Phase-3e fallback-dispatcher (FTS-first, linear-fallback) | Phase 2c/3e |
+| `scheduler` | public | Cron-style scheduler runner | (existing) |
+| `secrets` | public | KeyringStore + EncryptedFileStore (AES-256-GCM, PBKDF2-SHA-256 600k) | ADR-0004 |
+| `skill-lifecycle` | public | Lessons-Reader (`tasks/lessons.md`) + Draft-Generator (`_drafts/` bucket). Sandbox/Signature/Review-UI gated. | Phase 5 (ADR-0026) |
+| `skills` | public | Workspace-scoped SKILL.md Loader + BM25 Description-Matcher. Strict skill-name validation refuses malicious paths. | Phase 4 |
+| `tenant` | public | `TenantContext` resolver + `assertActiveTenant` / `assertNoActiveTenant` guards. Bridge-Calls in `claude-os-msp` importieren das hier. | Phase 6 foundation (ADR-0027 + ADR-0031) |
+| `update-orchestrator` | public | Tiered auto-update mit Backup + Diff-Review + Resumable-Checklist | ADR-0005 |
+| `vault-sync` | public | Branch-aware Snapshot-Sync für Vault (obsidian-git-Pattern), 3-Modi Conflict-Policy | (existing) |
+| `workspace` | public | Multi-Workspace per ADR-0031: paths, vault-resolver, atomic active-state, audit-log shim | Phase 2a (ADR-0031) |
+| `tanss-bridge` / `ninja-bridge` / `veeam-bridge` / `m365-bridge` / `securepoint-bridge` | **private MSP-Repo `claude-os-msp`** | API-Clients mit Approval-Gates (Phase 6 read, Phase 7 write). Importieren `audit` + `tenant` aus Public-Core. | ADR-0027 + ADR-0030 |
+| `house-watch` | **private House-Repo** | Immobilien-Crawler | ADR-0030 |
+
+**Regel:** Domains rufen einander nur über definierte Public-Interfaces an. Keine direkten Datenstruktur-Imports zwischen `domains/*`. Private MSP/House-Repos konsumieren `Claude-portable` als npm-Dependency oder Git-Submodule — **niemals umgekehrt** (Public-Core kennt keine Customer-Internals).
 
 ## 4. AI-Layer (Claude-Bridge)
 
