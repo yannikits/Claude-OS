@@ -16,6 +16,7 @@ import type { WatcherHandle } from '../domains/mcp-clients/index.js';
 import type { readSchedules } from '../domains/scheduler/index.js';
 import type { loadVaultConfig } from '../domains/vault-sync/index.js';
 import type { ChatSessions } from './chat-sessions.js';
+import type { MemoryIndexService } from './memory-index-service.js';
 import { type MethodsContext, rootPath } from './methods/_shared.js';
 import { registerAgentMethods } from './methods/agent.js';
 import { registerAuthMethods } from './methods/auth.js';
@@ -23,6 +24,7 @@ import { registerCatalogMethods } from './methods/catalog.js';
 import { registerChatMethods } from './methods/chat.js';
 import { registerInboxMethods } from './methods/inbox.js';
 import { registerMcpMethods } from './methods/mcp.js';
+import { registerMemoryMethods } from './methods/memory.js';
 import { registerNotesMethods } from './methods/notes.js';
 import { registerPtyMethods } from './methods/pty.js';
 import { registerRetrievalMethods } from './methods/retrieval.js';
@@ -50,6 +52,8 @@ interface MethodOpts {
    * omitted (e.g. tests), notifications are dropped silently.
    */
   readonly emit?: (method: string, params: unknown) => void;
+  /** Optional MemoryIndexService (Phase 3f) — memory.* RPCs only when provided. */
+  readonly memoryIndex?: MemoryIndexService;
 }
 
 export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}): void {
@@ -112,4 +116,8 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
   registerWorkspaceMethods(dispatcher, opts.emit ?? (() => {}));
   registerNotesMethods(dispatcher);
   registerRetrievalMethods(dispatcher);
+
+  // Phase 3f (Memory FTS). Memory.* RPCs only registered when the sidecar
+  // has actually booted a MemoryIndexService (vault-configured + db open).
+  if (opts.memoryIndex !== undefined) registerMemoryMethods(dispatcher, opts.memoryIndex);
 }

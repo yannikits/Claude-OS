@@ -6,6 +6,7 @@ import { McpTrustStore, mcpTrustPathFor, startMcpWatcher } from '../domains/mcp-
 import { startScheduler } from '../domains/scheduler/index.js';
 import { ChatSessions } from './chat-sessions.js';
 import { createSidecarLogger } from './logger.js';
+import { MemoryIndexService } from './memory-index-service.js';
 import { registerMethods } from './methods.js';
 import { PtyChatSessions } from './pty-chat-sessions.js';
 import { RpcDispatcher, runRpcServer } from './rpc.js';
@@ -128,6 +129,20 @@ logger.info(
   'sidecar: mcp watcher started (tick 60s, probe-timeout configurable)',
 );
 
+// Memory-index service (Phase 3f). Lazy-tolerant: if CLAUDE_OS_VAULT_PATH
+// is unset or the DB is corrupt, the service stays in "disabled" mode
+// and memory.* RPCs return enabled:false. Boot never fails because of
+// an unconfigured vault.
+const memoryIndexService = new MemoryIndexService({
+  log: (level, msg) => {
+    const bound = logger.child({ component: 'memory-index' });
+    if (level === 'error') bound.error(msg);
+    else if (level === 'warn') bound.warn(msg);
+    else bound.info(msg);
+  },
+});
+await memoryIndexService.start();
+
 dispatcher.register('shutdown', () => {
   queueMicrotask(async () => {
     logger.info('sidecar: shutdown requested via RPC');
@@ -136,6 +151,7 @@ dispatcher.register('shutdown', () => {
     await schedulerHandle.stop();
     await mcpWatcherHandle.stop();
     await watchers?.close();
+    await memoryIndexService.stop();
     process.exit(0);
   });
   return { ok: true };
@@ -146,6 +162,7 @@ registerMethods(dispatcher, {
   ...(ptyChatSessions !== null ? { ptyChatSessions } : {}),
   mcpWatcher: mcpWatcherHandle,
   emit: emitNotification,
+  memoryIndex: memoryIndexService,
 });
 
 await runRpcServer({ dispatcher });
@@ -155,5 +172,6 @@ await ptyChatSessions?.shutdownAll();
 await schedulerHandle.stop();
 await mcpWatcherHandle.stop();
 await watchers?.close();
+await memoryIndexService.stop();
 logger.info('sidecar: RPC channel closed, exiting');
 process.exit(0);
