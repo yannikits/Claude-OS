@@ -1057,3 +1057,77 @@ npx vitest run            995/998 grün, 3 skipped (long-running gated)
 - **GUI save-as-note + RPC** → Phase 2f
 - **FTS5-Index** → Phase 3 (eigene ROADMAP-phase)
 - **Sub-dir layout** (`Sessions/YYYY/MM/`) → v1.x
+
+---
+
+## Phase 2c (ROADMAP) — Linear-Scan-Retrieval (2026-05-25)
+
+**Quelle:** `ROADMAP.md` §Phase-2 (Memory MVP), Sub-Phase 2c per Plan vom 2026-05-25.
+**Branch:** `feature/phase-2c-linear-retrieval`.
+**Aufbauend auf:** Phase 2a (workspace) + 2b (notes).
+
+**Anlass:** MVP-Workflow §3 (Top-K-Retrieval). BM25-ranked Linear-Scan über workspace-Notes als v1-Fallback bevor Phase 3 (FTS5 + watchdog, ADR-0025) kommt. Failure-Mode-Design (ARCHITECTURE.md §8 "FTS-Index korrupt → Linear-Scan als Fallback") — derselbe Algorithmus wird also auch der safety-net für Phase 3+.
+
+### Geliefert
+
+| Bereich | Files |
+|---|---|
+| Types | `src/domains/retrieval/types.ts` (RetrievalQuery, RetrievalHit, RetrievalResult, RetrievalError) |
+| Tokeniser | `src/domains/retrieval/tokenizer.ts` (Unicode-aware via `\p{L}\p{N}`, lowercase, min-length 2, dedupe-helper) |
+| BM25-Scorer | `src/domains/retrieval/scorer.ts` (pure: `buildCorpusStats`, `buildDocStats`, `bm25Score` mit k1=1.5, b=0.75 Lucene-defaults) |
+| Linear-Scan | `src/domains/retrieval/linear-scan.ts` (`searchWorkspace`: listNotes → tokenise body+tags+type → BM25 → top-K) |
+| Index | `src/domains/retrieval/index.ts` (public exports) |
+| Tests | `tests/domains/retrieval/{tokenizer,scorer,linear-scan}.test.ts` — **29 neue Tests, 1024/1027 grün** (3 skipped long-running gated) |
+
+### Algorithmus-Details
+
+BM25 (Okapi) Ranking-Variante, single-doc-formula:
+
+```
+score(doc, query) = Σ q∈query: IDF(q) · TF(q,doc)·(k1+1) / (TF(q,doc) + k1·(1 − b + b·dl/avgdl))
+IDF(q) = ln( (N − df(q) + 0.5) / (df(q) + 0.5) + 1 )
+```
+
+- `k1=1.5` (TF-saturation), `b=0.75` (length-normalisation) — Lucene/Elasticsearch-Standard
+- Duplicate query-terms zählen einmal (BM25-konform — IDF·TF im Doc tut die Amplifikation, nicht Query-Repetition)
+- Indexable text = `body` + `frontmatter.tags.join(' ')` + `frontmatter.type` (Metadata wie classification/timestamps NICHT indexed)
+- Default `excludeClassifications: ['ephemeral']` (disposable notes nicht im default-recall — explizit overridable)
+
+### Tokeniser-Details
+
+`\p{L}\p{N}_` (Unicode letters + numbers + underscore) mit `u` flag — bewahrt deutsche Umlaute (`über`, `groß`, `Räume`) statt sie naive `[a-z0-9]` zu strippen. Min-length 2 dropt kurze Particles ("a", "I"). Lowercase normalisiert case. **Keine Stopwords** — BM25-IDF down-weighted high-df-terms strukturell.
+
+### Sicherheits-/Design-Entscheidungen
+
+- **Pure scorer** (`scorer.ts` ohne I/O) — Tests können numerisches BM25-Verhalten direkt pinnen (rare > common, shorter > longer, more-TF > less-TF, dup-query-noop). 7 algorithmic asserts gegen synthetic doc-fixtures.
+- **Workspace-Isolation strukturell** — `searchWorkspace(vault, ws, query)` nimmt EINEN workspace. Cross-workspace-search ist explicit caller-loop, NIE automatisch (ADR-0031 §FTS5-Query-Always-Filtered). Schützt gegen accidental Tenant-Leak.
+- **Listenfehler-tolerant** — `listNotes` skipt malformed notes silent (Phase-2b-Pattern). Retrieval profitiert davon: eine broken YAML rotzt nicht die ganze query weg.
+- **Recursive opt-in** — `query.recursive: true` falls Phase-2b ever sub-dir-Layout (`Sessions/YYYY/MM/`) bekommt. Default `false` für MVP-Simplicity.
+- **Empty-query graceful** — query die zu 0 tokens tokenisiert returnt `{hits: []}`, kein throw. Caller kann "query too short" rendern.
+- **durationMs + totalScanned exposed** — Diagnostik für CLI/GUI ("scanned 47 notes in 12ms, 3 hits").
+
+### v1-Abweichungen (transparent)
+
+- **Keine Stopword-Listen** — BM25-IDF dämpft das natürlich. Wenn deutsche/englische stop-words später doch needed sind (kleine Corpora), kann ein optionaler stopword-set-param in `tokenize` dazu.
+- **Kein Recency-Boost** — ARCHITECTURE.md §5.4 erwähnt Recency als Ranking-Faktor. v1 schiebt das auf Phase 3+ (zusammen mit Source-Type + Classification-Trust). Pure-BM25 ist sauberer baseline.
+- **Linear-Scan ohne caching** — jeder Query liest alle notes neu. Bei kleinen Vaults (~hundreds) trivial. Bei großen Vaults bringt Phase 3 (FTS5 + watchdog-trigger) die Beschleunigung.
+- **Body + tags + type only indexed** — heading-weighting (h1 > h2 > body) ist Phase 3+ wenn überhaupt. Pure-bag-of-words für MVP.
+- **`uniqTokens`-Helper exposed** aber nicht intern verwendet — public-API für künftige Caller (e.g. CLI ask command will queries dedupen vor Display).
+
+### Verifikation
+
+```
+npx tsc --noEmit          exit 0
+npx biome ci .            0 errors, 0 warnings (nach auto-fix-pass für import-ordering + 1 line)
+npx vitest run            1024/1027 grün, 3 skipped (long-running gated)
+                          neue tests: tokenizer 9 + scorer 11 + linear-scan 9 = 29
+```
+
+### Was bewusst nicht hier landet (folgt in 2d–2f + Phase 3)
+
+- **MVP-DoD-Drift §4 fix** → Phase 2d
+- **CLI `claude-os ask`** (composer: query → retrieval → prompt-template → claude.exe-delegation) → Phase 2e
+- **CLI `claude-os save-note`** + GUI save-as-note + RPC → Phase 2e + 2f
+- **FTS5-Index + watchdog** → Phase 3 (ADR-0025)
+- **Recency-Boost + Classification-Trust-Weighting** → Phase 3+
+- **Embedding-basiertes Semantic-Search** → kein ADR, kein Plan — wenn überhaupt v2
