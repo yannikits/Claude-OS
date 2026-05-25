@@ -13,6 +13,26 @@ Format pro Eintrag:
 
 ---
 
+## 2026-05-25 — Literal-space in JS regex char-class wird zu NUL-Byte umgewandelt
+
+**Situation:** Beim Schreiben von `src/domains/notes/paths.ts` (Phase 2b) habe ich einen Filename-Validation-Regex `/[\\/: ]/` angelegt — mit echtem Space-Zeichen zwischen `:` und `]`. Test `'has space.md'` failte. Lokale REPL bestätigte: der Regex sollte das Space matchen. Untersuchung mit `node -e` zeigte die echten Bytes im File: codepoint 0 (NUL) statt codepoint 32 (Space). Das `Read`-Tool zeigte den Inhalt mit Space (NUL → Space normalisiert für display), während der Compiler/Runtime die echten Bytes las und der Regex damit nur `\, /, :, NUL` matchte. Folgefehler: `Edit`-Tool kann ein old_string mit Space nicht matchen wenn die file echte NUL-bytes hat — das macht in-place-fix unmöglich, das ganze File muss mit `Write` neu geschrieben werden.
+
+**Lektion:** Niemals **nackten Space innerhalb eines JS-Regex-Character-Class** verlassen (z.B. `[abc ]`). Im Write-/Edit-Tool-Pipeline kann der einzelne Space ohne Vorwarnung durch ein NUL-Byte ersetzt werden. Defensiv immer `\s` (whitespace shorthand) oder `\x20` (explizite codepoint 32 escape sequence) verwenden:
+
+```ts
+// Schlecht — kann silently zu /[\\/:\x00]/ mutieren
+const BAD = /[\\/: ]/;
+
+// Gut — explizite escapes überleben die write-pipeline
+const GOOD = /[\\/:\s\x00]/;
+```
+
+Zweite Verteidigungslinie: bei Validation-Regexen IMMER mit `node -e "console.log([...source.slice(start,end)].map(c=>c.charCodeAt(0)))"` die echten Bytes auf der Disk verifizieren, wenn ein Match unerwartet failt. `Read`-Tool-Anzeige ist nicht byte-treu. Bei Verwendung von `\x00` (oder anderen control chars) muss `// biome-ignore lint/suspicious/noControlCharactersInRegex: <reason>` davor.
+
+**Anwendung:** Jeder neue Regex mit Character-Class. Besonders in Validation-Pfaden (filenames, ids, paths) wo silent-bypass eine Security-Implikation hat. Eigene mini-rule für Edit-/Write-pipelines: nie `' '` (literal space) als einzelnes Zeichen in semantisch-relevantem Kontext — immer durch escape (`\s`, `\x20`) ersetzen.
+
+---
+
 ## 2026-05-24 — PowerShell `-LiteralPath` ignoriert Wildcards beim Copy-Item
 
 **Situation:** Beim Konsolidieren eines orphan `Claude-Knowledge/`-Ordners (vom Knowledge-Miner an pre-migration-Pfad geschrieben) zurück in den post-migration-Pfad: `Copy-Item -LiteralPath "$rootCK\*" -Destination $migCK -Recurse -Force`. Das `*` wurde literal interpretiert — `-LiteralPath` schaltet Wildcard-Expansion ab. Copy-Item suchte nach einem Eintrag namens `*` und fand keinen ("Cannot find path … because it does not exist"). Direkt danach lief `Remove-Item -LiteralPath $rootCK -Recurse -Force` **ohne Exit-Code-Check** und löschte den Quell-Ordner trotzdem. Daten-Recovery nur möglich, weil der Miner deterministisch ist — re-mine schrieb den Inhalt an die korrekte Stelle. Bei nicht-reproduzierbarem Inhalt wäre das Datenverlust gewesen.

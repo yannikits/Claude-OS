@@ -992,3 +992,68 @@ npx vitest run            942/945 grün, 3 skipped (long-running gated)
 - **Linear-Scan-Retrieval** → Phase 2c
 - **Workspace-mutation via Sidecar-RPC** → Phase 2f (GUI)
 - **ARCHITECTURE.md §4 'Wrapper-Timeout' Drift** — auch fehlerhaft (widerspricht Memory 569/577/578 wie der Phase-1-ROADMAP-Eintrag). Eigene mini-PR.
+
+---
+
+## Phase 2b (ROADMAP) — Notes-Domain mit Frontmatter (2026-05-25)
+
+**Quelle:** `ROADMAP.md` §Phase-2 (Memory MVP), Sub-Phase 2b per Plan vom 2026-05-25.
+**Branch:** `feature/phase-2b-notes-frontmatter`.
+**Aufbauend auf:** Phase 2a (workspace-domain).
+
+**Anlass:** Notes-IO mit Frontmatter-Pflicht (ADR-0031 + ARCHITECTURE.md §5.2). Retrieval (2c) braucht parsed Notes; CLI `save-note` (2e) und GUI (2f) brauchen `writeNote`.
+
+### Geliefert
+
+| Bereich | Files |
+|---|---|
+| Types + Errors | `src/domains/notes/types.ts` (NoteClassification union, NoteType union, NoteFrontmatter open-shape, Note, 4 Error-Klassen) |
+| TypeBox-Schema | `src/domains/notes/frontmatter-schema.ts` (`WriteFrontmatterSchema`, `validateWriteFrontmatter` mit conditional tenant-Pflicht für msp-customers) |
+| Parser | `src/domains/notes/parser.ts` (eigener mini-extractFrontmatter via line-split + `yaml@^2.9.0` für YAML — kein gray-matter wegen js-yaml@3-Altlast) |
+| Paths | `src/domains/notes/paths.ts` (assertValidNoteFilename mit Windows-reserved-Names + traversal-refuse, ensureWorkspaceDir lazy-bootstrap, noteFilePath) |
+| Reader | `src/domains/notes/reader.ts` (lenient defaults per ARCHITECTURE.md §5.2 fail-safe: missing classification → customer-confidential, missing workspace → `_unsorted`, missing schema_version → 1) |
+| Writer | `src/domains/notes/writer.ts` (atomic tempfile+rename, validates strict, stamps created/updated, force workspace-id consistency) |
+| Index | `src/domains/notes/index.ts` (public exports) |
+| Tests | `tests/domains/notes/{parser,paths,writer,reader}.test.ts` — **53 neue Tests, 995/998 grün** (3 skipped long-running gated) |
+
+### Sicherheits-/Design-Entscheidungen
+
+- **Frontmatter ist open** (`additionalProperties: true` im TypeBox-Schema) — User kann beliebige extra-keys nutzen ohne schema-bump. Pflicht-Fields (workspace, classification, schema_version) sind strict.
+- **Tenant-Pflicht conditional**: nur wenn `workspace.startsWith('msp-customers/')`. Custom assertion nach TypeBox-Check, da TypeBox JSON-Schema kein cross-field-conditional supportet ohne Disjunctions.
+- **Filename-Validation strict**: refuse `\`, `/`, `:`, whitespace, NUL, dot-files, Windows-reserved-Stems (CON/PRN/NUL/AUX/COM1-9/LPT1-9), Längen-Limit 255. 8 reject-cases getestet.
+- **NUL-byte im char-class als path-injection defense** — biome-ignore-Annotation für `noControlCharactersInRegex` (intentional). Plus Lesson 2026-05-25 (siehe `lessons.md`) zum Space→NUL-pipeline-bug.
+- **Atomic write** via tempfile-+ rename mit pid-+ timestamp-suffix. POSIX rename-Atomicity + NTFS-transactionalität garantieren no-half-written-files.
+- **Lenient read, strict write**: read defaultet alle missing pflicht-fields auf fail-safe-werte (classification → customer-confidential per ARCHITECTURE.md §5.2). Write validiert immer. Migration-safe für legacy/v0-Notes ohne Frontmatter.
+- **Reader skipt malformed silently in listNotes** (try/catch pro Datei). Eine corrupted YAML soll die ganze Liste nicht töten. readNote(filePath) bleibt throwing für single-note-views.
+- **Lazy workspace-dir creation**: `ensureWorkspaceDir` mit `mkdir -p` beim ersten Write. Kein leerer dir bevor was reingeschrieben wird. ADR-0031-Default `personal` braucht keinen on-disk-dir bis tatsächlich gespeichert wird.
+- **No gray-matter dep**: gray-matter@4 bringt js-yaml@3 mit (legacy, unmaintained seit 2019). Eigener mini-parser (~70 LOC) + `yaml@2` (zero-deps, maintained) ist sauberer.
+
+### Gotcha + Recovery (Lesson 2026-05-25)
+
+Erster Implementierungsversuch nutzte literal-space im Regex `/[\\/: ]/`. Write-pipeline ersetzte das Space silently durch NUL-byte (codepoint 0). Test `'has space.md'` failte trotz korrekt-aussehendem source. Recovery: Read-tool zeigt Bytes normalisiert (NUL → Space) — debugging musste über `node -e "...charCodeAt(0)..."` auf raw FS gehen. Fix: `\s\x00` statt nacktem space (überlebt write-pipeline). Lesson in `tasks/lessons.md` eingetragen.
+
+### v1-Abweichungen (transparent)
+
+- **`yaml@2` direkt statt gray-matter** — gray-matter ist seit 2019 unmaintained und schleppt js-yaml@3 mit. yaml@2 ist 0-dep + active. Ein-Funktionen-mini-extractFrontmatter ist trivial.
+- **`_unsorted` als virtueller Workspace** — Notes ohne `workspace`-frontmatter landen darunter. Reader-only (kein write-target), GUI kann später einen "fixme bucket"-View darauf bauen.
+- **Keine Frontmatter-Migration** — `schema_version: 1` ist der erste version. Phase 2c+ retrieval kann v1-only annehmen. Migrations-Hooks bauen wir wenn v2 kommt.
+- **Filename ohne sub-paths** — `<vault>/Claude-OS/workspaces/<ws>/<filename>.md` direkt, keine `Sessions/YYYY/MM/`-sub-dirs. ARCHITECTURE.md §5.1 zeigt sub-dirs aber dokumentiert sie nicht als pflicht. v1.x kann die einführen.
+- **Reader optional recursive** — `listNotes(vault, ws, {recursive: true})` für künftige sub-dir-Layouts (Sessions/...). Default top-level für MVP-Simplicity.
+
+### Verifikation
+
+```
+npx tsc --noEmit          exit 0
+npx biome ci .            0 errors, 0 warnings (1 biome-ignore-comment für \x00)
+npx vitest run            995/998 grün, 3 skipped (long-running gated)
+                          neue tests: parser 14 + paths 16 + writer 9 + reader 9 = 48
+                          + die paths-it.each rejects als individual cases = 53 total
+```
+
+### Was bewusst nicht hier landet (folgt in 2c–2f)
+
+- **Linear-Scan-Retrieval** (read alle workspace-notes, term-overlap-score, top-K) → Phase 2c
+- **CLI `claude-os ask` / `save-note`** workflow-glue → Phase 2e
+- **GUI save-as-note + RPC** → Phase 2f
+- **FTS5-Index** → Phase 3 (eigene ROADMAP-phase)
+- **Sub-dir layout** (`Sessions/YYYY/MM/`) → v1.x
