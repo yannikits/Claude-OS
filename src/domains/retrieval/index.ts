@@ -5,6 +5,12 @@
  * @module @domains/retrieval
  */
 
+export {
+  type DispatcherOpts,
+  type DispatcherResult,
+  type SearchKind,
+  searchWithFallback,
+} from './dispatcher.js';
 export { searchWorkspace } from './linear-scan.js';
 export {
   type Bm25Params,

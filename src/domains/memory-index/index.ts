@@ -29,6 +29,7 @@ export {
   SCHEMA_SQL,
   STAMP_VERSION_SQL,
 } from './schema.js';
+export { searchIndex } from './search.js';
 export {
   IndexCorruptError,
   type IndexedDocument,
@@ -36,3 +37,9 @@ export {
   MEMORY_INDEX_SCHEMA_VERSION,
   MemoryIndexError,
 } from './types.js';
+export {
+  type MemoryWatcherHandle,
+  type MemoryWatcherOpts,
+  type MemoryWatcherStats,
+  startMemoryIndexWatcher,
+} from './watcher.js';
