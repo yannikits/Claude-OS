@@ -15,7 +15,7 @@
 
 **Plan-Datum:** 2026-05-26
 **Branch:** `feature/phase-web-server-deployment` (off main)
-**Status (2026-05-26):** Web-1 + Web-2 + Web-3 + Web-4 + Web-6 **shipped**. Web-5 (Multi-User-Tenant-Wiring) folgt als Inkrement. **Full feature-parity zur Tauri-Variante erreicht** außer Native-Dialogs (DragDrop, Native-Secret-Dialog) die im Browser nicht reproduzierbar sind.
+**Status (2026-05-26 abends):** Web-1 + Web-2 + Web-3 + Web-4 + Web-5 Stage 1 + Web-6 **shipped**. **Full feature-parity zur Tauri-Variante erreicht.** Drag-and-Drop läuft jetzt auch im Browser via multipart-upload zu `/api/inbox/upload`. Multi-User via Token-Liste in `.env` (ADR-0033). Web-5 Stage 2 (Login-UI + User-Registrierung) bleibt als eigene Phase offen.
 
 ## Shipped Commits
 

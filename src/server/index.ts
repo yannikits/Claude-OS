@@ -26,9 +26,9 @@ import { PtyChatSessions } from '../sidecar/pty-chat-sessions.js';
 import { RpcDispatcher } from '../sidecar/rpc.js';
 import { type InboxOutboxWatchers, setupWatchers } from '../sidecar/watchers.js';
 
-import { makeAuthHook } from './auth.js';
+import { makeAuthHook, parseTokenList } from './auth.js';
 import { createNotificationBus, registerSseRoute } from './events-sse.js';
-import { registerRpcRoutes } from './rpc-http.js';
+import { registerInboxUpload, registerRpcRoutes } from './rpc-http.js';
 import { registerStaticRoutes } from './static.js';
 import type { ServerConfig } from './types.js';
 import { registerPtyWebSocket } from './ws-pty.js';
@@ -175,14 +175,27 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
   fastify.get('/healthz', async () => ({ ok: true, ts: Date.now() }));
 
   // Gate every /api/* route behind Bearer-Token auth. The hook runs before
-  // route handlers and short-circuits with 401 on rejection.
-  const authHook = makeAuthHook(config.authToken);
+  // route handlers and short-circuits with 401 on rejection. Multi-User
+  // Stage 1: the env-var may carry a comma-separated list of valid tokens
+  // (ADR-0033); the matched token's hash becomes req.tenant.
+  const expectedTokens = parseTokenList(config.authToken);
+  if (expectedTokens.length === 0) {
+    throw new Error('server: authToken parsed to empty list after CSV split');
+  }
+  log.info(
+    { tokenCount: expectedTokens.length },
+    expectedTokens.length === 1
+      ? 'server: single-user auth (1 token)'
+      : `server: multi-user auth (${expectedTokens.length} tokens)`,
+  );
+  const authHook = makeAuthHook(expectedTokens);
   fastify.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     await authHook(req, reply);
   });
 
   registerRpcRoutes(fastify, dispatcher);
+  await registerInboxUpload(fastify, dispatcher);
   registerSseRoute(fastify, { bus, heartbeatMs: config.sseHeartbeatMs });
 
   // WebSocket bridge for interactive PTY sessions (Phase Web-3).

@@ -23,7 +23,7 @@ function buildApp(): {
     throw e;
   });
 
-  const authHook = makeAuthHook(TOKEN);
+  const authHook = makeAuthHook([TOKEN]);
   app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     await authHook(req, reply);

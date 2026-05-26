@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { setupBrowserDragDrop } from './lib/drag-drop';
 import {
   getAuthTransport,
   importToInbox,
@@ -175,6 +176,19 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
+
+    // Browser drag-drop — only attaches a listener in the HTTP build.
+    // The Tauri build keeps using its native files://dropped IPC below.
+    const unsubBrowserDnD = setupBrowserDragDrop(
+      () => {
+        const t = getAuthTransport();
+        return t !== null && t.hasAuth() ? sessionStorage.getItem('claude-os-token') : null;
+      },
+      ({ count }) => setLastDrop({ count, ts: Date.now() }),
+      (err) => console.error('browser drag-drop:', err),
+    );
+    unsubs.push(unsubBrowserDnD);
+
     onSidecarFailed(setFailure).then((u) => unsubs.push(u));
     onInboxChanged(setLastInbox).then((u) => unsubs.push(u));
     onOutboxChanged(setLastOutbox).then((u) => unsubs.push(u));

@@ -13,6 +13,10 @@ interface PtySpawnedFrame {
   type: 'spawned';
   sessionId: string;
 }
+interface PtyAttachedFrame {
+  type: 'attached';
+  sessionId: string;
+}
 interface PtyDataFrame {
   type: 'data';
   data: string;
@@ -27,7 +31,12 @@ interface PtyErrorFrame {
   code?: string;
   message: string;
 }
-type PtyServerFrame = PtySpawnedFrame | PtyDataFrame | PtyExitFrame | PtyErrorFrame;
+type PtyServerFrame =
+  | PtySpawnedFrame
+  | PtyAttachedFrame
+  | PtyDataFrame
+  | PtyExitFrame
+  | PtyErrorFrame;
 
 interface PtyEventPayload {
   sessionId: string;
@@ -45,8 +54,8 @@ interface PtyEventPayload {
 interface PtyChannel {
   ws: WebSocket;
   sessionId: string | null;
-  /** Resolves when the server confirms the spawn. */
-  pendingSpawn: { resolve: (id: string) => void; reject: (e: Error) => void } | null;
+  /** Resolves when the server confirms spawn OR attach. */
+  pendingBind: { resolve: (id: string) => void; reject: (e: Error) => void } | null;
   dataHandlers: Set<(payload: PtyEventPayload) => void>;
   exitHandlers: Set<(payload: PtyEventPayload) => void>;
 }
@@ -108,8 +117,8 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     } catch {
       /* nothing more to do */
     }
-    if (pty.pendingSpawn !== null) {
-      pty.pendingSpawn.reject(new Error('pty: ws closed before spawn confirmed'));
+    if (pty.pendingBind !== null) {
+      pty.pendingBind.reject(new Error('pty: ws closed before spawn confirmed'));
     }
     pty = null;
   }
@@ -124,7 +133,7 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     const channel: PtyChannel = {
       ws,
       sessionId: null,
-      pendingSpawn: null,
+      pendingBind: null,
       dataHandlers: new Set(),
       exitHandlers: new Set(),
     };
@@ -135,11 +144,11 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
       } catch {
         return;
       }
-      if (frame.type === 'spawned') {
+      if (frame.type === 'spawned' || frame.type === 'attached') {
         channel.sessionId = frame.sessionId;
-        if (channel.pendingSpawn !== null) {
-          const pending = channel.pendingSpawn;
-          channel.pendingSpawn = null;
+        if (channel.pendingBind !== null) {
+          const pending = channel.pendingBind;
+          channel.pendingBind = null;
           pending.resolve(frame.sessionId);
         }
       } else if (frame.type === 'data') {
@@ -166,9 +175,9 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
           }
         }
       } else if (frame.type === 'error') {
-        if (channel.pendingSpawn !== null) {
-          const pending = channel.pendingSpawn;
-          channel.pendingSpawn = null;
+        if (channel.pendingBind !== null) {
+          const pending = channel.pendingBind;
+          channel.pendingBind = null;
           pending.reject(new Error(`pty-ws: ${frame.code ?? 'error'}: ${frame.message}`));
         } else {
           console.error('pty-ws server error:', frame.code, frame.message);
@@ -177,8 +186,8 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     });
     ws.addEventListener('close', () => {
       if (pty === channel) pty = null;
-      if (channel.pendingSpawn !== null) {
-        channel.pendingSpawn.reject(new Error('pty: ws closed unexpectedly'));
+      if (channel.pendingBind !== null) {
+        channel.pendingBind.reject(new Error('pty: ws closed unexpectedly'));
       }
     });
     pty = channel;
@@ -220,14 +229,14 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     // the helper functions in rpc.ts work unchanged.
     if (method === 'pty.spawn') {
       const channel = ensurePtyChannel();
-      if (channel.pendingSpawn !== null || channel.sessionId !== null) {
+      if (channel.pendingBind !== null || channel.sessionId !== null) {
         throw new Error(
           'rpc-http: a pty session is already active on this transport — kill it first',
         );
       }
       const p = (params ?? {}) as { args?: readonly string[]; cols?: number; rows?: number };
       const spawnPromise = new Promise<string>((resolve, reject) => {
-        channel.pendingSpawn = { resolve, reject };
+        channel.pendingBind = { resolve, reject };
       });
       await sendPtyFrame({
         type: 'spawn',
@@ -236,6 +245,46 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
         ...(typeof p.rows === 'number' ? { rows: p.rows } : {}),
       });
       const sessionId = await spawnPromise;
+      return { sessionId } as T;
+    }
+
+    // auth.login spawns its PTY session server-side (not via WS), then
+    // returns {sessionId}. To receive the pty.data/exit stream on our
+    // WS, attach the WS to that session id right after the RPC succeeds.
+    if (method === 'auth.login') {
+      const res = await fetch('/api/rpc', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ method, params }),
+      });
+      if (res.status === 401) {
+        writeStoredToken(null);
+        token = null;
+        closeSse();
+        closePty();
+        throw new Error('rpc-http: 401 unauthorized — token cleared');
+      }
+      const body = (await res.json()) as
+        | { ok: true; result: { sessionId: string } }
+        | { ok: false; error: { code: string; message: string } };
+      if (!body.ok) {
+        throw new Error(`rpc-http: ${body.error.code}: ${body.error.message}`);
+      }
+      const sessionId = body.result.sessionId;
+
+      // Hook the WS to that session so pty.data + pty.exit can be
+      // forwarded to the AuthLoginModal's xterm.
+      const channel = ensurePtyChannel();
+      if (channel.sessionId === null) {
+        const attachPromise = new Promise<string>((resolve, reject) => {
+          channel.pendingBind = { resolve, reject };
+        });
+        await sendPtyFrame({ type: 'attach', sessionId });
+        await attachPromise;
+      }
       return { sessionId } as T;
     }
 

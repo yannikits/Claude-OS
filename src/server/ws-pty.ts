@@ -7,15 +7,18 @@
  *
  * Wire-protocol (JSON-encoded text frames):
  *  Client → Server:
- *    {type:'spawn', args?: string[], cols?: number, rows?: number}
- *    {type:'write', data: string}
+ *    {type:'spawn',  args?: string[], cols?: number, rows?: number}
+ *    {type:'attach', sessionId: string}  — bind WS to a session another RPC
+ *                                          spawned server-side (e.g. auth.login)
+ *    {type:'write',  data: string}
  *    {type:'resize', cols: number, rows: number}
  *    {type:'kill'}
  *  Server → Client:
- *    {type:'spawned', sessionId: string}
- *    {type:'data',    data: string}
- *    {type:'exit',    exitCode: number|null, signal: string|null}
- *    {type:'error',   message: string, code?: 'pty-disabled'|'spawn-failed'|...}
+ *    {type:'spawned',  sessionId: string}
+ *    {type:'attached', sessionId: string}
+ *    {type:'data',     data: string}
+ *    {type:'exit',     exitCode: number|null, signal: string|null}
+ *    {type:'error',    message: string, code?: 'pty-disabled'|'spawn-failed'|...}
  *
  * Implements ADR-0032 phase Web-3.
  *
@@ -43,6 +46,7 @@ interface ClientFrame {
   cols?: unknown;
   rows?: unknown;
   data?: unknown;
+  sessionId?: unknown;
 }
 
 interface RegisterPtyWsOptions {
@@ -213,11 +217,37 @@ export async function registerPtyWebSocket(
           return;
         }
 
+        if (type === 'attach') {
+          if (sessionId !== null) {
+            send({
+              type: 'error',
+              code: 'already-bound',
+              message: 'this WS is already bound to a session',
+            });
+            return;
+          }
+          if (typeof frame.sessionId !== 'string' || frame.sessionId.length === 0) {
+            send({
+              type: 'error',
+              code: 'invalid-params',
+              message: 'attach: sessionId must be a non-empty string',
+            });
+            return;
+          }
+          // No verification that the session actually exists here — if it
+          // doesn't, the bus filter just never matches and the client sees
+          // silence. PtyChatSessions itself enforces the ring-guard so
+          // bogus sessionIds cannot DoS us.
+          sessionId = frame.sessionId;
+          send({ type: 'attached', sessionId });
+          return;
+        }
+
         if (sessionId === null) {
           send({
             type: 'error',
             code: 'not-spawned',
-            message: 'send {type:"spawn"} first',
+            message: 'send {type:"spawn"} or {type:"attach"} first',
           });
           return;
         }
