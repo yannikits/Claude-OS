@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import {
+  getAuthTransport,
   importToInbox,
+  isTauriRuntime,
   onFilesDropped,
   onInboxChanged,
   onOutboxChanged,
@@ -23,6 +25,7 @@ import {
   SettingsPage,
   VaultPage,
 } from './pages';
+import { LoginPage } from './pages/login';
 import { MemoryPage } from './pages/memory';
 
 const NAV = [
@@ -87,7 +90,33 @@ function SidecarFailedBanner({ payload }: { payload: SidecarFailedPayload }) {
 
 const BANNER_TTL_MS = 5_000;
 
+/**
+ * Decide whether the user needs to authenticate.
+ *
+ * - Tauri build: the OS-local user-session IS the authentication; render
+ *   the app directly.
+ * - HTTP build: present `<LoginPage/>` until a token is stored in
+ *   sessionStorage; after a successful verify the gate flips to 'authed'.
+ */
+function useAuthGate(): { authed: boolean; markAuthenticated: () => void } {
+  const [authed, setAuthed] = useState<boolean>(() => {
+    if (isTauriRuntime()) return true;
+    const transport = getAuthTransport();
+    return transport !== null && transport.hasAuth();
+  });
+  return { authed, markAuthenticated: () => setAuthed(true) };
+}
+
 export function App() {
+  const { authed, markAuthenticated } = useAuthGate();
+
+  if (!authed) {
+    return <LoginPage onAuthenticated={markAuthenticated} />;
+  }
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const [showLoading, setShowLoading] = useState(true);
   const [failure, setFailure] = useState<SidecarFailedPayload | null>(null);
   const [lastInbox, setLastInbox] = useState<WatcherChangeEvent | null>(null);

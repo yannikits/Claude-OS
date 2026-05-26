@@ -151,4 +151,26 @@ describe('rpc-http routes', () => {
     });
     expect(res.statusCode).toBe(401);
   });
+
+  it('SSE-path /api/events accepts query-string token (browser EventSource workaround)', async () => {
+    const res = await appHandle.app.inject({
+      method: 'GET',
+      url: `/api/events?token=${encodeURIComponent(TOKEN)}`,
+      // No Authorization header — must accept ?token= for this path.
+      payloadAsStream: true,
+    });
+    // The route is not registered in buildApp() but the auth hook fires
+    // first; we expect a 404 (route missing) NOT a 401 — proves the
+    // query-token resolution worked. If auth had rejected, we'd see 401.
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('non-SSE routes refuse query-string token (header-only)', async () => {
+    const res = await appHandle.app.inject({
+      method: 'POST',
+      url: `/api/rpc?token=${encodeURIComponent(TOKEN)}`,
+      payload: { method: 'ping' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
 });

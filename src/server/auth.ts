@@ -57,8 +57,22 @@ export function extractBearer(headerValue: string | undefined): string {
 }
 
 /**
+ * Routes that may receive the bearer token via `?token=...` query-string
+ * instead of the `Authorization` header. Browsers cannot attach custom
+ * headers to `EventSource` connections, so we accept the token via URL
+ * for SSE only.
+ *
+ * Trade-off: the token appears in proxy/access logs for these routes.
+ * Mitigation: tokens are session-scoped (sessionStorage) and rotatable
+ * via env-restart. Header-auth remains preferred everywhere else.
+ */
+const QUERY_TOKEN_ALLOWED_PATHS = new Set<string>(['/api/events']);
+
+/**
  * Fastify `preHandler` hook that enforces Bearer-Token auth on a route.
- * Use via `fastify.register(authPlugin, {expectedToken})` (see index.ts).
+ * For the routes in `QUERY_TOKEN_ALLOWED_PATHS` it also accepts a
+ * `?token=...` query-string (needed for browser `EventSource` which
+ * cannot send custom headers).
  */
 export function makeAuthHook(expectedToken: string) {
   if (expectedToken.length === 0) {
@@ -66,8 +80,8 @@ export function makeAuthHook(expectedToken: string) {
   }
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
-      const token = extractBearer(req.headers.authorization);
-      if (!verifyBearerToken(token, expectedToken)) {
+      const presented = resolvePresentedToken(req);
+      if (!verifyBearerToken(presented, expectedToken)) {
         throw new AuthError('invalid');
       }
     } catch (err) {
@@ -77,4 +91,17 @@ export function makeAuthHook(expectedToken: string) {
       });
     }
   };
+}
+
+function resolvePresentedToken(req: FastifyRequest): string {
+  const header = req.headers.authorization;
+  if (header !== undefined && header.length > 0) {
+    return extractBearer(header);
+  }
+  const pathOnly = req.url.split('?')[0] ?? req.url;
+  if (QUERY_TOKEN_ALLOWED_PATHS.has(pathOnly)) {
+    const q = (req.query as { token?: unknown } | undefined)?.token;
+    if (typeof q === 'string' && q.length > 0) return q;
+  }
+  throw new AuthError('missing');
 }
