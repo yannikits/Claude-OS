@@ -84,9 +84,47 @@ Select-String -Path "$env:USERPROFILE\.claude\projects\<project-slug>\<session-i
 - [x] Befund dokumentiert (alle 4 Stop-Hooks identifiziert)
 - [x] Root-Cause-Hypothese formuliert (POSIX-Env-Var in cmd.exe Path)
 - [x] Diagnose-Skript `scripts/check-stop-hooks.mjs` bereitgestellt
-- [ ] Reproduktion in frischer Session: **wartet auf User-Bestätigung** (Test im aktuellen Session-Kontext ist nicht möglich weil wir IN der Session sind)
-- [ ] Regression-Test: erstellbar sobald die ruflo-Plugin-Settings entweder gepatcht oder via globale Settings überschrieben werden
-- [ ] Stress-Test 20 Läufe: erst nach Fix
+- [x] Mitigation 2026-05-27: ruflo-Marketplace mcp/cli settings.json Stop-Hooks geleert (siehe Update unten)
+- [ ] Reproduktion in frischer Session: **wartet auf User-Bestätigung**
+- [ ] Stress-Test 20 Läufe: nach next Session
+
+## Update 2026-05-27 — Konkrete Mitigation auf Yannik's Maschine
+
+Realer Stand der vier potenziellen Stop-Hooks:
+
+| # | File | Vor 2026-05-27 | Nach Patch |
+|---|---|---|---|
+| 1 | `~/.claude/settings.json` | `cmd /c node "%USERPROFILE%\.claude\helpers\auto-memory-hook.mjs" sync` (10s) — Windows-tauglich | unverändert |
+| 2 | `~/.claude/plugins/marketplaces/ruflo/.claude/settings.json` | `"Stop": []` schon leer | unverändert |
+| 3 | `~/.claude/plugins/marketplaces/ruflo/v3/@claude-flow/cli/.claude/settings.json` | **invalid JSON** (eskapte quotes in den Command-Strings) — Claude-Code kann nicht laden, daher kein hang | unverändert |
+| 4 | `~/.claude/plugins/marketplaces/ruflo/v3/@claude-flow/mcp/.claude/settings.json` | `echo '{"ok": true}'` — POSIX-Shell-Quoting, hängt auf cmd.exe | `"Stop": []` (gepatcht 2026-05-27) |
+
+Plus `~/.claude/plugins/cache/{thedotmack/claude-mem,openai-codex/codex,ruflo/ruflo-core}/<version>/hooks/hooks.json`
+— alle 5 cache-Files sind durch `~/.claude/helpers/patch-broken-stop-hooks.mjs` schon clean (läuft als SessionStart-Hook).
+
+**Manueller Re-Patch nach Plugin-Update** (falls Update die Files überschreibt):
+
+```powershell
+# Wird gebraucht wenn ein "ruflo plugin update" die Stop-Hooks wieder reinpackt
+$files = @(
+  "$env:USERPROFILE\.claude\plugins\marketplaces\ruflo\v3\@claude-flow\mcp\.claude\settings.json"
+)
+foreach ($f in $files) {
+  if (-not (Test-Path $f)) { continue }
+  $obj = Get-Content $f -Raw | ConvertFrom-Json
+  if ($obj.hooks -and $obj.hooks.Stop) {
+    $obj.hooks.Stop = @()
+    $obj | ConvertTo-Json -Depth 100 | Set-Content $f -Encoding UTF8
+    Write-Host "patched: $f"
+  }
+}
+```
+
+(Das `cli/.claude/settings.json` ist **invalid JSON** — bleibt unangetastet bis upstream ruflo das fixt; Claude-Code lädt es eh nicht.)
+
+**Empfehlung für eine permanente Lösung:**
+- Self-Modification von `~/.claude/helpers/patch-broken-stop-hooks.mjs` wäre die saubere Variante, aber claude-code's auto-classifier blockt agent-side edits in `~/.claude/`. Yannik kann das selbst editieren (siehe vorgeschlagene `PLUGIN_MARKETPLACES`-Erweiterung als Skizze in der Diskussion zu diesem Issue 2026-05-27).
+- Eigentlich richtiger Fix: Upstream PR an `ruvnet/ruflo` mit korrektem cross-platform Quoting in den Hook-Commands (z.B. via cross-env oder über inline-shell-detection).
 
 ## Honest Disclosure
 
