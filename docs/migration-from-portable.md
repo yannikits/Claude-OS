@@ -87,6 +87,50 @@ claude auth login
 claude-os auth status
 ```
 
+### 8. Memory-MVP-Workspace einrichten (post-ROADMAP-Phase-2)
+
+Per ADR-0031 verwaltet `claude-os` Memory-Notes in einem getrennten Obsidian-Vault unter `<CLAUDE_OS_VAULT_PATH>/Claude-OS/workspaces/<workspaceId>/`. Das ist **getrennt** vom `vault/`-unter-`CLAUDE_OS_ROOT/` (Letzteres ist die legacy claude-portable-vault, weiterhin via `claude-os vault snapshot` syncbar). Memory-MVP-Workflow nutzt das neue Layout.
+
+Setup einmalig pro Maschine:
+
+```powershell
+# 1. .env im Repo-Root anlegen (siehe docs/environment.md für allowed vars)
+Set-Content .env "CLAUDE_OS_VAULT_PATH=D:\OneDrive\Obsidian Vault"
+
+# Optional: Default-Workspace überschreiben (default: personal)
+Add-Content .env "CLAUDE_OS_DEFAULT_WORKSPACE=personal"
+
+# 2. Workspace switchen + erste Note schreiben
+claude-os workspace use personal
+echo "First memory note via claude-os" | claude-os save-note hello.md --from-stdin
+
+# 3. Mit Vault-Kontext fragen — claude-os baut den Prompt aus Top-K-Notes,
+#    delegiert dann an claude.exe per ADR-0003 (keine eigene Provider-API).
+claude-os ask "what did I write about?"
+```
+
+**Workspace-Modell:**
+
+- `personal` (default — privat)
+- `msp-internal` (allgemeine MSP-Doku, firmenintern)
+- `msp-customers/<customer-id>` (tenant-isoliert pro Customer; refused in `personal` workspace via `assertActiveTenant` aus Phase-6-foundation)
+
+**Vault-Layout (per ADR-0031):**
+
+```text
+<CLAUDE_OS_VAULT_PATH>/Claude-OS/
+├── workspaces/
+│   ├── personal/skills/<name>/SKILL.md     # User-Skills (heilig)
+│   ├── personal/<note>.md                  # Notes mit frontmatter (TypeBox-validiert)
+│   ├── msp-internal/...
+│   └── msp-customers/<customer-id>/...     # Tenant-isoliert
+└── .claude-os/index.db                     # FTS4 (sql.js, ADR-0025)
+                                            # auto-managed via Sidecar memory-index
+                                            # service — disabled wenn vault unset
+```
+
+Der memory-index (FTS4 via sql.js) baut sich beim ersten Sidecar-Start automatisch auf. Status checken: `claude-os --json` plus Sidecar-RPC `memory.stats` (via GUI Memory-page sichtbar).
+
 Secrets von claude-portable v0.x `.env` in Keychain überführen:
 
 ```powershell
