@@ -1,5 +1,73 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+/**
+ * RPC facade — the API surface is identical whether claude-os runs as
+ * a Tauri-desktop app or as a server-served web-app. The runtime
+ * detection happens once at module-init via `isTauriRuntime()`; every
+ * helper below uses the routed `invoke()` and `listen()` shims declared
+ * here. See ADR-0032 phase Web-2.
+ */
+import { createHttpTransport } from './rpc-http';
+import { createTauriTransport } from './rpc-tauri';
+import {
+  type AuthCapableTransport,
+  isAuthCapable,
+  isTauriRuntime,
+  type RpcTransport,
+  type UnsubscribeFn,
+} from './rpc-transport';
+
+/** Backwards-compatible alias for the Tauri-API event-unsubscribe signature. */
+export type UnlistenFn = UnsubscribeFn;
+
+let transport: RpcTransport | null = null;
+
+function getTransport(): RpcTransport {
+  if (transport === null) {
+    transport = isTauriRuntime() ? createTauriTransport() : createHttpTransport();
+  }
+  return transport;
+}
+
+/**
+ * Get the active transport if it supports auth (HTTP build only). Returns
+ * null in the Tauri build — the Tauri shell is the authenticated session.
+ */
+export function getAuthTransport(): AuthCapableTransport | null {
+  const t = getTransport();
+  return isAuthCapable(t) ? t : null;
+}
+
+/** Re-exported runtime check for AuthGate / Login-Page. */
+export { isTauriRuntime };
+
+/**
+ * Tauri-flavoured `invoke` shim. `rpc_call` is the universal RPC entry
+ * point and is routed through the transport. Other invoke-commands are
+ * Tauri-shell-specific (drag-drop, native dialogs) and throw in web mode.
+ */
+async function invoke<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  if (command === 'rpc_call') {
+    const method = args.method as string;
+    const params = args.params as unknown;
+    return getTransport().call<T>(method, params);
+  }
+  if (!isTauriRuntime()) {
+    throw new Error(`invoke('${command}'): only available in the Tauri desktop build`);
+  }
+  const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+  return tauriInvoke<T>(command, args);
+}
+
+/**
+ * Tauri-flavoured `listen` shim. Routes to the active transport's
+ * `subscribe()` and wraps the handler so `e.payload` keeps the same
+ * shape as `@tauri-apps/api/event#listen`.
+ */
+async function listen<T>(
+  eventName: string,
+  handler: (event: { payload: T }) => void,
+): Promise<UnlistenFn> {
+  return getTransport().subscribe<T>(eventName, (payload) => handler({ payload }));
+}
 
 export const SIDECAR_FAILED_EVENT = 'sidecar://failed';
 export const SIDECAR_STDERR_EVENT = 'sidecar://stderr';

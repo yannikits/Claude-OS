@@ -1,0 +1,77 @@
+# claude-os — example docker-compose for self-hosters.
+#
+# Reference setup: Proxmox VM running Debian 12 + Docker, accessed via
+# Cloudflare DNS + nginx proxy manager on the same host. See
+# docs/server-deployment.md for the full walkthrough.
+#
+# 1. Copy this file to docker-compose.yml
+# 2. Create a .env file with at minimum:
+#      CLAUDE_OS_AUTH_TOKEN=<openssl rand -hex 32>
+#      CLAUDE_OS_SECRETS_PASSPHRASE=<openssl rand -hex 32>
+# 3. docker compose pull && docker compose up -d
+# 4. docker exec -it claude-os claude auth login  (one-time, persists in volume)
+
+services:
+  claude-os:
+    # Use the prebuilt image:
+    image: ghcr.io/iteenschmiede/claude-os:latest
+    # …or build locally from the repo:
+    # build: .
+    container_name: claude-os
+    restart: unless-stopped
+
+    # Bind to localhost only — nginx proxy manager (or cloudflared,
+    # see below) forwards external traffic in. Change to "3000:3000"
+    # if you want the port reachable from your LAN directly.
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    environment:
+      # REQUIRED — generate once: openssl rand -hex 32
+      CLAUDE_OS_AUTH_TOKEN: "${CLAUDE_OS_AUTH_TOKEN:?CLAUDE_OS_AUTH_TOKEN must be set in .env}"
+
+      # REQUIRED for EncryptedFileStore (headless secrets backend).
+      # Generate: openssl rand -hex 32
+      CLAUDE_OS_SECRETS_PASSPHRASE: "${CLAUDE_OS_SECRETS_PASSPHRASE:?CLAUDE_OS_SECRETS_PASSPHRASE must be set in .env}"
+
+      # Optional — defaults are fine for most setups.
+      CLAUDE_OS_LOG_LEVEL: "info"
+      # PORT: 3000
+      # HOST: "0.0.0.0"
+      # CLAUDE_OS_VAULT_PATH: /data/vault
+      # CLAUDE_OS_DATA_DIR: /data/config
+
+    volumes:
+      # Vault + config + Anthropic auth all live in the same volume so
+      # a single Proxmox snapshot + rsync backup covers everything.
+      - claude-os-data:/data
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ----------------------------------------------------------------------
+  # OPTIONAL: Cloudflare Tunnel (zero-trust deployment)
+  # ----------------------------------------------------------------------
+  # Uncomment and set CF_TUNNEL_TOKEN in .env to expose claude-os to the
+  # internet WITHOUT opening any inbound ports on your OPNsense firewall.
+  # Steps in Cloudflare Zero Trust:
+  #   1. Networks → Tunnels → Create a tunnel → name it "claude-os"
+  #   2. Copy the install token; set CF_TUNNEL_TOKEN=<token> in .env
+  #   3. In the tunnel's "Public Hostname" tab, route your hostname
+  #      (e.g. claude-os.yourdomain.tld) to http://claude-os:3000
+  #
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   container_name: claude-os-cloudflared
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+  #   depends_on:
+  #     - claude-os
+
+volumes:
+  claude-os-data:
+    driver: local

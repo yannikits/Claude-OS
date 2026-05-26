@@ -1,0 +1,57 @@
+# --- VCS / IDE ---
+.git
+.github
+.gitignore
+.gitattributes
+.vscode
+.idea
+.editorconfig
+
+# --- Node build outputs (rebuilt in container) ---
+node_modules
+dist
+gui/node_modules
+gui/dist
+
+# --- Tauri (desktop-only, not needed in server image) ---
+gui/src-tauri/target
+gui/src-tauri/binaries
+gui/src-tauri/Cargo.lock
+
+# --- Tests + dev artifacts ---
+tests
+tasks
+docs
+examples
+scripts
+config
+**/*.test.ts
+**/*.test.tsx
+**/__tests__/**
+
+# --- Caches + temp ---
+.husky
+.lintstagedrc.cjs
+.npmrc
+*.log
+smoke-*.log
+smoke-*-stderr.log
+smoke-*-stdout.log
+.vitest-cache
+
+# --- Documentation ---
+*.md
+!README.md
+docs/
+
+# --- Secrets / env (never bake into image) ---
+.env
+.env.*
+!.env.example
+
+# --- Misc ---
+Dockerfile
+docker-compose*.yml
+.dockerignore
+LICENSE.txt
+CODEOWNERS
