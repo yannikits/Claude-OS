@@ -127,6 +127,13 @@ impl DropDedup {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        // Phase 8 — Auto-Update plugin per ADR-0028. The plugin itself is
+        // always registered so the JS-side `@tauri-apps/plugin-updater`
+        // API doesn't blow up when imported. The actual update-check is
+        // gated by tauri.conf.json plugins.updater.active — set to false
+        // by default so dev-builds without a real signing keypair don't
+        // ping the GitHub-Release endpoint accidentally.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let state = Arc::new(SupervisorState::default());
             app.manage(state.clone());
