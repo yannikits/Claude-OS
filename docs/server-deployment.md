@@ -310,6 +310,55 @@ docker compose logs claude-os | grep '{' | jq -c '{level, msg, time}'
 
 ---
 
+## Häufige Stolperfallen (aus realen Deployments)
+
+### "Web server is down" (Cloudflare 521)
+
+Cloudflare erreicht deinen Origin nicht. Reihenfolge zum Eingrenzen:
+
+1. **Container hört auf falschem Interface?** — `ss -tlnp | grep 3000` muss `0.0.0.0:3000` zeigen, nicht `127.0.0.1:3000`. Wenn `127.0.0.1`: in `docker-compose.yml` `ports: ["3000:3000"]` setzen (NICHT `"127.0.0.1:3000:3000"`), dann `docker compose up -d`.
+2. **OPNsense-Port-Forward fehlt** für :443 zur Reverse-Proxy-IP.
+3. **Firewall in der VM** blockt :3000 (`ufw status`, ggf. `ufw allow from <reverse-proxy-IP> to any port 3000`).
+4. **Reverse-Proxy hat falsche Forward-IP**: muss die LAN-IP der claude-os-VM sein, NICHT die Docker-Container-IP (`172.x.x.x`).
+
+### "SSL handshake failed" (Cloudflare 525)
+
+Cloudflare verbindet sich zum Origin, aber kein TLS-Handshake. Meistens:
+
+1. **Domain-Name-Tippfehler im Proxy Host** — Hostname im nginx-pm Proxy Host muss exakt dem Cloudflare-DNS-Record entsprechen (Bindestrich, Subdomain). Prüfen via:
+   ```bash
+   openssl s_client -connect 127.0.0.1:443 -servername deine-domain.tld </dev/null 2>&1 | grep -E "subject|unrecognized"
+   ```
+   Bei `unrecognized name`: Hostname-Mismatch.
+2. **Cert nicht assigned** im Proxy Host SSL-Tab. nach Save in der Liste prüfen — SSL-Spalte muss den Cert-Namen zeigen, nicht "None".
+3. **Cert für falsche Domain ausgestellt**: Cloudflare-Origin-Cert muss exakt für die genutzte Subdomain ausgestellt sein. Wildcard `*.deinedomain.tld` deckt alle Subdomains ab.
+
+### "Could not resolve claude-os root" (Container exit 1, restart-loop)
+
+`resolveRoot()` findet keine `.claude-os-root`-Marker-Datei.
+Fix ist seit Commit `41cc8a0` im Container automatisch: entrypoint.sh setzt `CLAUDE_OS_ROOT=/data` und legt den Marker an. Wer einen älteren Container hat: `docker compose pull && docker compose up -d`.
+
+### Debian-13-Trixie-Minimal: `curl` und `ufw` fehlen
+
+```bash
+apt install -y curl ca-certificates gnupg ufw
+```
+
+Vor der Docker-Install. `ufw` ist optional wenn du hinter einer Hardware-Firewall (OPNsense) sitzt.
+
+### `sudo` ohne `-i` lässt User-PATH stehen
+
+Wenn `which ufw` leer ist nach erfolgreichem `apt install ufw`:
+```bash
+echo $PATH
+# Wenn /usr/sbin fehlt:
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Persistent:
+echo 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' >> /root/.bashrc
+```
+
+Oder von vornherein mit `sudo -i` einsteigen (Login-Shell mit korrektem Root-PATH).
+
 ## Sicherheits-Hinweise
 
 - **Token-Rotation:** bei Verdacht auf Compromise: `.env` ändern, `docker compose up -d`. Alle aktiven Browser-Sessions verlieren ihre Auth → Re-Login.
