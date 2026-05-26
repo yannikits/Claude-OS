@@ -20,11 +20,16 @@ services:
     container_name: claude-os
     restart: unless-stopped
 
-    # Bind to localhost only — nginx proxy manager (or cloudflared,
-    # see below) forwards external traffic in. Change to "3000:3000"
-    # if you want the port reachable from your LAN directly.
+    # Bind to all interfaces by default — reverse-proxy (nginx proxy
+    # manager, Traefik, Caddy …) running on another VM/host can then
+    # forward to this VM's LAN IP on :3000.
+    #
+    # If reverse-proxy and claude-os run on the SAME Docker host you
+    # may prefer a stricter bind to localhost — change to
+    # "127.0.0.1:3000:3000" then. Both halves end up behind the
+    # bearer-token regardless.
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
 
     environment:
       # REQUIRED — generate once: openssl rand -hex 32

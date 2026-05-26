@@ -32,6 +32,14 @@ ANTHROPIC_DIR="${ANTHROPIC_CONFIG_DIR:-/data/anthropic}"
 
 mkdir -p "${DATA_DIR}" "${VAULT_DIR}" "${ANTHROPIC_DIR}"
 
+# resolveRoot() needs either $CLAUDE_OS_ROOT or a .claude-os-root marker
+# file in some ancestor directory. We pin both to /data so the marker
+# (and everything else) survives container restarts via the volume.
+ROOT_DIR="${CLAUDE_OS_ROOT:-/data}"
+mkdir -p "${ROOT_DIR}"
+touch "${ROOT_DIR}/.claude-os-root"
+export CLAUDE_OS_ROOT="${ROOT_DIR}"
+
 # Export so the node process picks them up
 export CLAUDE_OS_DATA_DIR="${DATA_DIR}"
 export CLAUDE_OS_VAULT_PATH="${VAULT_DIR}"
@@ -41,6 +49,7 @@ export ANTHROPIC_CONFIG_DIR="${ANTHROPIC_DIR}"
 export CLAUDE_OS_LOG_LEVEL="${CLAUDE_OS_LOG_LEVEL:-info}"
 
 echo "==> claude-os server starting"
+echo "    root:      ${ROOT_DIR}"
 echo "    vault:     ${VAULT_DIR}"
 echo "    data:      ${DATA_DIR}"
 echo "    anthropic: ${ANTHROPIC_DIR}"

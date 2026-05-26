@@ -15,13 +15,15 @@
 
 **Plan-Datum:** 2026-05-26
 **Branch:** `feature/phase-web-server-deployment` (off main)
-**Status (2026-05-26):** Web-1 + Web-2 + Web-4 + Web-6 **shipped**. Web-3 (PTY-WS) und Web-5 (Tenant-Wiring) folgen als Inkrement. MVP-Pfad damit komplett — Yannik kann den Server deployen.
+**Status (2026-05-26 abends):** Web-1 + Web-2 + Web-3 + Web-4 + Web-5 Stage 1 + Web-6 **shipped**. **Full feature-parity zur Tauri-Variante erreicht.** Drag-and-Drop läuft jetzt auch im Browser via multipart-upload zu `/api/inbox/upload`. Multi-User via Token-Liste in `.env` (ADR-0033). Web-5 Stage 2 (Login-UI + User-Registrierung) bleibt als eigene Phase offen.
 
 ## Shipped Commits
 
 - `c1940ba` Web-1 (backend HTTP-adapter + Fastify + auth + SSE)
 - `b730031` Web-2 (frontend transport abstraction + login + AuthGate)
 - `341216f` Web-4 + Web-6 (Dockerfile + compose + entrypoint + docs/server-deployment.md)
+- … `d02c7ad` `9cda412` `622d1c8` `41cc8a0` `e3daa1a` `a41c7f0` `ff7b7ea` (Dockerfile + entrypoint + headless-fixes von realem Deploy)
+- Web-3 (PTY/Chat über WebSocket — pty.* RPCs routen im HTTP-transport über `/api/pty/ws`)
 
 ---
 
@@ -107,10 +109,10 @@ Docker-Container "claude-os"
 
 **Ziel:** Interaktive Claude-Sessions im Browser.
 
-- [ ] `src/server/ws-pty.ts` — `WS /api/pty/:sessionId` upgrade-Handler, bridged stdin/stdout zu `PtyChatSessions`
-- [ ] Auth via Subprotocol oder Query-Param-Token (XHR-Auth in WS-Handshake)
-- [ ] `gui/src/lib/rpc-http.ts` — WebSocket-Variante der `onPtyData`/`onPtyExit`-Handler
-- [ ] xterm.js arbeitet 1:1 — terminal-Frontend bleibt unverändert
+- [x] `src/server/ws-pty.ts` — `WS /api/pty/ws` upgrade-Handler, bridged stdin/stdout zu `PtyChatSessions`
+- [x] Auth via Query-Param-Token (Browser-EventSource/WebSocket können keine custom-headers)
+- [x] `gui/src/lib/rpc-http.ts` — WebSocket-Variante; pty.* RPCs + pty.data/exit Subscriptions transparent über WS gerouted
+- [x] xterm.js arbeitet 1:1 — terminal-Frontend bleibt unverändert (transparent transport-switch)
 
 **DoD Web-3:** ChatPage im Browser sendet Tastatureingaben an `claude` und sieht Output in Echtzeit. Resize funktioniert.
 

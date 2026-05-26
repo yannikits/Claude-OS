@@ -9,6 +9,57 @@ import type { AuthCapableTransport, UnsubscribeFn } from './rpc-transport';
 
 export const AUTH_STORAGE_KEY = 'claude-os-token';
 
+interface PtySpawnedFrame {
+  type: 'spawned';
+  sessionId: string;
+}
+interface PtyAttachedFrame {
+  type: 'attached';
+  sessionId: string;
+}
+interface PtyDataFrame {
+  type: 'data';
+  data: string;
+}
+interface PtyExitFrame {
+  type: 'exit';
+  exitCode: number | null;
+  signal: string | null;
+}
+interface PtyErrorFrame {
+  type: 'error';
+  code?: string;
+  message: string;
+}
+type PtyServerFrame =
+  | PtySpawnedFrame
+  | PtyAttachedFrame
+  | PtyDataFrame
+  | PtyExitFrame
+  | PtyErrorFrame;
+
+interface PtyEventPayload {
+  sessionId: string;
+  data?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+}
+
+/**
+ * Single shared WebSocket per HTTP-transport instance. One claude-os tab
+ * runs at most one PTY session at a time (xterm.js is a singleton on the
+ * ChatPage); a multi-session future would lift this to a Map keyed by
+ * client-allocated id.
+ */
+interface PtyChannel {
+  ws: WebSocket;
+  sessionId: string | null;
+  /** Resolves when the server confirms spawn OR attach. */
+  pendingBind: { resolve: (id: string) => void; reject: (e: Error) => void } | null;
+  dataHandlers: Set<(payload: PtyEventPayload) => void>;
+  exitHandlers: Set<(payload: PtyEventPayload) => void>;
+}
+
 function readStoredToken(): string | null {
   if (typeof sessionStorage === 'undefined') return null;
   return sessionStorage.getItem(AUTH_STORAGE_KEY);
@@ -47,6 +98,7 @@ function createSseConnection(token: string): SseConnection {
 export function createHttpTransport(initialToken?: string): AuthCapableTransport {
   let token: string | null = initialToken ?? readStoredToken();
   let sse: SseConnection | null = null;
+  let pty: PtyChannel | null = null;
 
   function closeSse(): void {
     if (sse === null) return;
@@ -58,8 +110,205 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     sse = null;
   }
 
+  function closePty(): void {
+    if (pty === null) return;
+    try {
+      pty.ws.close();
+    } catch {
+      /* nothing more to do */
+    }
+    if (pty.pendingBind !== null) {
+      pty.pendingBind.reject(new Error('pty: ws closed before spawn confirmed'));
+    }
+    pty = null;
+  }
+
+  /** Open the PTY-WebSocket lazily (first pty.spawn call). */
+  function ensurePtyChannel(): PtyChannel {
+    if (pty !== null) return pty;
+    if (token === null) throw new Error('rpc-http: no auth token set');
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${window.location.host}/api/pty/ws?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(url);
+    const channel: PtyChannel = {
+      ws,
+      sessionId: null,
+      pendingBind: null,
+      dataHandlers: new Set(),
+      exitHandlers: new Set(),
+    };
+    ws.addEventListener('message', (event) => {
+      let frame: PtyServerFrame;
+      try {
+        frame = JSON.parse(event.data as string) as PtyServerFrame;
+      } catch {
+        return;
+      }
+      if (frame.type === 'spawned' || frame.type === 'attached') {
+        channel.sessionId = frame.sessionId;
+        if (channel.pendingBind !== null) {
+          const pending = channel.pendingBind;
+          channel.pendingBind = null;
+          pending.resolve(frame.sessionId);
+        }
+      } else if (frame.type === 'data') {
+        if (channel.sessionId === null) return;
+        const payload: PtyEventPayload = { sessionId: channel.sessionId, data: frame.data };
+        for (const h of channel.dataHandlers) {
+          try {
+            h(payload);
+          } catch (err) {
+            console.error('pty-ws: data handler threw', err);
+          }
+        }
+      } else if (frame.type === 'exit') {
+        const payload: PtyEventPayload = {
+          sessionId: channel.sessionId ?? '',
+          exitCode: frame.exitCode,
+          signal: frame.signal,
+        };
+        for (const h of channel.exitHandlers) {
+          try {
+            h(payload);
+          } catch (err) {
+            console.error('pty-ws: exit handler threw', err);
+          }
+        }
+      } else if (frame.type === 'error') {
+        if (channel.pendingBind !== null) {
+          const pending = channel.pendingBind;
+          channel.pendingBind = null;
+          pending.reject(new Error(`pty-ws: ${frame.code ?? 'error'}: ${frame.message}`));
+        } else {
+          console.error('pty-ws server error:', frame.code, frame.message);
+        }
+      }
+    });
+    ws.addEventListener('close', () => {
+      if (pty === channel) pty = null;
+      if (channel.pendingBind !== null) {
+        channel.pendingBind.reject(new Error('pty: ws closed unexpectedly'));
+      }
+    });
+    pty = channel;
+    return channel;
+  }
+
+  function sendPtyFrame(frame: Record<string, unknown>): Promise<void> {
+    const channel = pty;
+    if (channel === null) {
+      return Promise.reject(new Error('pty-ws: not connected'));
+    }
+    const payload = JSON.stringify(frame);
+    if (channel.ws.readyState === WebSocket.OPEN) {
+      channel.ws.send(payload);
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const onOpen = (): void => {
+        channel.ws.removeEventListener('open', onOpen);
+        channel.ws.removeEventListener('error', onError);
+        channel.ws.send(payload);
+        resolve();
+      };
+      const onError = (): void => {
+        channel.ws.removeEventListener('open', onOpen);
+        channel.ws.removeEventListener('error', onError);
+        reject(new Error('pty-ws: ws errored before frame could be sent'));
+      };
+      channel.ws.addEventListener('open', onOpen);
+      channel.ws.addEventListener('error', onError);
+    });
+  }
+
   async function call<T>(method: string, params: unknown = null): Promise<T> {
     if (token === null) throw new Error('rpc-http: no auth token set');
+
+    // PTY methods route through the dedicated WebSocket (Phase Web-3).
+    // The shape matches the existing sidecar pty.* RPC return types so
+    // the helper functions in rpc.ts work unchanged.
+    if (method === 'pty.spawn') {
+      const channel = ensurePtyChannel();
+      if (channel.pendingBind !== null || channel.sessionId !== null) {
+        throw new Error(
+          'rpc-http: a pty session is already active on this transport — kill it first',
+        );
+      }
+      const p = (params ?? {}) as { args?: readonly string[]; cols?: number; rows?: number };
+      const spawnPromise = new Promise<string>((resolve, reject) => {
+        channel.pendingBind = { resolve, reject };
+      });
+      await sendPtyFrame({
+        type: 'spawn',
+        args: Array.isArray(p.args) ? p.args : [],
+        ...(typeof p.cols === 'number' ? { cols: p.cols } : {}),
+        ...(typeof p.rows === 'number' ? { rows: p.rows } : {}),
+      });
+      const sessionId = await spawnPromise;
+      return { sessionId } as T;
+    }
+
+    // auth.login spawns its PTY session server-side (not via WS), then
+    // returns {sessionId}. To receive the pty.data/exit stream on our
+    // WS, attach the WS to that session id right after the RPC succeeds.
+    if (method === 'auth.login') {
+      const res = await fetch('/api/rpc', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ method, params }),
+      });
+      if (res.status === 401) {
+        writeStoredToken(null);
+        token = null;
+        closeSse();
+        closePty();
+        throw new Error('rpc-http: 401 unauthorized — token cleared');
+      }
+      const body = (await res.json()) as
+        | { ok: true; result: { sessionId: string } }
+        | { ok: false; error: { code: string; message: string } };
+      if (!body.ok) {
+        throw new Error(`rpc-http: ${body.error.code}: ${body.error.message}`);
+      }
+      const sessionId = body.result.sessionId;
+
+      // Hook the WS to that session so pty.data + pty.exit can be
+      // forwarded to the AuthLoginModal's xterm.
+      const channel = ensurePtyChannel();
+      if (channel.sessionId === null) {
+        const attachPromise = new Promise<string>((resolve, reject) => {
+          channel.pendingBind = { resolve, reject };
+        });
+        await sendPtyFrame({ type: 'attach', sessionId });
+        await attachPromise;
+      }
+      return { sessionId } as T;
+    }
+
+    if (method === 'pty.write') {
+      const p = (params ?? {}) as { sessionId?: string; input?: string };
+      if (pty === null) throw new Error('rpc-http: no pty session — call pty.spawn first');
+      await sendPtyFrame({ type: 'write', data: p.input ?? '' });
+      return { ok: true } as T;
+    }
+
+    if (method === 'pty.resize') {
+      const p = (params ?? {}) as { sessionId?: string; cols?: number; rows?: number };
+      if (pty === null) throw new Error('rpc-http: no pty session — call pty.spawn first');
+      await sendPtyFrame({ type: 'resize', cols: p.cols, rows: p.rows });
+      return { ok: true } as T;
+    }
+
+    if (method === 'pty.kill') {
+      if (pty === null) return { ok: true } as T;
+      await sendPtyFrame({ type: 'kill' });
+      closePty();
+      return { ok: true } as T;
+    }
+
     const res = await fetch('/api/rpc', {
       method: 'POST',
       headers: {
@@ -96,6 +345,20 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     handler: (payload: T) => void,
   ): Promise<UnsubscribeFn> {
     if (token === null) throw new Error('rpc-http: no auth token for SSE');
+
+    // pty.* events come over the dedicated WebSocket (Phase Web-3), NOT
+    // the shared SSE stream. xterm.js needs sub-100ms round-trips that
+    // SSE-via-cloudflare-proxy cannot reliably deliver.
+    if (eventName === 'pty.data' || eventName === 'pty.exit') {
+      const channel = ensurePtyChannel();
+      const set = eventName === 'pty.data' ? channel.dataHandlers : channel.exitHandlers;
+      const wrapped = handler as unknown as (payload: PtyEventPayload) => void;
+      set.add(wrapped);
+      return (): void => {
+        set.delete(wrapped);
+      };
+    }
+
     if (sse === null) sse = createSseConnection(token);
 
     let handlerSet = sse.handlers.get(eventName);
@@ -146,15 +409,17 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     if (t.length === 0) throw new Error('setAuth: token must be non-empty');
     token = t;
     writeStoredToken(t);
-    // If a stale SSE-connection is open with the previous token, close it
-    // so the next subscribe-call reopens with the new credentials.
+    // If a stale SSE/PTY-connection is open with the previous token, close
+    // them so the next subscribe/spawn reopens with the new credentials.
     closeSse();
+    closePty();
   }
 
   function clearAuth(): void {
     token = null;
     writeStoredToken(null);
     closeSse();
+    closePty();
   }
 
   async function verifyAuth(candidateToken: string): Promise<boolean> {

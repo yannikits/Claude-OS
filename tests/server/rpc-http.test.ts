@@ -23,7 +23,7 @@ function buildApp(): {
     throw e;
   });
 
-  const authHook = makeAuthHook(TOKEN);
+  const authHook = makeAuthHook([TOKEN]);
   app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     await authHook(req, reply);
@@ -162,6 +162,16 @@ describe('rpc-http routes', () => {
     // The route is not registered in buildApp() but the auth hook fires
     // first; we expect a 404 (route missing) NOT a 401 — proves the
     // query-token resolution worked. If auth had rejected, we'd see 401.
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('WS-path /api/pty/ws accepts query-string token (browsers cannot attach Authorization to WebSocket)', async () => {
+    const res = await appHandle.app.inject({
+      method: 'GET',
+      url: `/api/pty/ws?token=${encodeURIComponent(TOKEN)}`,
+    });
+    // Same as above — route not registered here, but preHandler must pass
+    // the query-token check so we see 404 (route missing) rather than 401.
     expect(res.statusCode).toBe(404);
   });
 

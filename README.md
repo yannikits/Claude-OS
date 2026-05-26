@@ -2,12 +2,9 @@
 
 OS-unabhängige Entwicklungs-Umgebung rund um Anthropic Claude. Tauri-GUI + Node-CLI + cloud-mount Vault-Sync.
 
-> **Status (2026-05-26):** Post-Spec-Split nutzt das Repo die ROADMAP-Phasen-Struktur — siehe [`ROADMAP.md`](ROADMAP.md) als authoritative Statusquelle.
+> **Status:** v1.5.3 (siehe [`package.json`](package.json) für die kanonische Version, [`CHANGELOG.md`](CHANGELOG.md) für die Release-Historie). Alle 8 Phasen (0–7) shipped. CI grün auf ubuntu/win/macos × cli/rust-shell/gui-typecheck. Bundle pipeline grün — MSI (Windows), DMG (macOS x86_64 + aarch64 universal), AppImage (Linux) als Release-Assets. UI-Smoke confirmed (Windows): Dashboard rendert mit live RPC-Daten, alle 7 Views functional, Drag-Drop end-to-end (drag → inbox.import → chokidar → Tauri-Event-Banner) — siehe [`docs/migration-from-portable.md`](docs/migration-from-portable.md) für Setup, [`gui/README.md`](gui/README.md) für GUI-Build. 815/818 Tests grün (3 long-running gated hinter `RUN_SLOW_TESTS=1`). Tracker: [`tasks/todo.md`](tasks/todo.md).
 >
-> - **In main:** Phasen 0–6 als Code shipped via PRs #135–150. Memory-MVP-Workflow funktional (CLI + GUI), FTS-Index-Layer, Skill-Engine, Skill-Lifecycle-Foundation, Public-Core-Foundation für MSP-Bridges (audit + tenant). ~1150+ vitest cases grün (3 long-running gated hinter `RUN_SLOW_TESTS=1`).
-> - **CI:** grün auf ubuntu/win/macos × `cli` / `rust-shell` / `gui-typecheck`. Bundle pipeline (MSI/DMG/AppImage) grün.
-> - **GUI:** Dashboard + Memory-Page + 7 weitere Views functional, Drag-Drop end-to-end (siehe [`docs/migration-from-portable.md`](docs/migration-from-portable.md) für Setup, [`gui/README.md`](gui/README.md) für GUI-Build).
-> - **Vorgänger:** `claude-portable` (USB-only Variante). Die alten Launch-Scripts liegen in `legacy/` und sind nicht mehr aktiv.
+> Vorgänger: `claude-portable` (USB-only Variante). Die alten Launch-Scripts liegen in `legacy/` und sind nicht mehr aktiv.
 
 ## Was es ist
 
@@ -98,50 +95,7 @@ POSIX äquivalent — `./claude-os` statt `.\claude-os.cmd`, `export CLAUDE_OS_R
 | `claude-os migrate --from-portable <path>` | ready (v1.5) | Automatisierte Migration von claude-portable v0.x → claude-os v1: robocopy-equivalent recursive copy mit Overlap-Protection, idempotent. Siehe docs/migration-from-portable.md. |
 | `claude-os mcp serve` | ready (v1.4) | claude-os als MCP-Server für Claude Desktop / Claude Code (Tools-API über stdio). Siehe ADR-0016. |
 
-### Memory-MVP-Commands (ROADMAP Phase 2 + 3 + 4)
-
-| Command | Status | Was es macht |
-|---|---|---|
-| `claude-os workspace list\|current\|use <id>\|where [<id>]` | ready (Phase 2a) | Multi-Workspace per ADR-0031 — `personal` / `msp-internal` / `msp-customers/<id>`. Strict id-validation. |
-| `claude-os save-note <filename> --body \| --from-file \| --from-stdin [--type --tags --classification --tenant --overwrite]` | ready (Phase 2e) | Schreibt Markdown-Note mit frontmatter-validation in active Workspace. |
-| `claude-os ask "<prompt>" [--workspace --top-k --no-context --include-ephemeral --dry-run]` | ready (Phase 2e) | Komponiert Prompt mit BM25-vault-context, delegiert an `claude.exe -p "..."` (ADR-0003). |
-| `claude-os skills list\|show <name>\|match "<query>" [--top-k]` | ready (Phase 4) | SKILL.md-Loader + BM25 description-matcher pro Workspace. |
-
-Sidecar-only RPCs (kein CLI-Equivalent — via GUI Memory-page oder Tauri-IPC): `workspace.*`, `notes.*`, `retrieval.*` (Phase 2f), `memory.stats` / `memory.rebuild` (Phase 3f).
-
-Globale Flags: `--root <path>` (statt `$CLAUDE_OS_ROOT`), `--vault <path>` (statt `$CLAUDE_OS_VAULT_PATH`), `--json`, `-v/--verbose`.
-
-### Memory-MVP-Quickstart
-
-```bash
-# 1. Vault konfigurieren (einmalig)
-echo 'CLAUDE_OS_VAULT_PATH=D:\OneDrive\Obsidian Vault' > .env
-
-# 2. Workspace wählen
-claude-os workspace use personal
-
-# 3. Notes schreiben (CLI oder GUI Memory-page)
-echo "Migration runs Sonntag 0300. Affects all DCs." | claude-os save-note migration.md --from-stdin --type session
-
-# 4. Mit Vault-Kontext fragen — claude-os baut den Prompt, claude.exe antwortet
-claude-os ask "when is the migration?"
-
-# 5. Skills im Workspace listen / matchen
-claude-os skills list
-claude-os skills match "find notes about deployments"
-```
-
-Vault-Layout per ADR-0031:
-
-```
-<CLAUDE_OS_VAULT_PATH>/Claude-OS/
-├── workspaces/
-│   ├── personal/skills/<name>/SKILL.md       # User-Skills (heilig)
-│   ├── personal/<note>.md                    # Notes mit frontmatter
-│   ├── msp-internal/...
-│   └── msp-customers/<customer-id>/...       # Tenant-isoliert
-└── .claude-os/index.db                       # FTS4 (sql.js, ADR-0025)
-```
+Globale Flags: `--root <path>` (statt `$CLAUDE_OS_ROOT`), `--json`, `-v/--verbose`.
 
 ## Cross-Machine-Setup (zweite Maschine)
 
@@ -160,8 +114,6 @@ Der Vault-Status auf der zweiten Maschine wird durch den Cloud-Sync-Client gepul
 | Var | Wirkung |
 |---|---|
 | `$CLAUDE_OS_ROOT` | Cloud-Mount-Pfad (sonst: Repo-Detect via Marker-File) |
-| `$CLAUDE_OS_VAULT_PATH` | Obsidian-Vault-Root (per ADR-0031). Workspaces leben unter `<vault>/Claude-OS/workspaces/<id>/`. Pflicht für Memory-Commands (workspace/notes/retrieval/skills); install-only Befehle (doctor/secrets/ai) brauchen es nicht. Aus `.env` oder shell. Details: [`docs/environment.md`](docs/environment.md). |
-| `$CLAUDE_OS_DEFAULT_WORKSPACE` | Default-Workspace beim Start (default: `personal`). |
 | `$CLAUDE_OS_DATA_DIR` | Override für `%APPDATA%/claude-os/` (Tests + unusual installs) |
 | `$CLAUDE_OS_LOG_LEVEL` | `trace`/`debug`/`info`/`warn`/`error`/`fatal` (Default: `info`) |
 | `$CLAUDE_OS_SECRETS_BACKEND` | `keyring` \| `encrypted-file` (Default: Auto-Detect via Probe) |
