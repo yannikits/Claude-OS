@@ -76,6 +76,7 @@ const SUBCOMMAND_LOADERS: Record<string, Loader> = {
   workspace: async (p) => (await import('./commands/workspace.js')).registerWorkspaceCommand(p),
   ask: async (p) => (await import('./commands/ask.js')).registerAskCommand(p),
   'save-note': async (p) => (await import('./commands/save-note.js')).registerSaveNoteCommand(p),
+  serve: async (p) => (await import('./commands/serve.js')).registerServeCommand(p),
 };
 
 async function loadAll(p: Command): Promise<void> {
