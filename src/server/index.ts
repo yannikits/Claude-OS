@@ -12,6 +12,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import fastifyCors from '@fastify/cors';
+import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import { resolveRoot } from '../core/environment/index.js';
@@ -25,11 +26,12 @@ import { PtyChatSessions } from '../sidecar/pty-chat-sessions.js';
 import { RpcDispatcher } from '../sidecar/rpc.js';
 import { type InboxOutboxWatchers, setupWatchers } from '../sidecar/watchers.js';
 
-import { makeAuthHook } from './auth.js';
+import { makeAuthHook, parseTokenList } from './auth.js';
 import { createNotificationBus, registerSseRoute } from './events-sse.js';
-import { registerRpcRoutes } from './rpc-http.js';
+import { registerInboxUpload, registerRpcRoutes } from './rpc-http.js';
 import { registerStaticRoutes } from './static.js';
 import type { ServerConfig } from './types.js';
+import { registerPtyWebSocket } from './ws-pty.js';
 
 export interface ServerHandle {
   readonly fastify: FastifyInstance;
@@ -41,6 +43,7 @@ interface BackgroundServices {
   readonly chatSessions: ChatSessions;
   readonly ptyChatSessions: PtyChatSessions | null;
   readonly watchers: InboxOutboxWatchers | null;
+  readonly mcpWatcher: ReturnType<typeof startMcpWatcher> | null;
   readonly schedulerStop: () => Promise<void>;
   readonly mcpWatcherStop: () => Promise<void>;
 }
@@ -83,23 +86,42 @@ async function startBackgroundServices(
   const probeTimeoutFromEnv = Number.parseInt(process.env.CLAUDE_OS_MCP_PROBE_TIMEOUT_MS ?? '', 10);
   const probeTimeoutMs =
     Number.isFinite(probeTimeoutFromEnv) && probeTimeoutFromEnv > 0 ? probeTimeoutFromEnv : 15_000;
-  const mcpTrustStore = new McpTrustStore({
-    filePath: mcpTrustPathFor(resolveMachinePaths().dataDir),
-  });
-  const mcpWatcherHandle = startMcpWatcher({
-    emit: (event) => emit('mcp-client://event', event),
-    projectCwd: resolveRoot({}).path,
-    probeTimeoutMs,
-    isTrusted: (serverKey) => mcpTrustStore.isAcknowledged(serverKey),
-  });
-  logger.logger.info({ probeTimeoutMs }, 'server: mcp watcher started');
+
+  // MCP-watcher needs a project root for discovery. In headless server
+  // deployments resolveRoot() may legitimately fail (no marker file in
+  // the container). Degrade gracefully — MCP-clients UI shows empty
+  // and the server keeps running.
+  let mcpWatcher: ReturnType<typeof startMcpWatcher> | null = null;
+  let mcpWatcherStop: () => Promise<void> = async () => {
+    /* no-op when watcher disabled */
+  };
+  try {
+    const projectCwd = resolveRoot({}).path;
+    const mcpTrustStore = new McpTrustStore({
+      filePath: mcpTrustPathFor(resolveMachinePaths().dataDir),
+    });
+    mcpWatcher = startMcpWatcher({
+      emit: (event) => emit('mcp-client://event', event),
+      projectCwd,
+      probeTimeoutMs,
+      isTrusted: (serverKey) => mcpTrustStore.isAcknowledged(serverKey),
+    });
+    mcpWatcherStop = () => mcpWatcher?.stop() ?? Promise.resolve();
+    logger.logger.info({ probeTimeoutMs }, 'server: mcp watcher started');
+  } catch (err) {
+    logger.logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'server: mcp watcher disabled (no claude-os root — set $CLAUDE_OS_ROOT or create .claude-os-root marker)',
+    );
+  }
 
   return {
     chatSessions,
     ptyChatSessions,
     watchers,
+    mcpWatcher,
     schedulerStop: () => schedulerHandle.stop(),
-    mcpWatcherStop: () => mcpWatcherHandle.stop(),
+    mcpWatcherStop,
   };
 }
 
@@ -144,6 +166,7 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
   registerMethods(dispatcher, {
     chatSessions: services.chatSessions,
     ...(services.ptyChatSessions !== null ? { ptyChatSessions: services.ptyChatSessions } : {}),
+    ...(services.mcpWatcher !== null ? { mcpWatcher: services.mcpWatcher } : {}),
     emit,
   });
 
@@ -152,15 +175,42 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
   fastify.get('/healthz', async () => ({ ok: true, ts: Date.now() }));
 
   // Gate every /api/* route behind Bearer-Token auth. The hook runs before
-  // route handlers and short-circuits with 401 on rejection.
-  const authHook = makeAuthHook(config.authToken);
+  // route handlers and short-circuits with 401 on rejection. Multi-User
+  // Stage 1: the env-var may carry a comma-separated list of valid tokens
+  // (ADR-0033); the matched token's hash becomes req.tenant.
+  const expectedTokens = parseTokenList(config.authToken);
+  if (expectedTokens.length === 0) {
+    throw new Error('server: authToken parsed to empty list after CSV split');
+  }
+  log.info(
+    { tokenCount: expectedTokens.length },
+    expectedTokens.length === 1
+      ? 'server: single-user auth (1 token)'
+      : `server: multi-user auth (${expectedTokens.length} tokens)`,
+  );
+  const authHook = makeAuthHook(expectedTokens);
   fastify.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     await authHook(req, reply);
   });
 
   registerRpcRoutes(fastify, dispatcher);
+  await registerInboxUpload(fastify, dispatcher);
   registerSseRoute(fastify, { bus, heartbeatMs: config.sseHeartbeatMs });
+
+  // WebSocket bridge for interactive PTY sessions (Phase Web-3).
+  // Register only when node-pty actually loaded — on a fully-headless
+  // host the plugin would still expose the upgrade endpoint and the
+  // /api/pty/ws handler would tell the client "pty-disabled", which is
+  // fine. We register unconditionally so the route exists.
+  await fastify.register(fastifyWebsocket, {
+    options: { maxPayload: 1024 * 1024 },
+  });
+  await registerPtyWebSocket(fastify, {
+    pty: services.ptyChatSessions,
+    bus,
+    expectedToken: config.authToken,
+  });
 
   if (config.staticDir !== null) {
     await registerStaticRoutes(fastify, config.staticDir);

@@ -21,6 +21,10 @@ export function LoginPage({ onAuthenticated }: LoginProps) {
   const [token, setToken] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Toggle: some browser password managers intercept inputs with type=password
+  // and prevent normal typing/pasting. Letting the user reveal the token
+  // (type=text) avoids that whole class of conflicts.
+  const [revealed, setRevealed] = useState(false);
 
   const transport = getAuthTransport();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -76,15 +80,43 @@ export function LoginPage({ onAuthenticated }: LoginProps) {
         <form onSubmit={handleSubmit}>
           <label className="login-field">
             <span>Bearer-Token</span>
-            <input
-              ref={inputRef}
-              type="password"
-              autoComplete="off"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              disabled={submitting}
-              placeholder="Wert aus $CLAUDE_OS_AUTH_TOKEN"
-            />
+            <div className="login-field-row">
+              <input
+                ref={inputRef}
+                type={revealed ? 'text' : 'password'}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                // data-1p-ignore + data-lpignore tell 1Password / LastPass to
+                // skip this field so they don't overlay clicks/keypresses.
+                data-1p-ignore="true"
+                data-lpignore="true"
+                name="claude-os-bearer-token"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                onPaste={(e) => {
+                  // Fallback: even if React's onChange is swallowed by a
+                  // password manager, onPaste fires reliably.
+                  const pasted = e.clipboardData.getData('text');
+                  if (pasted.length > 0) {
+                    e.preventDefault();
+                    setToken(pasted.trim());
+                  }
+                }}
+                disabled={submitting}
+                placeholder="Wert aus $CLAUDE_OS_AUTH_TOKEN"
+              />
+              <button
+                type="button"
+                className="login-reveal"
+                onClick={() => setRevealed((r) => !r)}
+                disabled={submitting}
+                aria-label={revealed ? 'Token verbergen' : 'Token anzeigen'}
+              >
+                {revealed ? 'verbergen' : 'anzeigen'}
+              </button>
+            </div>
           </label>
           {error !== null && <div className="login-error">{error}</div>}
           <button type="submit" disabled={submitting || token.trim().length === 0}>

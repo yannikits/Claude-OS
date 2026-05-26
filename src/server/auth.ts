@@ -1,17 +1,30 @@
 /**
  * Bearer-Token authentication for the HTTP-Adapter.
  *
- * Single-User MVP per ADR-0032. The expected token is loaded once at boot
- * from `ServerConfig.authToken` and never logged. Verification uses
- * `crypto.timingSafeEqual` to avoid timing-leak attacks.
+ * Multi-User Stage 1 (ADR-0033): accepts a list of valid tokens. Each
+ * token's SHA-256 prefix becomes a deterministic Tenant-ID set on the
+ * request as `req.tenant`. Verification stays constant-time across the
+ * whole list (no timing-side-channel by token position).
  *
- * For Multi-User (Phase Web-5+) this layer becomes a token→tenant lookup;
- * the public surface (`verifyBearerToken`, `requireAuth`) stays unchanged.
+ * Single-token setups keep working unchanged — the list-of-one is the
+ * Single-User case.
  *
  * @module @server/auth
  */
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    /**
+     * Tenant-ID derived from the bearer token (sha256-prefix). Set by
+     * `makeAuthHook` after a successful match. Domain methods that need
+     * per-user isolation read this — default-fallback to "personal" when
+     * absent (e.g. Tauri-mode or unauthenticated /healthz).
+     */
+    tenant?: string;
+  }
+}
 
 const BEARER_PREFIX = 'Bearer ';
 
@@ -41,6 +54,46 @@ export function verifyBearerToken(presented: string, expected: string): boolean 
 }
 
 /**
+ * Parse the env-supplied token configuration into a list. Accepts both
+ * single-token (legacy / Single-User) and comma-separated multi-token.
+ *
+ * Whitespace around entries is trimmed. Empty entries (e.g. trailing
+ * commas) are dropped silently.
+ */
+export function parseTokenList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Constant-time match against the entire token list. Returns the
+ * matched token (so the caller can compute the tenant-id) or null when
+ * no entry matches. Always loops over every list entry — early-return
+ * would leak position via timing.
+ */
+export function matchBearerToken(presented: string, expected: readonly string[]): string | null {
+  let match: string | null = null;
+  for (const candidate of expected) {
+    if (verifyBearerToken(presented, candidate)) {
+      // Don't `break` — keep going to even out the loop time.
+      match = candidate;
+    }
+  }
+  return match;
+}
+
+/**
+ * Deterministic tenant-id from a bearer token. Uses SHA-256 → first
+ * 12 hex chars (48-bit space, plenty for homelab scale and easy to
+ * spot in log lines). The full token is never logged.
+ */
+export function tokenToTenantId(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex').slice(0, 12);
+}
+
+/**
  * Extract the bearer token from a `Authorization: Bearer <token>` header.
  * Throws `AuthError` with a precise reason for the failure case.
  */
@@ -66,24 +119,30 @@ export function extractBearer(headerValue: string | undefined): string {
  * Mitigation: tokens are session-scoped (sessionStorage) and rotatable
  * via env-restart. Header-auth remains preferred everywhere else.
  */
-const QUERY_TOKEN_ALLOWED_PATHS = new Set<string>(['/api/events']);
+const QUERY_TOKEN_ALLOWED_PATHS = new Set<string>(['/api/events', '/api/pty/ws']);
 
 /**
  * Fastify `preHandler` hook that enforces Bearer-Token auth on a route.
+ * Accepts any of the configured tokens (Multi-User Stage 1) and sets
+ * `req.tenant` to the deterministic tenant-id derived from the matching
+ * token.
+ *
  * For the routes in `QUERY_TOKEN_ALLOWED_PATHS` it also accepts a
- * `?token=...` query-string (needed for browser `EventSource` which
- * cannot send custom headers).
+ * `?token=...` query-string (needed for browser `EventSource` and
+ * `WebSocket` which cannot send custom headers).
  */
-export function makeAuthHook(expectedToken: string) {
-  if (expectedToken.length === 0) {
-    throw new Error('makeAuthHook: expectedToken must be non-empty');
+export function makeAuthHook(expectedTokens: readonly string[]) {
+  if (expectedTokens.length === 0) {
+    throw new Error('makeAuthHook: expectedTokens must contain at least one entry');
   }
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
       const presented = resolvePresentedToken(req);
-      if (!verifyBearerToken(presented, expectedToken)) {
+      const matched = matchBearerToken(presented, expectedTokens);
+      if (matched === null) {
         throw new AuthError('invalid');
       }
+      req.tenant = tokenToTenantId(matched);
     } catch (err) {
       const e = err as AuthError;
       reply.code(e.statusCode ?? 401).send({
