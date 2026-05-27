@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import { QuickCaptureModal } from './components/quick-capture-modal';
+import { SidebarWorkspaceSwitcher } from './components/sidebar-workspace-switcher';
 import { setupBrowserDragDrop } from './lib/drag-drop';
 import {
   getAuthTransport,
@@ -50,6 +51,7 @@ function Layout() {
         <Link to="/" className="brand">
           claude-os
         </Link>
+        <SidebarWorkspaceSwitcher />
         <nav>
           {NAV.map((n) => (
             <NavLink
