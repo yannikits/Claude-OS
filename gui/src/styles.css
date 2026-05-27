@@ -1334,3 +1334,149 @@ button.danger:disabled {
   font-style: italic;
   color: var(--muted);
 }
+
+/* ------- Phase Web-7-4: login tabs + register + profile-drawer ------- */
+.login-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.login-tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+.login-tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.login-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.login-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.login-link {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  text-decoration: underline;
+}
+.login-banner-success {
+  background: rgba(80, 200, 120, 0.12);
+  border: 1px solid rgba(80, 200, 120, 0.35);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.profile-drawer {
+  position: relative;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 8px 0;
+}
+.profile-drawer__trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.profile-drawer__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.profile-drawer__chevron {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 6px;
+}
+.profile-drawer__label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.profile-drawer__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+}
+.profile-drawer__menu {
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  right: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.profile-drawer__menu button {
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.profile-drawer__menu button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.profile-drawer__meta {
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.profile-drawer__tenant {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: monospace;
+}
+.profile-drawer__status {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.profile-drawer--bearer,
+.profile-drawer--loading {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.modal-backdrop-button {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 0;
+}

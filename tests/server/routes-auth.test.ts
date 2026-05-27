@@ -14,19 +14,25 @@ import { registerAuthRoutes } from '../../src/server/routes-auth.js';
 const FALLBACK_TOKEN = 'fallback-bearer-token-for-test-cli';
 const STRONG = 'correct-horse-battery-staple';
 
+interface HarnessOpts {
+  readonly allowRegistration?: boolean;
+}
+
 interface Harness {
   app: FastifyInstance;
   userRepo: UserRepository;
   sessionRepo: SessionRepository;
   rateLimiter: LoginRateLimiter;
+  registrationRateLimiter: LoginRateLimiter;
   dataDir: string;
 }
 
-async function buildHarness(): Promise<Harness> {
+async function buildHarness(opts: HarnessOpts = {}): Promise<Harness> {
   const dataDir = mkdtempSync(join(tmpdir(), 'routes-auth-'));
   const userRepo = await UserRepository.open({ dataDir });
   const sessionRepo = new SessionRepository();
   const rateLimiter = new LoginRateLimiter({ capacity: 5 });
+  const registrationRateLimiter = new LoginRateLimiter({ capacity: 3 });
 
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
@@ -44,6 +50,9 @@ async function buildHarness(): Promise<Harness> {
     rateLimiter,
     insecureCookies: true,
     sessionMaxAgeSec: 60 * 60,
+    ...(opts.allowRegistration === true
+      ? { allowRegistration: true, registrationRateLimiter }
+      : {}),
   });
 
   // Test endpoint behind auth — used to exercise CSRF + bearer paths.
@@ -54,7 +63,7 @@ async function buildHarness(): Promise<Harness> {
     reply.send({ ok: true, user: req.user?.id ?? null });
   });
 
-  return { app, userRepo, sessionRepo, rateLimiter, dataDir };
+  return { app, userRepo, sessionRepo, rateLimiter, registrationRateLimiter, dataDir };
 }
 
 function extractCookieValue(
@@ -279,7 +288,7 @@ describe('bearer-token fallback', () => {
       headers: { authorization: `Bearer ${FALLBACK_TOKEN}` },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ user: null });
+    expect(res.json()).toEqual({ user: null, allowRegistration: false });
   });
 
   it('bearer-only POST skips CSRF entirely', async () => {
@@ -373,5 +382,255 @@ describe('POST /api/auth/refresh', () => {
     expect(body.expiresAt).toBeGreaterThan(Date.now());
     const renewed = extractCookieValue(ref.headers['set-cookie'], SESSION_COOKIE_NAME);
     expect(renewed).toBe(sessionId);
+  });
+});
+
+describe('POST /api/auth/register', () => {
+  it('returns 404 by default (allowRegistration off)', async () => {
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { email: 'alice@example.com', password: STRONG },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  describe('when allowRegistration is enabled', () => {
+    let reg: Harness;
+
+    beforeEach(async () => {
+      reg = await buildHarness({ allowRegistration: true });
+    });
+
+    afterEach(async () => {
+      await reg.app.close();
+      reg.userRepo.close();
+      rmSync(reg.dataDir, { recursive: true, force: true });
+    });
+
+    it('201 on a valid new registration', async () => {
+      const res = await reg.app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { email: 'alice@example.com', password: STRONG },
+      });
+      expect(res.statusCode).toBe(201);
+      const body = res.json() as { user: { email: string } };
+      expect(body.user.email).toBe('alice@example.com');
+    });
+
+    it('400 duplicate-email when the address is already registered', async () => {
+      await reg.userRepo.createUser('alice@example.com', STRONG);
+      const res = await reg.app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { email: 'alice@example.com', password: STRONG },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('duplicate-email');
+    });
+
+    it('400 invalid-email when email format malformed', async () => {
+      const res = await reg.app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { email: 'not-an-email', password: STRONG },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('invalid-email');
+    });
+
+    it('400 weak-password when password is too short', async () => {
+      const res = await reg.app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { email: 'alice@example.com', password: 'short' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('weak-password');
+    });
+
+    it('429 after rate-limit capacity exhausted', async () => {
+      // capacity=3 → fourth attempt blocked
+      for (let i = 0; i < 3; i++) {
+        await reg.app.inject({
+          method: 'POST',
+          url: '/api/auth/register',
+          payload: { email: `bob${i}@example.com`, password: STRONG },
+        });
+      }
+      const res = await reg.app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { email: 'bob3@example.com', password: STRONG },
+      });
+      expect(res.statusCode).toBe(429);
+    });
+  });
+});
+
+describe('POST /api/auth/change-password', () => {
+  const NEW_PW = 'new-extremely-secure-passphrase';
+
+  it('401 when called without an active session-cookie', async () => {
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      payload: { oldPassword: STRONG, newPassword: NEW_PW },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('400 when fields missing', async () => {
+    await h.userRepo.createUser('alice@example.com', STRONG);
+    const login = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'alice@example.com', password: STRONG },
+    });
+    const sessionId = extractCookieValue(login.headers['set-cookie'], SESSION_COOKIE_NAME);
+    const csrf = extractCookieValue(login.headers['set-cookie'], CSRF_COOKIE_NAME);
+
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${sessionId}; ${CSRF_COOKIE_NAME}=${csrf}`,
+        'x-csrf-token': csrf ?? '',
+      },
+      payload: { oldPassword: STRONG },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('401 on wrong old password', async () => {
+    await h.userRepo.createUser('alice@example.com', STRONG);
+    const login = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'alice@example.com', password: STRONG },
+    });
+    const sessionId = extractCookieValue(login.headers['set-cookie'], SESSION_COOKIE_NAME);
+    const csrf = extractCookieValue(login.headers['set-cookie'], CSRF_COOKIE_NAME);
+
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${sessionId}; ${CSRF_COOKIE_NAME}=${csrf}`,
+        'x-csrf-token': csrf ?? '',
+      },
+      payload: { oldPassword: 'wrong-password', newPassword: NEW_PW },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('200 on success — old no longer verifies, new does', async () => {
+    const user = await h.userRepo.createUser('alice@example.com', STRONG);
+    const login = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'alice@example.com', password: STRONG },
+    });
+    const sessionId = extractCookieValue(login.headers['set-cookie'], SESSION_COOKIE_NAME);
+    const csrf = extractCookieValue(login.headers['set-cookie'], CSRF_COOKIE_NAME);
+
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${sessionId}; ${CSRF_COOKIE_NAME}=${csrf}`,
+        'x-csrf-token': csrf ?? '',
+      },
+      payload: { oldPassword: STRONG, newPassword: NEW_PW },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+
+    expect(await h.userRepo.verifyPassword('alice@example.com', STRONG)).toBeNull();
+    expect((await h.userRepo.verifyPassword('alice@example.com', NEW_PW))?.id).toBe(user.id);
+  });
+
+  it('400 weak-password when new password too short', async () => {
+    await h.userRepo.createUser('alice@example.com', STRONG);
+    const login = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'alice@example.com', password: STRONG },
+    });
+    const sessionId = extractCookieValue(login.headers['set-cookie'], SESSION_COOKIE_NAME);
+    const csrf = extractCookieValue(login.headers['set-cookie'], CSRF_COOKIE_NAME);
+
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${sessionId}; ${CSRF_COOKIE_NAME}=${csrf}`,
+        'x-csrf-token': csrf ?? '',
+      },
+      payload: { oldPassword: STRONG, newPassword: 'short' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('weak-password');
+  });
+
+  it('revokes all other sessions of the same user after successful change', async () => {
+    const user = await h.userRepo.createUser('alice@example.com', STRONG);
+    // Mint a "second" session — simulates the user logged in elsewhere.
+    const otherSession = h.sessionRepo.issue({ userId: user.id });
+
+    const login = await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'alice@example.com', password: STRONG },
+    });
+    const sessionId = extractCookieValue(login.headers['set-cookie'], SESSION_COOKIE_NAME);
+    const csrf = extractCookieValue(login.headers['set-cookie'], CSRF_COOKIE_NAME);
+
+    expect(h.sessionRepo.listForUser(user.id).length).toBe(2);
+
+    await h.app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${sessionId}; ${CSRF_COOKIE_NAME}=${csrf}`,
+        'x-csrf-token': csrf ?? '',
+      },
+      payload: { oldPassword: STRONG, newPassword: NEW_PW },
+    });
+
+    const remaining = h.sessionRepo.listForUser(user.id);
+    expect(remaining.length).toBe(1);
+    expect(remaining[0]?.id).toBe(sessionId);
+    expect(h.sessionRepo.peek(otherSession.id)).toBeNull();
+  });
+});
+
+describe('GET /api/auth/me allowRegistration flag', () => {
+  it('returns allowRegistration:false by default', async () => {
+    const res = await h.app.inject({
+      method: 'GET',
+      url: '/api/auth/me',
+      headers: { authorization: `Bearer ${FALLBACK_TOKEN}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ user: null, allowRegistration: false });
+  });
+
+  it('returns allowRegistration:true when feature is enabled', async () => {
+    const reg = await buildHarness({ allowRegistration: true });
+    try {
+      const res = await reg.app.inject({
+        method: 'GET',
+        url: '/api/auth/me',
+        headers: { authorization: `Bearer ${FALLBACK_TOKEN}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ user: null, allowRegistration: true });
+    } finally {
+      await reg.app.close();
+      reg.userRepo.close();
+      rmSync(reg.dataDir, { recursive: true, force: true });
+    }
   });
 });

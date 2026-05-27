@@ -28,6 +28,18 @@ export interface MultiUserConfig {
   readonly insecureCookies: boolean;
   /** Session-cookie `Max-Age=` in seconds. Default 30 days. */
   readonly sessionMaxAgeSec: number;
+  /**
+   * When true, exposes `POST /api/auth/register`. Off by default —
+   * production deployments use the Admin-CLI (Web-7-5) for provisioning
+   * and run behind Cloudflare Access / VPN.
+   */
+  readonly allowRegistration?: boolean;
+  /**
+   * Separate rate-limit bucket for registrations. Required when
+   * `allowRegistration` is true. Default in `index.ts` is 3 attempts /
+   * IP / hour.
+   */
+  readonly registrationRateLimiter?: LoginRateLimiter;
 }
 
 export interface ServerConfig {

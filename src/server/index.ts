@@ -208,6 +208,14 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
       ...(config.multiUser.audit !== undefined ? { audit: config.multiUser.audit } : {}),
       insecureCookies: config.multiUser.insecureCookies,
       sessionMaxAgeSec: config.multiUser.sessionMaxAgeSec,
+      ...(config.multiUser.allowRegistration === true
+        ? {
+            allowRegistration: true,
+            ...(config.multiUser.registrationRateLimiter !== undefined
+              ? { registrationRateLimiter: config.multiUser.registrationRateLimiter }
+              : {}),
+          }
+        : {}),
     });
   } else {
     log.info(

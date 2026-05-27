@@ -34,7 +34,9 @@ export type AuditEventKind =
   | 'note.write'
   | 'auth.login.success'
   | 'auth.login.failed'
-  | 'auth.logout';
+  | 'auth.logout'
+  | 'auth.register'
+  | 'auth.password.change';
 
 /**
  * Audit-log schema version. Bumped only when a backwards-incompatible

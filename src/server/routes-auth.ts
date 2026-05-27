@@ -45,11 +45,34 @@ export interface AuthRoutesDeps {
   readonly insecureCookies: boolean;
   /** Session lifetime in seconds for `Max-Age=`. */
   readonly sessionMaxAgeSec: number;
+  /**
+   * When true, exposes `POST /api/auth/register`. Default false — Web-7-4
+   * spec says self-registration ships off-by-default because the typical
+   * deployment is behind Cloudflare Access / VPN where Admin-CLI is the
+   * provisioning path.
+   */
+  readonly allowRegistration?: boolean;
+  /**
+   * Separate token-bucket for registrations (3 / IP / hour by default).
+   * Required when `allowRegistration` is true. Decoupled from the login
+   * rate-limiter so a registration flood can't block legitimate logins.
+   */
+  readonly registrationRateLimiter?: LoginRateLimiter;
 }
 
 interface LoginBody {
   email?: unknown;
   password?: unknown;
+}
+
+interface RegisterBody {
+  email?: unknown;
+  password?: unknown;
+}
+
+interface ChangePasswordBody {
+  oldPassword?: unknown;
+  newPassword?: unknown;
 }
 
 export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): void {
@@ -215,7 +238,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
   app.get('/api/auth/me', async (req, reply) => {
     if (req.user === undefined) {
       // Cookie-less request authenticated via bearer — no user-of-record.
-      reply.send({ user: null });
+      reply.send({ user: null, allowRegistration: deps.allowRegistration === true });
       return;
     }
     reply.send({
@@ -224,7 +247,162 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
         email: req.user.email,
         tenantId: userToTenantId(req.user),
       },
+      allowRegistration: deps.allowRegistration === true,
     });
+  });
+
+  // -----------------------------------------------------------
+  // POST /api/auth/register (conditional on allowRegistration)
+  // -----------------------------------------------------------
+  if (deps.allowRegistration === true) {
+    if (deps.registrationRateLimiter === undefined) {
+      throw new Error(
+        'registerAuthRoutes: allowRegistration=true requires registrationRateLimiter',
+      );
+    }
+    const regRateLimit = deps.registrationRateLimiter;
+    app.post('/api/auth/register', async (req, reply) => {
+      const ip = clientIp(req);
+      const body = (req.body ?? {}) as RegisterBody;
+      const email = typeof body.email === 'string' ? body.email : '';
+      const password = typeof body.password === 'string' ? body.password : '';
+
+      if (email.length === 0 || password.length === 0) {
+        reply
+          .code(400)
+          .send({ error: { code: 'invalid-request', message: 'email and password required' } });
+        return;
+      }
+
+      const rl = regRateLimit.check(ip);
+      if (!rl.allowed) {
+        reply.header('retry-after', rl.retryAfterSec.toString());
+        reply.code(429).send({
+          error: {
+            code: 'rate-limited',
+            message: `too many registration attempts; retry after ${rl.retryAfterSec}s`,
+          },
+        });
+        return;
+      }
+
+      try {
+        const user = await deps.userRepo.createUser(email, password);
+        regRateLimit.recordFailed(ip); // debit even on success — caps registrations not failed attempts
+        deps.audit?.append({
+          kind: 'auth.register',
+          action: 'register',
+          workspace: 'system',
+          tenant: userToTenantId(user),
+          outcome: 'ok',
+          details: {
+            userId: user.id,
+            emailHash: hashedEmail(email),
+            ipHash: hashedIp(ip),
+            userAgent: ua(req),
+          },
+        });
+        reply.code(201).send({
+          user: {
+            id: user.id,
+            email: user.email,
+            tenantId: userToTenantId(user),
+          },
+        });
+      } catch (err) {
+        // Debit failed registration attempts to prevent brute-force
+        // enumeration via "is this email registered?" probes.
+        regRateLimit.recordFailed(ip);
+        const errName = err instanceof Error ? err.name : 'Error';
+        const errMsg = err instanceof Error ? err.message : String(err);
+        deps.audit?.append({
+          kind: 'auth.register',
+          action: 'register',
+          workspace: 'system',
+          outcome: 'denied',
+          details: {
+            reason: errName,
+            emailHash: hashedEmail(email),
+            ipHash: hashedIp(ip),
+          },
+        });
+        const code =
+          errName === 'DuplicateEmailError'
+            ? 'duplicate-email'
+            : errName === 'InvalidEmailError'
+              ? 'invalid-email'
+              : errName === 'WeakPasswordError'
+                ? 'weak-password'
+                : 'register-failed';
+        reply.code(400).send({ error: { code, message: errMsg } });
+      }
+    });
+  }
+
+  // -----------------------------------------------------------
+  // POST /api/auth/change-password (cookie-auth required)
+  // -----------------------------------------------------------
+  app.post('/api/auth/change-password', async (req, reply) => {
+    if (req.user === undefined) {
+      reply.code(401).send({
+        error: {
+          code: 'unauthorized',
+          message: 'change-password requires an active session-cookie',
+        },
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as ChangePasswordBody;
+    const oldPassword = typeof body.oldPassword === 'string' ? body.oldPassword : '';
+    const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+
+    if (oldPassword.length === 0 || newPassword.length === 0) {
+      reply.code(400).send({
+        error: { code: 'invalid-request', message: 'oldPassword and newPassword required' },
+      });
+      return;
+    }
+
+    // Verify old password before touching the store.
+    const verified = await deps.userRepo.verifyPassword(req.user.email, oldPassword);
+    if (verified === null) {
+      reply.code(401).send({ error: { code: 'unauthorized', message: 'old password incorrect' } });
+      return;
+    }
+
+    try {
+      await deps.userRepo.setPassword(req.user.id, newPassword);
+    } catch (err) {
+      const errName = err instanceof Error ? err.name : 'Error';
+      const code = errName === 'WeakPasswordError' ? 'weak-password' : 'change-password-failed';
+      reply
+        .code(400)
+        .send({ error: { code, message: err instanceof Error ? err.message : String(err) } });
+      return;
+    }
+
+    // Revoke every session of this user except the current one (defence
+    // against credential-stuffing in a forgotten browser session).
+    const currentSessionId = req.sessionId;
+    const sessions = deps.sessionRepo.listForUser(req.user.id);
+    for (const s of sessions) {
+      if (s.id !== currentSessionId) deps.sessionRepo.revoke(s.id);
+    }
+
+    deps.audit?.append({
+      kind: 'auth.password.change',
+      action: 'password-change',
+      workspace: 'system',
+      tenant: userToTenantId(req.user),
+      outcome: 'ok',
+      details: {
+        userId: req.user.id,
+        ipHash: hashedIp(clientIp(req)),
+        revokedSessions: sessions.length - 1,
+      },
+    });
+
+    reply.send({ ok: true });
   });
 }
 

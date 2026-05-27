@@ -38,7 +38,7 @@ declare module 'fastify' {
 }
 
 /** Routes that the global hook skips entirely (auth not yet established). */
-const PUBLIC_PATHS = new Set<string>(['/api/auth/login']);
+const PUBLIC_PATHS = new Set<string>(['/api/auth/login', '/api/auth/register']);
 
 const UNSAFE_METHODS = new Set<string>(['POST', 'PUT', 'PATCH', 'DELETE']);
 /** Routes exempt from CSRF (login mints the cookie; refresh exchanges a bearer). */

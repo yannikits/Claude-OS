@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { ProfileDrawer } from './components/profile-drawer';
 import { QuickCaptureModal } from './components/quick-capture-modal';
 import { SidebarWorkspaceSwitcher } from './components/sidebar-workspace-switcher';
+import { type AuthUser, authMe, isCookieAuthed } from './lib/auth-api';
 import { setupBrowserDragDrop } from './lib/drag-drop';
 import {
   getAuthTransport,
@@ -30,6 +32,7 @@ import {
 } from './pages';
 import { LoginPage } from './pages/login';
 import { MemoryPage } from './pages/memory';
+import { RegisterPage } from './pages/register';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
@@ -44,7 +47,13 @@ const NAV = [
   { to: '/settings', label: 'Settings' },
 ] as const;
 
-function Layout() {
+interface LayoutProps {
+  readonly authMode: AuthMode;
+  readonly onLogout: () => void;
+}
+
+function Layout({ authMode, onLogout }: LayoutProps) {
+  const showProfile = authMode === 'cookie' || authMode === 'token';
   return (
     <div className="app">
       <aside className="sidebar">
@@ -52,6 +61,7 @@ function Layout() {
           claude-os
         </Link>
         <SidebarWorkspaceSwitcher />
+        {showProfile && <ProfileDrawer onLogout={onLogout} />}
         <nav>
           {NAV.map((n) => (
             <NavLink
@@ -97,30 +107,118 @@ const BANNER_TTL_MS = 5_000;
 /**
  * Decide whether the user needs to authenticate.
  *
- * - Tauri build: the OS-local user-session IS the authentication; render
- *   the app directly.
- * - HTTP build: present `<LoginPage/>` until a token is stored in
- *   sessionStorage; after a successful verify the gate flips to 'authed'.
+ * Modes:
+ *  - `tauri`  : OS-local session, always authed
+ *  - `cookie` : HTTP build via /api/auth/login (Web-7-2 / -7-4)
+ *  - `token`  : HTTP build via bearer-token (ADR-0033 Stage 1)
+ *  - `none`   : show LoginPage / RegisterPage
+ *
+ * Initial mode is best-effort sync; then we probe `/api/auth/me` once
+ * to either upgrade `none → cookie` (when the browser already has a
+ * valid session cookie from a previous visit) and to read the
+ * `allowRegistration` flag so the LoginPage can show the register link.
  */
-function useAuthGate(): { authed: boolean; markAuthenticated: () => void } {
-  const [authed, setAuthed] = useState<boolean>(() => {
-    if (isTauriRuntime()) return true;
-    const transport = getAuthTransport();
-    return transport !== null && transport.hasAuth();
-  });
-  return { authed, markAuthenticated: () => setAuthed(true) };
+type AuthMode = 'tauri' | 'cookie' | 'token' | 'none';
+
+interface AuthGateState {
+  readonly mode: AuthMode;
+  readonly allowRegistration: boolean;
+  readonly ready: boolean;
+  markAuthenticated(mode: 'cookie' | 'token', user?: AuthUser): void;
+  markLoggedOut(): void;
 }
+
+function useAuthGate(): AuthGateState {
+  const [mode, setMode] = useState<AuthMode>(() => {
+    if (isTauriRuntime()) return 'tauri';
+    if (isCookieAuthed()) return 'cookie';
+    const t = getAuthTransport();
+    return t !== null && t.hasAuth() ? 'token' : 'none';
+  });
+  const [allowRegistration, setAllowRegistration] = useState(false);
+  const [ready, setReady] = useState<boolean>(() => isTauriRuntime());
+
+  useEffect(() => {
+    if (isTauriRuntime()) {
+      setReady(true);
+      return;
+    }
+    let cancelled = false;
+    authMe()
+      .then((me) => {
+        if (cancelled) return;
+        setAllowRegistration(me.allowRegistration);
+        if (me.user !== null && mode === 'none') setMode('cookie');
+        setReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
+
+  return {
+    mode,
+    allowRegistration,
+    ready,
+    markAuthenticated: (m) => setMode(m),
+    markLoggedOut: () => {
+      const t = getAuthTransport();
+      if (t !== null) t.clearAuth();
+      setMode('none');
+    },
+  };
+}
+
+type AuthView = 'login' | 'register';
 
 export function App() {
-  const { authed, markAuthenticated } = useAuthGate();
+  const gate = useAuthGate();
+  const [view, setView] = useState<AuthView>('login');
+  const [postRegisterEmail, setPostRegisterEmail] = useState<string | null>(null);
 
-  if (!authed) {
-    return <LoginPage onAuthenticated={markAuthenticated} />;
+  if (!gate.ready) {
+    return (
+      <div className="login-screen">
+        <div className="login-card">Lade …</div>
+      </div>
+    );
   }
-  return <AuthenticatedApp />;
+
+  if (gate.mode === 'none') {
+    if (view === 'register') {
+      return (
+        <RegisterPage
+          onRegistered={(email) => {
+            setPostRegisterEmail(email);
+            setView('login');
+          }}
+          onCancel={() => setView('login')}
+        />
+      );
+    }
+    return (
+      <LoginPage
+        onAuthenticated={(m) => gate.markAuthenticated(m)}
+        {...(gate.allowRegistration ? { onSwitchToRegister: () => setView('register') } : {})}
+        {...(postRegisterEmail !== null
+          ? { successBanner: `Account ${postRegisterEmail} angelegt — bitte einloggen.` }
+          : {})}
+      />
+    );
+  }
+
+  return <AuthenticatedApp authMode={gate.mode} onLogout={gate.markLoggedOut} />;
 }
 
-function AuthenticatedApp() {
+interface AuthenticatedAppProps {
+  readonly authMode: AuthMode;
+  readonly onLogout: () => void;
+}
+
+function AuthenticatedApp({ authMode, onLogout }: AuthenticatedAppProps) {
   const [showLoading, setShowLoading] = useState(true);
   const [failure, setFailure] = useState<SidecarFailedPayload | null>(null);
   const [lastInbox, setLastInbox] = useState<WatcherChangeEvent | null>(null);
@@ -300,7 +398,7 @@ function AuthenticatedApp() {
             />
           )}
           <Routes>
-            <Route path="/" element={<Layout />}>
+            <Route path="/" element={<Layout authMode={authMode} onLogout={onLogout} />}>
               <Route index element={<Dashboard />} />
               <Route path="memory" element={<MemoryPage />} />
               <Route path="chat" element={<ChatPage />} />
