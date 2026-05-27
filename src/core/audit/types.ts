@@ -34,11 +34,28 @@ export type AuditEventKind =
   | 'note.write';
 
 /**
+ * Audit-log schema version. Bumped only when a backwards-incompatible
+ * field change happens. Forward-compat: readers tolerate higher versions
+ * by stripping unknown fields rather than rejecting the entry.
+ *
+ * History:
+ *   v1 (2026-05-27) — initial finalized schema per SECURITY.md §4:
+ *                     at, kind, action, workspace, tenant?, outcome,
+ *                     details?, pid, hostname, schema_version
+ */
+export const AUDIT_SCHEMA_VERSION = 1 as const;
+export type AuditSchemaVersion = typeof AUDIT_SCHEMA_VERSION;
+
+/**
  * Single append-only audit entry. Written as one JSONL row per
  * `auditLogger.append()`. The shape is fixed-key + open-ended
  * `details` to keep grep-friendly.
+ *
+ * Schema is finalized per SECURITY.md §4 (Phase 5 completion 2026-05-27).
  */
 export interface AuditEntry {
+  /** Schema version — see `AUDIT_SCHEMA_VERSION`. */
+  readonly schema_version: AuditSchemaVersion;
   /** ISO-8601 timestamp at write time. */
   readonly at: string;
   readonly kind: AuditEventKind;

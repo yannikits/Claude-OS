@@ -20,7 +20,7 @@ import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { auditFileForDate } from './paths.js';
-import { type AuditEntry, AuditError, type AuditEventKind } from './types.js';
+import { AUDIT_SCHEMA_VERSION, type AuditEntry, AuditError, type AuditEventKind } from './types.js';
 
 export interface AuditLoggerOpts {
   /** Override audit-dir (tests). */
@@ -58,6 +58,7 @@ export class AuditLogger {
   append(input: AppendInput): AuditEntry {
     const at = this.now();
     const entry: AuditEntry = {
+      schema_version: AUDIT_SCHEMA_VERSION,
       at: at.toISOString(),
       kind: input.kind,
       action: input.action,

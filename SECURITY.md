@@ -53,6 +53,8 @@ Vor jedem Provider-Call läuft Redaction-Hook:
 
 ## 4. Audit-Log
 
+**Schema-Status:** finalisiert v1 (2026-05-27) per Phase-5-completion. Siehe `src/core/audit/types.ts AUDIT_SCHEMA_VERSION` für die kanonische Form. Forward-compat: Reader tolerieren höhere Versionen durch unknown-field-skip; Backwards-incompat-Änderungen bumpen die Version.
+
 ### 4.1 Loggen
 - Provider-Call (Modell, Token-Counts, Tool-Calls, Approval-Status)
 - MSP-Tool-Aufruf (Bridge, Endpoint, HTTP-Status, Customer-ID falls vorhanden)
@@ -62,16 +64,34 @@ Vor jedem Provider-Call läuft Redaction-Hook:
 - Vault-Mutation (path, classification, operation, workspace)
 - Workspace-Switch
 
-### 4.2 Format (JSONL)
+### 4.2 Format (JSONL — v1, finalisiert 2026-05-27)
+
+Eine Zeile pro Event. Pflicht-Felder + freiform `details`:
+
 ```jsonl
-{"ts":"2026-05-24T03:25:00Z","event":"provider_call","model":"<from-config>","tokens_in":1234,"tokens_out":567,"tool_calls":["vault_search"],"approval":"auto","workspace":"personal","correlation_id":"uuid"}
+{"schema_version":1,"at":"2026-05-27T10:00:00.000Z","kind":"note.write","action":"quick-capture","workspace":"msp-customers/acme","tenant":"acme","outcome":"ok","details":{"source":"anruf","category":"incident","titleLength":18,"bodyLength":234},"pid":12345,"hostname":"yannik-pc"}
 ```
 
+Pflicht-Felder:
+- `schema_version` — `AUDIT_SCHEMA_VERSION` (heute `1`)
+- `at` — ISO-8601 UTC
+- `kind` — discriminator (`bridge.read|bridge.write|workspace.switch|secret.read|secret.write|skill.promote|skill.invoke|note.write`)
+- `action` — kurze Aktion (`tanss.tickets.list`, `quick-capture`, …)
+- `workspace` — aktiver Workspace (ADR-0031)
+- `outcome` — `ok|denied|error`
+- `pid`, `hostname` — forensic correlation
+
+Optionale Felder:
+- `tenant` — bei `msp-customers/<id>` gesetzt (Customer-ID extrahiert)
+- `details` — freeform sanitised payload (KEINE Secrets, Caller-Verantwortung)
+
 ### 4.3 Aufbewahrung
-- Pfad: `<config>/audit/YYYY-MM/audit.jsonl`
-- Append-only — kein Edit, kein Delete (außer Retention-Cleanup)
-- Retention: 90 Tage default, konfigurierbar bis 7 Jahre (DSGVO MSP-Kontext)
-- Rotation: monatlich, gzip-Archive
+- Pfad: `<dataDir>/audit/audit-YYYY-MM-DD.jsonl` (UTC-day-Rotation, automatisch)
+- Append-only — kein Edit, kein Delete (außer Retention-Cleanup via `pruneAuditFiles`)
+- File-Mode `0o600` (per-machine, nicht world-readable)
+- Retention: **90 Tage default** (per `DEFAULT_RETENTION_DAYS`), konfigurierbar bis 7 Jahre (DSGVO MSP-Kontext) via `$CLAUDE_OS_AUDIT_RETENTION_DAYS` env-var
+- Retention-Cleanup: `pruneAuditFiles()` aus `@core/audit/retention` — idempotent, dry-run-Mode, filename-driven (löscht NUR `audit-YYYY-MM-DD.jsonl`, lässt `.gz`-Archives + stray files alleine)
+- gzip-Archives: Phase-5-future (optional; aktuell wird `audit-YYYY-MM-DD.jsonl` nach Ablauf einfach gelöscht)
 
 ## 5. Self-Improving Skills (kritisch — ADR-0026)
 
