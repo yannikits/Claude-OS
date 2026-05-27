@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { QuickCaptureModal } from './components/quick-capture-modal';
 import { setupBrowserDragDrop } from './lib/drag-drop';
 import {
   getAuthTransport,
@@ -123,8 +124,15 @@ function AuthenticatedApp() {
   const [lastInbox, setLastInbox] = useState<WatcherChangeEvent | null>(null);
   const [lastOutbox, setLastOutbox] = useState<WatcherChangeEvent | null>(null);
   const [lastDrop, setLastDrop] = useState<{ count: number; ts: number } | null>(null);
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
+  const [lastCapture, setLastCapture] = useState<{ path: string; ts: number } | null>(null);
   const failureRef = useRef<SidecarFailedPayload | null>(null);
   failureRef.current = failure;
+
+  const openQuickCapture = useCallback(() => {
+    if (failureRef.current !== null) return; // Read-only mode
+    setQuickCaptureOpen(true);
+  }, []);
 
   // Poll ping() until sidecar is ready (supervisor spawns the sidecar in
   // setup() but it takes ~1-2s; fixed 500ms grace was a race that left
@@ -173,6 +181,33 @@ function AuthenticatedApp() {
     const t = setTimeout(() => setLastOutbox(null), BANNER_TTL_MS);
     return () => clearTimeout(t);
   }, [lastOutbox]);
+
+  useEffect(() => {
+    if (!lastCapture) return;
+    const t = setTimeout(() => setLastCapture(null), BANNER_TTL_MS);
+    return () => clearTimeout(t);
+  }, [lastCapture]);
+
+  // Global hotkey "n" — opens Quick-Capture. Ignored when:
+  //   - any modal already open (modal owns Escape/Enter)
+  //   - focus is in an input/textarea/select (user is typing)
+  //   - sidecar is in read-only mode (handled in openQuickCapture)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'n' && e.key !== 'N') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t === null) return;
+      const tag = t.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if (t.isContentEditable) return;
+      if (quickCaptureOpen) return;
+      e.preventDefault();
+      openQuickCapture();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [quickCaptureOpen, openQuickCapture]);
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
@@ -236,6 +271,31 @@ function AuthenticatedApp() {
                 </span>
               )}
             </div>
+          )}
+          {lastCapture && (
+            <div className="banner banner-success" role="status" key={lastCapture.ts}>
+              Quick-Capture gespeichert: {lastCapture.path.split(/[\\/]/).pop()}
+            </div>
+          )}
+          <button
+            type="button"
+            className="quick-capture-fab"
+            onClick={openQuickCapture}
+            disabled={failure !== null}
+            aria-label="Quick-Capture öffnen (Hotkey: n)"
+            title={
+              failure !== null
+                ? 'Quick-Capture deaktiviert (Sidecar nicht verfügbar)'
+                : 'Quick-Capture öffnen (n)'
+            }
+          >
+            + Quick-Capture
+          </button>
+          {quickCaptureOpen && (
+            <QuickCaptureModal
+              onClose={() => setQuickCaptureOpen(false)}
+              onCaptured={(path) => setLastCapture({ path, ts: Date.now() })}
+            />
           )}
           <Routes>
             <Route path="/" element={<Layout />}>

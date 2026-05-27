@@ -1165,3 +1165,101 @@ button.danger:disabled {
   border-color: var(--border);
   color: var(--muted);
 }
+
+/* ---------- Quick-Capture (MSP-Daily-Workflow) ---------- */
+
+.quick-capture-fab {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 50;
+  padding: 12px 18px;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+.quick-capture-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+.quick-capture-fab:active {
+  transform: translateY(0);
+}
+.quick-capture-fab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.quick-capture-modal {
+  max-width: 640px;
+  width: 92vw;
+}
+
+.quick-capture-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.quick-capture-header h2 {
+  margin: 0;
+}
+
+.quick-capture-badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quick-capture-badge.badge-customer {
+  background: rgba(255, 165, 0, 0.18);
+  color: #ffc36b;
+  border: 1px solid rgba(255, 165, 0, 0.4);
+}
+.quick-capture-badge.badge-internal {
+  background: rgba(0, 180, 255, 0.16);
+  color: #6ed0ff;
+  border: 1px solid rgba(0, 180, 255, 0.35);
+}
+.quick-capture-badge.badge-warning {
+  background: rgba(255, 80, 80, 0.16);
+  color: #ff8080;
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  font-weight: 500;
+}
+
+.banner-success {
+  background: rgba(0, 180, 100, 0.16);
+  color: #6ce0a0;
+  border: 1px solid rgba(0, 180, 100, 0.35);
+}
+
+@media (max-width: 600px) {
+  .quick-capture-fab {
+    bottom: 12px;
+    right: 12px;
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+  .quick-capture-modal {
+    width: 96vw;
+    max-width: none;
+  }
+}

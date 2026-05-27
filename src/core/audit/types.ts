@@ -30,7 +30,8 @@ export type AuditEventKind =
   | 'secret.read'
   | 'secret.write'
   | 'skill.promote'
-  | 'skill.invoke';
+  | 'skill.invoke'
+  | 'note.write';
 
 /**
  * Single append-only audit entry. Written as one JSONL row per

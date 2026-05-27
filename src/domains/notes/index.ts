@@ -13,6 +13,21 @@ export {
   serializeNote,
 } from './parser.js';
 export { assertValidNoteFilename, ensureWorkspaceDir, noteFilePath } from './paths.js';
+export {
+  buildFilename,
+  defaultClassification,
+  QUICK_CAPTURE_CATEGORIES,
+  QUICK_CAPTURE_SOURCES,
+  QUICK_CAPTURE_STATUSES,
+  type QuickCaptureCategory,
+  type QuickCaptureInput,
+  type QuickCaptureOpts,
+  type QuickCaptureResult,
+  type QuickCaptureSource,
+  type QuickCaptureStatus,
+  quickCapture,
+  slugifyTitle,
+} from './quick-capture.js';
 export { listNotes, readNote } from './reader.js';
 export {
   FrontmatterParseError,

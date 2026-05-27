@@ -762,6 +762,42 @@ export async function saveNote(input: NotesSaveInput): Promise<NotesSaveResult> 
   return rpcCall<NotesSaveResult>('notes.save', input);
 }
 
+export interface QuickCaptureInput {
+  title: string;
+  body: string;
+  source: string;
+  category: string;
+  status?: string;
+  tags?: string[];
+  workspace?: string;
+  tanssTicketId?: string;
+}
+
+export interface QuickCaptureResult {
+  path: string;
+  workspace: string;
+  tenant: string | null;
+  created: boolean;
+  filename: string;
+  source: string;
+  category: string;
+}
+
+export interface QuickCaptureMeta {
+  activeWorkspace: string;
+  sources: string[];
+  categories: string[];
+  statuses: string[];
+}
+
+export async function quickCaptureNote(input: QuickCaptureInput): Promise<QuickCaptureResult> {
+  return rpcCall<QuickCaptureResult>('notes.quickCapture', input);
+}
+
+export async function getQuickCaptureMeta(): Promise<QuickCaptureMeta> {
+  return rpcCall<QuickCaptureMeta>('notes.captureMeta', {});
+}
+
 export async function listNotesByWorkspace(
   opts: { workspace?: string; recursive?: boolean; limit?: number } = {},
 ): Promise<NoteListItem[]> {
