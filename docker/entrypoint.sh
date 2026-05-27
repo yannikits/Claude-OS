@@ -57,6 +57,22 @@ echo "    static:    ${CLAUDE_OS_STATIC_DIR:-/app/gui/dist}"
 echo "    port:      ${PORT:-3000}"
 echo "    host:      ${HOST:-0.0.0.0}"
 
+# Pre-flight: doctor --json catches mis-configured secrets backend,
+# unmounted vault, and other server-env drift BEFORE the server tries
+# to boot and crashes later with cryptic ENOENT/EACCES. The check
+# fails-loud — container exits 1 instead of staying in a half-started
+# state. Skipped if $CLAUDE_OS_SKIP_DOCTOR=1 (escape hatch for debugging).
+if [ "${CLAUDE_OS_SKIP_DOCTOR:-0}" != "1" ]; then
+  echo "==> running pre-flight doctor"
+  if ! node /app/dist/cli/index.js doctor --json > /tmp/doctor-preflight.json 2>&1; then
+    echo "FATAL: claude-os doctor pre-flight failed" >&2
+    cat /tmp/doctor-preflight.json >&2
+    echo "" >&2
+    echo "Set CLAUDE_OS_SKIP_DOCTOR=1 to bypass (debugging only)." >&2
+    exit 1
+  fi
+fi
+
 exec node /app/dist/cli/index.js serve \
   --host "${HOST:-0.0.0.0}" \
   --port "${PORT:-3000}"

@@ -10,6 +10,7 @@ import {
   checkGitAvailable,
   checkMountReachable,
   checkNodeVersion,
+  checkServerEnv,
   checkWindowsLongPaths,
   checkWritePermission,
 } from './checks.js';
@@ -52,6 +53,7 @@ export async function runDoctor(
       checkClaudeBinary(root.path),
       checkWritePermission(root.path),
       checkWindowsLongPaths(),
+      checkServerEnv(),
     ]);
     return summarize(checks, Date.now() - startedAt);
   }
@@ -69,6 +71,7 @@ export async function runDoctor(
     checkNodeVersion(),
     checkGitAvailable(),
     checkWindowsLongPaths(),
+    checkServerEnv(),
   ]);
   return summarize([rootResolutionFail, ...independent], Date.now() - startedAt);
 }

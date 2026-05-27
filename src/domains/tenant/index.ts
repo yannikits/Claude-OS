@@ -11,9 +11,11 @@ export {
   assertNoActiveTenant,
 } from './guard.js';
 export { resolveTenantContext } from './resolve.js';
+export { resolveTenantFromToken, tokenToTenantId } from './resolve-token.js';
 export {
   CrossTenantAccessError,
   NoTenantContextError,
+  type ServerTenantContext,
   type TenantContext,
   TenantError,
 } from './types.js';

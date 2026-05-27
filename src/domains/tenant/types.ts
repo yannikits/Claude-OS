@@ -19,6 +19,21 @@ export interface TenantContext {
   readonly tenant: string | null;
 }
 
+/**
+ * Server-mode extension of `TenantContext` (Phase Web-5 / ADR-0033).
+ * Adds the deterministic token-derived tenant-id used for per-token
+ * data isolation and audit-log subject tagging. Undefined in Tauri-mode
+ * (no bearer token there).
+ */
+export interface ServerTenantContext extends TenantContext {
+  /**
+   * Stable 12-hex prefix of SHA-256(token). Survives container restarts
+   * — same token always resolves to the same id. Used as audit-log
+   * subject and (Phase Web-5b) per-token workspace key.
+   */
+  readonly tokenTenantId?: string;
+}
+
 export class TenantError extends Error {
   constructor(message: string) {
     super(message);

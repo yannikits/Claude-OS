@@ -7,6 +7,7 @@ import {
   checkGitAvailable,
   checkMountReachable,
   checkNodeVersion,
+  checkServerEnv,
   checkWindowsLongPaths,
   checkWritePermission,
 } from '../../../src/core/doctor/index.js';
@@ -136,5 +137,78 @@ describe('checkWindowsLongPaths', () => {
     const result = await checkWindowsLongPaths();
     expect(['ok', 'warn']).toContain(result.severity);
     expect(result.name).toBe('windows-long-paths');
+  });
+});
+
+describe('checkServerEnv', () => {
+  let tmpVault: string;
+
+  beforeEach(() => {
+    tmpVault = mkdtempSync(join(tmpdir(), 'claude-os-server-env-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tmpVault)) rmSync(tmpVault, { recursive: true, force: true });
+  });
+
+  it('skips with ok when CLAUDE_OS_AUTH_TOKEN is unset (Tauri mode)', async () => {
+    const result = await checkServerEnv({});
+    expect(result.severity).toBe('ok');
+    expect(result.message).toContain('not in server mode');
+  });
+
+  it('returns ok when all server-mode env-vars are set correctly', async () => {
+    const result = await checkServerEnv({
+      CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      CLAUDE_OS_SECRETS_BACKEND: 'file',
+      CLAUDE_OS_VAULT_PATH: tmpVault,
+    });
+    expect(result.severity).toBe('ok');
+    expect(result.message).toContain('server-mode env complete');
+  });
+
+  it('fails when CLAUDE_OS_SECRETS_BACKEND is wrong', async () => {
+    const result = await checkServerEnv({
+      CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      CLAUDE_OS_SECRETS_BACKEND: 'keyring',
+      CLAUDE_OS_VAULT_PATH: tmpVault,
+    });
+    expect(result.severity).toBe('fail');
+    expect(result.detail).toContain('CLAUDE_OS_SECRETS_BACKEND');
+    expect(result.detail).toContain('headless');
+  });
+
+  it('fails when CLAUDE_OS_VAULT_PATH is unset', async () => {
+    const result = await checkServerEnv({
+      CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      CLAUDE_OS_SECRETS_BACKEND: 'file',
+    });
+    expect(result.severity).toBe('fail');
+    expect(result.detail).toContain('CLAUDE_OS_VAULT_PATH is unset');
+  });
+
+  it('fails when CLAUDE_OS_VAULT_PATH does not exist', async () => {
+    const result = await checkServerEnv({
+      CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      CLAUDE_OS_SECRETS_BACKEND: 'file',
+      CLAUDE_OS_VAULT_PATH: join(tmpVault, 'nope'),
+    });
+    expect(result.severity).toBe('fail');
+    expect(result.detail).toContain('does not exist');
+  });
+
+  it('aggregates multiple problems in one detail string', async () => {
+    const result = await checkServerEnv({
+      CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      // backend wrong + vault missing → both surface
+    });
+    expect(result.severity).toBe('fail');
+    expect(result.detail).toContain('CLAUDE_OS_SECRETS_BACKEND');
+    expect(result.detail).toContain('CLAUDE_OS_VAULT_PATH');
+  });
+
+  it('hint points at docs/server-deployment.md', async () => {
+    const result = await checkServerEnv({ CLAUDE_OS_AUTH_TOKEN: 'x' });
+    expect(result.hint).toContain('server-deployment.md');
   });
 });

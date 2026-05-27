@@ -45,10 +45,22 @@ Phasen sind sequenziell. Phase überspringen nur via ADR in `tasks/adr/`. Defini
 **Noch nicht gebaut:**
 - `SOUL.md`, `TOOLS.md` (Root-Level)
 - Phase 7 MSP-Bridges Write (approval-gate, ADR-0027 §Phase-7)
-- Phase 8 GUI Polish (Tray, Auto-Update via Tauri-Updater, ADR-0028/0018)
+- Phase 8 GUI Polish (Tray, Auto-Update via Tauri-Updater, ADR-0028/0018) — **deprioritisiert 2026-05-27** zugunsten Web/Linux-Server-Distribution (siehe §"Distribution-Pivot 2026-05-27")
 - Phase 9 Side-Skills (House-Watch, separates Private-Repo per ADR-0030)
 - Phase-5-completion: Sandbox-Process-Isolation, Yannik-Signatur-Flow, Audit-Log-Format-Finalisierung
 - MSP-Bridge-Impls (separates `claude-os-msp` per ADR-0030)
+
+**Phase Web vollständig shipped (2026-05-27):** Headless-HTTP-Variante mit Web-UI ist Primary-Distribution. Siehe `tasks/phase-server-web.md`. Tauri-Desktop bleibt funktional als Sekundär-Distribution.
+
+## Distribution-Pivot 2026-05-27
+
+Yannik priorisiert die **Web-Anwendung mit Linux-Server-OS** als Primary-Distribution. Tauri-Desktop-Codesigning (macOS/Windows) ist damit niedrige Priorität — Signing kostet $99/y (Apple) + $200/y (OV-Cert), zahlt sich für den aktuellen Use-Case nicht aus.
+
+**Folgen:**
+- `tasks/todo.md` Phase 8a (macOS Codesigning + Notarization) und Phase 8b (Windows Authenticode-Signing) sind deprioritisiert. Re-Aufnahme nur wenn breitere Desktop-Distribution gewünscht wird.
+- Phase 8e (Tag v1.3.0) wartete auf 8a/8b — bleibt damit offen. Web-Distribution shippt unter eigener Version (siehe `docker-compose.example.yml` Image-Tag).
+- `docs/macos-gatekeeper.md` und `docs/windows-smartscreen.md` (geplant) bleiben als User-Workarounds dokumentiert; werden nicht aktiv obsoleted.
+- Linux-Build-Pfad (ADR-0018 AppImage-zsync) bleibt aktiv, weil er die Desktop-Variante für Linux-Self-Hoster abdeckt.
 
 ## Phasen
 

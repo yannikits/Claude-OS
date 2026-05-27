@@ -11,8 +11,15 @@
  *
  * @module @server/auth
  */
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { tokenToTenantId } from '../domains/tenant/index.js';
+
+// Re-export so existing callers and tests that import from `@server/auth`
+// keep working unchanged. The canonical definition lives in
+// `src/domains/tenant/resolve-token.ts` (correct layering: domain →
+// transport, never the other way).
+export { tokenToTenantId };
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -82,15 +89,6 @@ export function matchBearerToken(presented: string, expected: readonly string[])
     }
   }
   return match;
-}
-
-/**
- * Deterministic tenant-id from a bearer token. Uses SHA-256 → first
- * 12 hex chars (48-bit space, plenty for homelab scale and easy to
- * spot in log lines). The full token is never logged.
- */
-export function tokenToTenantId(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex').slice(0, 12);
 }
 
 /**

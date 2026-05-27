@@ -9,6 +9,7 @@ export {
   checkGitAvailable,
   checkMountReachable,
   checkNodeVersion,
+  checkServerEnv,
   checkWindowsLongPaths,
   checkWritePermission,
 } from './checks.js';

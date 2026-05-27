@@ -15,7 +15,9 @@
 
 **Plan-Datum:** 2026-05-26
 **Branch:** `feature/phase-web-server-deployment` (off main)
-**Status (2026-05-26 abends):** Web-1 + Web-2 + Web-3 + Web-4 + Web-5 Stage 1 + Web-6 **shipped**. **Full feature-parity zur Tauri-Variante erreicht.** Drag-and-Drop läuft jetzt auch im Browser via multipart-upload zu `/api/inbox/upload`. Multi-User via Token-Liste in `.env` (ADR-0033). Web-5 Stage 2 (Login-UI + User-Registrierung) bleibt als eigene Phase offen.
+**Status (2026-05-27):** Web-1 + Web-2 + Web-3 + Web-4 + **Web-5 vollständig** + Web-6 **shipped**. **Full feature-parity zur Tauri-Variante erreicht.** Drag-and-Drop läuft jetzt auch im Browser via multipart-upload zu `/api/inbox/upload`. Multi-User via Token-Liste in `.env` (ADR-0033). `resolveTenantFromToken` + `checkServerEnv` + entrypoint-Pre-Flight ergänzt 2026-05-27 (PR `feature/phase-web-5-completion`). Web-5 Stage 2 (Login-UI + User-Registrierung) bleibt als eigene Phase offen.
+
+**Strategischer Pivot 2026-05-27:** Tauri-Desktop-Codesigning (Phase 8a macOS, Phase 8b Windows in `tasks/todo.md`) wird **deprioritisiert**. Web-Variante + Linux-Server-OS ist Primary-Distribution; Tauri-Build bleibt funktional, aber Signing-Aufwand zahlt sich für die aktuelle Use-Case nicht aus.
 
 ## Shipped Commits
 
@@ -140,12 +142,12 @@ Docker-Container "claude-os"
 
 **Ziel:** Claude-CLI-Login im Container, Workspace-Persistenz, Tenant-Resolver bereit für Multi-User.
 
-- [ ] `docs/server-deployment.md` — Setup-Schritt: `docker exec -it claude-os claude auth login` → DeviceCode-Flow im Browser → Auth-File persistiert in Volume
+- [x] `docs/server-deployment.md` — Setup-Schritt: `docker exec -it claude-os claude auth login` → DeviceCode-Flow im Browser → Auth-File persistiert in Volume (siehe §"Schritt 2.4 — Anthropic-Login")
 - [x] `src/server/auth.ts` — Token-Validation triggert TenantContext-Resolver mit Single-User-Default; Tenant-ID ist Token-Hash (so steht der Multi-User-Switch später bei: Token-Tabelle statt Single-Token)
-- [ ] `src/domains/tenant/` Wrapper-Methode `resolveTenantFromToken(token): TenantContext` — als public-Interface dokumentieren
-- [ ] Doctor-Check `serverEnvOk`: prüft `CLAUDE_OS_AUTH_TOKEN` gesetzt, `CLAUDE_OS_SECRETS_BACKEND=file`, `CLAUDE_OS_VAULT_PATH` erreichbar; runs in entrypoint.sh
+- [x] `src/domains/tenant/` Wrapper-Methode `resolveTenantFromToken(token): ServerTenantContext` (Phase Web-5 completion 2026-05-27). Public-Interface in `src/domains/tenant/resolve-token.ts`. Layering: `src/server/auth.ts` importiert `tokenToTenantId` aus tenant-domain (Domain → Transport, never reversed). Re-export aus `src/server/auth.ts` für Backwards-Compat mit existing Tests. `ServerTenantContext extends TenantContext` mit optionalem `tokenTenantId: string` (12-hex sha256 prefix). +9 Tests in `tests/domains/tenant/resolve-token.test.ts`.
+- [x] Doctor-Check `checkServerEnv`: prüft `CLAUDE_OS_AUTH_TOKEN` gesetzt, `CLAUDE_OS_SECRETS_BACKEND=file`, `CLAUDE_OS_VAULT_PATH` exists + writable. Skip-with-ok wenn `$CLAUDE_OS_AUTH_TOKEN` unset (Tauri-Mode unaffected). Wired into `runDoctor()` (both root-resolved und root-not-resolvable Pfade). entrypoint.sh ruft `doctor --json` pre-flight auf, exit 1 bei fail mit `$CLAUDE_OS_SKIP_DOCTOR=1` als Escape-Hatch. +7 Tests in `tests/core/doctor/checks.test.ts`.
 
-**DoD Web-5:** Yannik macht `claude auth login` einmalig, danach überleben Container-Restarts die Auth. Tenant-Resolver gibt für gegebenen Token konsistent denselben Workspace zurück.
+**DoD Web-5:** Yannik macht `claude auth login` einmalig, danach überleben Container-Restarts die Auth. Tenant-Resolver gibt für gegebenen Token konsistent denselben Workspace zurück. ✅ **Web-5 abgeschlossen 2026-05-27.**
 
 ---
 

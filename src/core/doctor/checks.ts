@@ -157,6 +157,79 @@ export async function checkWindowsLongPaths(): Promise<CheckResult> {
   });
 }
 
+/**
+ * Server-mode pre-flight (Phase Web-5 per ADR-0032 §"Akzeptanzkriterien" #1).
+ *
+ * Runs from `docker/entrypoint.sh` before `claude-os serve` boots —
+ * fails loud so the container exits with a usable error message
+ * instead of starting in a half-configured state.
+ *
+ * Three boundaries this check protects:
+ *  1. `CLAUDE_OS_AUTH_TOKEN` set → otherwise the server's
+ *     `makeAuthHook` would refuse-boot anyway, but later in startup
+ *     and with a less-greppable message.
+ *  2. `CLAUDE_OS_SECRETS_BACKEND=file` → headless containers have no
+ *     keyring/DBus; the encrypted-file backend is the only viable
+ *     choice. Catching a mis-set `=keyring` here saves a confusing
+ *     runtime crash on the first `secrets.set` call.
+ *  3. `CLAUDE_OS_VAULT_PATH` directory exists and is writable →
+ *     otherwise vault-sync, note-write, and FTS-indexer fail later
+ *     with cryptic ENOENT/EACCES errors deep in `methods.ts`.
+ *
+ * Skips with `ok` outside server-mode (no `CLAUDE_OS_AUTH_TOKEN`
+ * present), so Tauri-desktop `claude-os doctor` runs are unaffected.
+ */
+export async function checkServerEnv(env: NodeJS.ProcessEnv = process.env): Promise<CheckResult> {
+  return timed('server-env', () => {
+    const token = env.CLAUDE_OS_AUTH_TOKEN;
+    if (token === undefined || token.length === 0) {
+      return Promise.resolve({
+        name: 'server-env',
+        severity: 'ok',
+        message: 'not in server mode (skipped — $CLAUDE_OS_AUTH_TOKEN unset)',
+      });
+    }
+
+    const problems: string[] = [];
+
+    const backend = env.CLAUDE_OS_SECRETS_BACKEND ?? '';
+    if (backend !== 'file') {
+      problems.push(
+        `CLAUDE_OS_SECRETS_BACKEND="${backend}" — must be "file" in headless containers (keyring backends need a desktop session)`,
+      );
+    }
+
+    const vaultPath = env.CLAUDE_OS_VAULT_PATH ?? '';
+    if (vaultPath.length === 0) {
+      problems.push('CLAUDE_OS_VAULT_PATH is unset — pre-flight expects a mounted vault directory');
+    } else if (!existsSync(vaultPath)) {
+      problems.push(`CLAUDE_OS_VAULT_PATH="${vaultPath}" does not exist (volume not mounted?)`);
+    } else {
+      try {
+        accessSync(vaultPath, fsConstants.W_OK);
+      } catch {
+        problems.push(`CLAUDE_OS_VAULT_PATH="${vaultPath}" is not writable`);
+      }
+    }
+
+    if (problems.length === 0) {
+      return Promise.resolve({
+        name: 'server-env',
+        severity: 'ok',
+        message: 'server-mode env complete (token + file-backend + writable vault)',
+      });
+    }
+
+    return Promise.resolve({
+      name: 'server-env',
+      severity: 'fail',
+      message: 'server-mode env incomplete',
+      detail: problems.join(' | '),
+      hint: 'See docs/server-deployment.md §"Schritt 2 — Claude-OS deployen" for the expected .env layout',
+    });
+  });
+}
+
 export async function checkWritePermission(rootPath: string): Promise<CheckResult> {
   return timed('write-permission', () => {
     try {
