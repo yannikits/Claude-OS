@@ -830,3 +830,28 @@ export async function searchVault(opts: {
 }): Promise<RetrievalSearchResult> {
   return rpcCall<RetrievalSearchResult>('retrieval.search', opts);
 }
+
+export interface CrossWorkspaceHitDto extends RetrievalHitDto {
+  workspace: string;
+}
+
+export interface CrossWorkspaceSearchResult {
+  query: string;
+  tokens: string[];
+  hits: CrossWorkspaceHitDto[];
+  totalScanned: number;
+  durationMs: number;
+  activeWorkspace: string;
+  scope: string[];
+  crossCustomer: boolean;
+}
+
+export async function crossWorkspaceSearch(opts: {
+  text: string;
+  crossCustomer?: boolean;
+  topK?: number;
+  includeEphemeral?: boolean;
+  recursive?: boolean;
+}): Promise<CrossWorkspaceSearchResult> {
+  return rpcCall<CrossWorkspaceSearchResult>('retrieval.crossWorkspaceSearch', opts);
+}

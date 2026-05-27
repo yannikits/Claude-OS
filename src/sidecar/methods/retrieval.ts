@@ -7,8 +7,9 @@
  *
  * @module @sidecar/methods/retrieval
  */
+import { AuditLogger } from '../../core/audit/index.js';
 import type { Note } from '../../domains/notes/index.js';
-import { searchWorkspace } from '../../domains/retrieval/index.js';
+import { crossWorkspaceSearch, searchWorkspace } from '../../domains/retrieval/index.js';
 import {
   readActiveWorkspace,
   resolveVaultRoot,
@@ -16,6 +17,14 @@ import {
 } from '../../domains/workspace/index.js';
 import type { RpcDispatcher } from '../rpc.js';
 import { requireString } from './_shared.js';
+
+let sharedAuditLogger: AuditLogger | undefined;
+function getAuditLogger(): AuditLogger {
+  if (sharedAuditLogger === undefined) {
+    sharedAuditLogger = new AuditLogger();
+  }
+  return sharedAuditLogger;
+}
 
 interface SearchParams {
   readonly text: string;
@@ -53,6 +62,31 @@ function resolveVaultOrThrow(): string {
   }
 }
 
+interface CrossWorkspaceSearchParams {
+  readonly text: string;
+  readonly crossCustomer?: boolean;
+  readonly topK?: number;
+  readonly includeEphemeral?: boolean;
+  readonly recursive?: boolean;
+}
+
+interface CrossWorkspaceHitDto extends SearchHitDto {
+  /** Workspace this hit originated from — surfaced explicitly per
+   *  Codex Stage-2 hardening (caller MUST be able to render source). */
+  readonly workspace: string;
+}
+
+interface CrossWorkspaceSearchResponse {
+  readonly query: string;
+  readonly tokens: readonly string[];
+  readonly hits: readonly CrossWorkspaceHitDto[];
+  readonly totalScanned: number;
+  readonly durationMs: number;
+  readonly activeWorkspace: string;
+  readonly scope: readonly string[];
+  readonly crossCustomer: boolean;
+}
+
 export function registerRetrievalMethods(dispatcher: RpcDispatcher): void {
   dispatcher.register('retrieval.search', (raw): SearchResponse => {
     const p = (raw ?? {}) as Partial<SearchParams>;
@@ -78,6 +112,48 @@ export function registerRetrievalMethods(dispatcher: RpcDispatcher): void {
       totalScanned: result.totalScanned,
       durationMs: result.durationMs,
       workspace: workspaceId,
+    };
+  });
+
+  dispatcher.register('retrieval.crossWorkspaceSearch', (raw): CrossWorkspaceSearchResponse => {
+    const p = (raw ?? {}) as Partial<CrossWorkspaceSearchParams>;
+    const text = requireString(p.text, 'text', 'retrieval.crossWorkspaceSearch');
+    const vault = resolveVaultOrThrow();
+    const activeWorkspace = readActiveWorkspace().active;
+    const topK = typeof p.topK === 'number' && p.topK > 0 ? p.topK : 10;
+    const result = crossWorkspaceSearch(
+      vault,
+      {
+        query: {
+          text,
+          topK,
+          excludeClassifications: p.includeEphemeral === true ? [] : undefined,
+          recursive: p.recursive === true,
+        },
+        activeWorkspace,
+        crossCustomer: p.crossCustomer === true,
+      },
+      // Audit-logger only matters for crossCustomer=true (per
+      // domain-layer policy) — we still inject it so the flag
+      // toggles work correctly.
+      { auditLogger: getAuditLogger() },
+    );
+    return {
+      query: result.query,
+      tokens: result.tokens,
+      hits: result.hits.map((h) => ({
+        path: h.note.path,
+        score: h.score,
+        matchedTerms: h.matchedTerms,
+        preview: h.note.body.slice(0, HIT_PREVIEW_CHARS),
+        frontmatter: h.note.frontmatter,
+        workspace: h.note.workspace,
+      })),
+      totalScanned: result.totalScanned,
+      durationMs: result.durationMs,
+      activeWorkspace,
+      scope: result.scope,
+      crossCustomer: result.crossCustomer,
     };
   });
 }

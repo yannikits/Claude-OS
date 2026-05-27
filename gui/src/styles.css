@@ -1251,6 +1251,17 @@ button.danger:disabled {
   border: 1px solid rgba(0, 180, 100, 0.35);
 }
 
+.banner-warning {
+  background: rgba(255, 165, 0, 0.16);
+  color: #ffc36b;
+  border: 1px solid rgba(255, 165, 0, 0.4);
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 @media (max-width: 600px) {
   .quick-capture-fab {
     bottom: 12px;

@@ -6,6 +6,13 @@
  */
 
 export {
+  buildScope,
+  type CrossWorkspaceSearchInput,
+  type CrossWorkspaceSearchOpts,
+  type CrossWorkspaceSearchResult,
+  crossWorkspaceSearch,
+} from './cross-workspace.js';
+export {
   type DispatcherOpts,
   type DispatcherResult,
   type SearchKind,

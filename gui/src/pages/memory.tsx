@@ -16,10 +16,19 @@
 import { useCallback, useState } from 'react';
 import { SaveAsNoteModal } from '../components/save-as-note-modal';
 import { WorkspaceIndicator } from '../components/workspace-indicator';
-import { type RetrievalSearchResult, searchVault } from '../lib/rpc';
+import {
+  type CrossWorkspaceSearchResult,
+  crossWorkspaceSearch,
+  type RetrievalSearchResult,
+  searchVault,
+} from '../lib/rpc';
+
+type AnySearchResult =
+  | ({ kind: 'single' } & RetrievalSearchResult)
+  | ({ kind: 'cross' } & CrossWorkspaceSearchResult);
 
 interface SearchState {
-  result: RetrievalSearchResult | null;
+  result: AnySearchResult | null;
   loading: boolean;
   error: string | null;
 }
@@ -31,6 +40,10 @@ export function MemoryPage() {
   const [topK, setTopK] = useState(10);
   const [includeEphemeral, setIncludeEphemeral] = useState(false);
   const [recursive, setRecursive] = useState(false);
+  // Cross-workspace mode: 'off' (active only), 'scoped' (active + msp-internal),
+  // 'cross-customer' (all customer workspaces). Codex Stage-2 hardening:
+  // default is 'off' — the most restrictive, no implicit broad scope.
+  const [scopeMode, setScopeMode] = useState<'off' | 'scoped' | 'cross-customer'>('off');
   const [search, setSearch] = useState<SearchState>(INITIAL_SEARCH);
   const [modalBody, setModalBody] = useState<string | null>(null);
 
@@ -41,8 +54,19 @@ export function MemoryPage() {
       if (text.length === 0) return;
       setSearch({ result: null, loading: true, error: null });
       try {
-        const result = await searchVault({ text, topK, includeEphemeral, recursive });
-        setSearch({ result, loading: false, error: null });
+        if (scopeMode === 'off') {
+          const result = await searchVault({ text, topK, includeEphemeral, recursive });
+          setSearch({ result: { kind: 'single', ...result }, loading: false, error: null });
+        } else {
+          const result = await crossWorkspaceSearch({
+            text,
+            topK,
+            includeEphemeral,
+            recursive,
+            crossCustomer: scopeMode === 'cross-customer',
+          });
+          setSearch({ result: { kind: 'cross', ...result }, loading: false, error: null });
+        }
       } catch (err) {
         setSearch({
           result: null,
@@ -51,7 +75,7 @@ export function MemoryPage() {
         });
       }
     },
-    [query, topK, includeEphemeral, recursive],
+    [query, topK, includeEphemeral, recursive, scopeMode],
   );
 
   const handleNewNote = useCallback(() => {
@@ -95,6 +119,21 @@ export function MemoryPage() {
           />
         </label>
         <label>
+          Scope:{' '}
+          <select
+            value={scopeMode}
+            onChange={(e) => setScopeMode(e.target.value as typeof scopeMode)}
+            title={
+              'off = nur aktiver Workspace · scoped = aktiv + msp-internal · ' +
+              'cross-customer = alle Kunden-Workspaces (Audit-Log!)'
+            }
+          >
+            <option value="off">Aktiver Workspace</option>
+            <option value="scoped">+ msp-internal</option>
+            <option value="cross-customer">⚠ Alle Kunden (audit-logged)</option>
+          </select>
+        </label>
+        <label>
           <input
             type="checkbox"
             checked={includeEphemeral}
@@ -112,6 +151,14 @@ export function MemoryPage() {
         </label>
       </div>
 
+      {scopeMode === 'cross-customer' && (
+        <p className="banner banner-warning" role="status">
+          ⚠ Cross-Customer-Suche aktiv — diese Abfrage wird im Audit-Log mit deinem Token-Tenant
+          verzeichnet. Nutze dies nur wenn du eine Lösung aus einem anderen Customer-Workspace
+          übernehmen willst.
+        </p>
+      )}
+
       {search.error !== null && (
         <p className="banner banner-error">Search failed: {search.error}</p>
       )}
@@ -120,7 +167,16 @@ export function MemoryPage() {
         <div className="memory-results">
           <p className="muted">
             {search.result.hits.length} hits aus {search.result.totalScanned} notes ·{' '}
-            {search.result.durationMs} ms · workspace {search.result.workspace}
+            {search.result.durationMs} ms ·{' '}
+            {search.result.kind === 'cross' ? (
+              <>
+                scope: <code>{search.result.scope.join(' + ')}</code>
+              </>
+            ) : (
+              <>
+                workspace: <code>{search.result.workspace}</code>
+              </>
+            )}
           </p>
           {search.result.hits.length === 0 ? (
             <p>Keine Treffer für „{search.result.query}".</p>
@@ -130,6 +186,18 @@ export function MemoryPage() {
                 <li key={hit.path} className="memory-hit">
                   <div className="memory-hit__head">
                     <span className="memory-hit__score">{hit.score.toFixed(3)}</span>
+                    {'workspace' in hit && search.result?.kind === 'cross' && (
+                      <span
+                        className={`quick-capture-badge ${
+                          hit.workspace.startsWith('msp-customers/')
+                            ? 'badge-customer'
+                            : 'badge-internal'
+                        }`}
+                        style={{ fontSize: '11px', padding: '2px 8px' }}
+                      >
+                        {hit.workspace}
+                      </span>
+                    )}
                     <code className="memory-hit__path">{hit.path}</code>
                     <span className="memory-hit__class">
                       [{String(hit.frontmatter.classification ?? 'unknown')}]
