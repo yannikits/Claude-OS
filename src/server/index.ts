@@ -11,6 +11,7 @@
  * @module @server
  */
 import { randomBytes } from 'node:crypto';
+import fastifyCookie from '@fastify/cookie';
 import fastifyCors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -27,7 +28,9 @@ import { RpcDispatcher } from '../sidecar/rpc.js';
 import { type InboxOutboxWatchers, setupWatchers } from '../sidecar/watchers.js';
 
 import { makeAuthHook, parseTokenList } from './auth.js';
+import { makeCookieAuthHook } from './cookie-auth.js';
 import { createNotificationBus, registerSseRoute } from './events-sse.js';
+import { registerAuthRoutes } from './routes-auth.js';
 import { registerInboxUpload, registerRpcRoutes } from './rpc-http.js';
 import { registerStaticRoutes } from './static.js';
 import type { ServerConfig } from './types.js';
@@ -178,21 +181,47 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
   // route handlers and short-circuits with 401 on rejection. Multi-User
   // Stage 1: the env-var may carry a comma-separated list of valid tokens
   // (ADR-0033); the matched token's hash becomes req.tenant.
+  //
+  // Stage 2 (Phase Web-7-2 per ADR-0036 draft): when `config.multiUser` is
+  // set, the cookie-first hook replaces the bearer-only one. Bearer remains
+  // available as a fallback so service-tokens / CLI clients keep working.
   const expectedTokens = parseTokenList(config.authToken);
   if (expectedTokens.length === 0) {
     throw new Error('server: authToken parsed to empty list after CSV split');
   }
-  log.info(
-    { tokenCount: expectedTokens.length },
-    expectedTokens.length === 1
-      ? 'server: single-user auth (1 token)'
-      : `server: multi-user auth (${expectedTokens.length} tokens)`,
-  );
-  const authHook = makeAuthHook(expectedTokens);
-  fastify.addHook('preHandler', async (req, reply) => {
-    if (!req.url.startsWith('/api/')) return;
-    await authHook(req, reply);
-  });
+  if (config.multiUser !== undefined) {
+    await fastify.register(fastifyCookie);
+    log.info(
+      { tokenCount: expectedTokens.length, insecureCookies: config.multiUser.insecureCookies },
+      'server: multi-user Stage-2 enabled (cookie-first auth + email/password login)',
+    );
+    const cookieAuthHook = makeCookieAuthHook({
+      expectedTokens,
+      sessionRepo: config.multiUser.sessionRepo,
+      userRepo: config.multiUser.userRepo,
+    });
+    fastify.addHook('preHandler', cookieAuthHook);
+    registerAuthRoutes(fastify, {
+      userRepo: config.multiUser.userRepo,
+      sessionRepo: config.multiUser.sessionRepo,
+      rateLimiter: config.multiUser.rateLimiter,
+      ...(config.multiUser.audit !== undefined ? { audit: config.multiUser.audit } : {}),
+      insecureCookies: config.multiUser.insecureCookies,
+      sessionMaxAgeSec: config.multiUser.sessionMaxAgeSec,
+    });
+  } else {
+    log.info(
+      { tokenCount: expectedTokens.length },
+      expectedTokens.length === 1
+        ? 'server: single-user auth (1 token)'
+        : `server: multi-user-stage-1 auth (${expectedTokens.length} tokens)`,
+    );
+    const authHook = makeAuthHook(expectedTokens);
+    fastify.addHook('preHandler', async (req, reply) => {
+      if (!req.url.startsWith('/api/')) return;
+      await authHook(req, reply);
+    });
+  }
 
   registerRpcRoutes(fastify, dispatcher);
   await registerInboxUpload(fastify, dispatcher);

@@ -1325,15 +1325,15 @@ Code-Audit gegen Spec (per `feedback_audit_first_todo.md` — verify-before-impl
   - **User-Enumeration-Defense:** `verifyPassword` führt bei unbekanntem User trotzdem einen scrypt-Verify gegen einen lazy-generierten `FAKE_PASSWORD_PLACEHOLDER`-Hash aus → konstante Login-Latenz unabhängig von Email-Existenz.
   - **Email-Normalization:** lowercase + trim vor INSERT/SELECT. UNIQUE-constraint case-insensitive durchgesetzt.
   - **DoD erfüllt:** `tests/domains/users/{password-hash,repo}.test.ts` — 46 Tests (45 pass + 1 POSIX-only-skip auf Windows). tsc clean, biome ci clean. Chat-sessions-Flake (Lesson-Kandidat: parallel-test child-process race) ist pre-existing und nicht von Web-7-1 verursacht.
-- [ ] **Phase Web-7-2 — Sessions + cookie-first auth + login/logout/refresh/me RPCs** (4-6 h, M) — blockiert durch 7-1
-  - `src/server/sessions.ts`: in-memory LRU (default 1000), 256-bit CSPRNG session-ids, 30-day sliding TTL; opt-in persist via env-flag → sessions-Tabelle in users.sqlite.
-  - `src/server/auth.ts` erweitern: cookie-first → bearer-fallback (ADR-0033) → 401. Cookie `claude_os_session` (HTTP-only, SameSite=Strict, Secure; dev-bypass via `$CLAUDE_OS_INSECURE_COOKIES=1`).
-  - CSRF: Double-submit-cookie-token für state-changing RPCs; Bearer-only skippt CSRF.
-  - `@fastify/cookie` als Dep.
-  - Endpoints: `POST /api/auth/{login,logout,refresh}` + `GET /api/auth/me`.
-  - Rate-Limit: per-IP-token-bucket, 5 failed-logins / 15min → 429+Retry-After (in-memory; persistent in Web-8).
-  - Audit-Log: `kind: 'auth.login.success'|'auth.login.failed'|'auth.logout'` mit `{emailHash, ipHash, userAgent}`.
-  - **DoD:** curl-Login-Roundtrip funktional, Browser-Session überlebt Reload, CSRF-Failed → 403. 12+ Server-Roundtrip-Tests.
+- [x] **Phase Web-7-2 — Sessions + cookie-first auth + login/logout/refresh/me RPCs** (abgeschlossen 2026-05-28, Branch `feature/phase-web-7-multi-user`)
+  - **Sessions-Domain neu in `src/domains/sessions/`** (parallel zu `users/`, `tenant/`): `types.ts`, `id.ts` (256-bit CSPRNG, base64url, 43 chars), `lru-store.ts` (pure LRU primitive auf Map insertion-order), `repo.ts` (sliding-window TTL via injektivem `now()`), `index.ts`. Default 1000 entries, 30-Tage-TTL.
+  - **Server-Files neu in `src/server/`**: `cookies.ts` (Set-Cookie builders mit HttpOnly+SameSite=Strict+conditional Secure), `csrf.ts` (32-byte hex token + `timingSafeEqual`), `rate-limit.ts` (`LoginRateLimiter` per-IP-token-bucket, 5/15min default, max 10k tracked IPs mit oldest-eviction), `cookie-auth.ts` (cookie-first → bearer-fallback Hook + `defaultUserTenantId` provisorischer Resolver — Phase Web-7-3 ersetzt), `routes-auth.ts` (4 Endpoints).
+  - **Endpoints:** `POST /api/auth/login` (email+password → 200 + Set-Cookie session + csrf + return {user, csrfToken, expiresAt}), `POST /api/auth/logout` (revoke + clear cookies + audit), `POST /api/auth/refresh` (sliding TTL renewal — **kein** bearer→cookie-exchange in v1, dokumentierte v1-Vereinfachung), `GET /api/auth/me`.
+  - **CSRF Double-Submit:** unsafe-methods (POST/PUT/PATCH/DELETE) auf cookie-auth-Pfad brauchen passendes `x-csrf-token`-Header == `claude_os_csrf`-Cookie. Bearer-only Clients skippen CSRF (bearer ist unforgeable und nicht auto-attached vom Browser). Login + refresh sind CSRF-exempt (login mintet die Cookie, refresh läuft schon hinter Cookie-Auth).
+  - **Rate-Limit:** per-IP-Token-Bucket, 5 attempts / 15min → 429+`Retry-After`. Successful login wipes failures. In-memory only (Phase-Web-8 persistent).
+  - **Audit:** neue `AuditEventKind`-Werte `auth.login.success|failed|logout` mit `{emailHash, ipHash, userAgent}` (sha256-prefix → 16 hex chars; **niemals** plaintext). Audit-Logger ist opt-in (caller-provided), tests laufen ohne.
+  - **Wire-up:** `ServerConfig.multiUser?: MultiUserConfig` — komplett opt-in. Ohne `multiUser` verhält sich der Server wie ADR-0033 Stage 1 (token-only). Mit `multiUser` registriert sich `@fastify/cookie@11.0.2` + cookie-auth-Hook + 4 Auth-Routes. Backward-compatible.
+  - **DoD erfüllt:** `tests/{domains/sessions,server/csrf,server/rate-limit,server/routes-auth}.test.ts` — **54 neue Tests** (LRU 9, Sessions-Repo 12, CSRF 6, Rate-Limit 8, Routes-Auth 19). Routes-Auth-Tests decken End-to-End-Roundtrip ab: login-flow, CSRF-403 vs. accepted, bearer-only-fallback, rate-limit-429, disabled-user-401, logout+session-revoke, refresh-renewal. **Full suite 1487/1495 pass + 0 fail** (regression-clean).
 - [ ] **Phase Web-7-3 — tenant-from-user resolution + doctor check** (2-3 h, S) — blockiert durch 7-2
   - `src/domains/tenant/resolve-token.ts` erweitern: `resolveTenantFromUser(userId): ServerTenantContext`. User-tenantId = `tenantIdOverride` ?? `'user-' + sha256(userId).slice(0,12)`.
   - auth-hook setzt `req.user` UND `req.tenant`; existing-only-tenant-Code unverändert.
