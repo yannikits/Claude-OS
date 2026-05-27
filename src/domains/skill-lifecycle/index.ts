@@ -21,6 +21,22 @@ export {
   quarantinedDir,
 } from './paths.js';
 export {
+  assertSkillScriptUnderRoot,
+  assertValidSandboxRoot,
+  assertValidSkillId,
+  DEFAULT_TIMEOUT_MS as SANDBOX_DEFAULT_TIMEOUT_MS,
+  runSkillInSandbox,
+  SandboxError,
+  type SandboxIpcRequest,
+  type SandboxIpcResponse,
+  type SandboxOpts,
+  type SandboxRunError,
+  type SandboxRunInput,
+  type SandboxRunOk,
+  type SandboxRunResult,
+  type SandboxRunTimeout,
+} from './sandbox/index.js';
+export {
   type DraftSkill,
   type LessonEntry,
   LessonParseError,
