@@ -24,8 +24,8 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { AuditLogger } from '../core/audit/index.js';
 import type { SessionRepository } from '../domains/sessions/index.js';
+import { userToTenantId } from '../domains/tenant/index.js';
 import type { UserRepository } from '../domains/users/index.js';
-import { defaultUserTenantId } from './cookie-auth.js';
 import {
   buildClearCookie,
   buildCsrfCookie,
@@ -136,7 +136,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       kind: 'auth.login.success',
       action: 'login',
       workspace: 'system',
-      tenant: defaultUserTenantId(user),
+      tenant: userToTenantId(user),
       outcome: 'ok',
       details: {
         userId: user.id,
@@ -150,7 +150,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       user: {
         id: user.id,
         email: user.email,
-        tenantId: defaultUserTenantId(user),
+        tenantId: userToTenantId(user),
       },
       csrfToken: csrf,
       expiresAt: session.expiresAt,
@@ -222,7 +222,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       user: {
         id: req.user.id,
         email: req.user.email,
-        tenantId: defaultUserTenantId(req.user),
+        tenantId: userToTenantId(req.user),
       },
     });
   });

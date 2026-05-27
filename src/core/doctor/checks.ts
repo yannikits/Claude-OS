@@ -303,6 +303,64 @@ export async function checkSigningKeypair(
   });
 }
 
+/**
+ * Server-mode user-store pre-flight (Phase Web-7-3, ADR-0036 draft).
+ *
+ * Three outcomes:
+ *   - `ok` when `users.sqlite` is absent (single-user Stage-1 token-only)
+ *     OR present and openable with the expected schema-version.
+ *   - `fail` when the file is present but unreadable, corrupt, or the
+ *     schema-version mismatches (autoRebuildOnSchemaDrift=false so a
+ *     drift surfaces here rather than silently dropping users).
+ *   - Skipped (returns `ok`) outside server-mode.
+ *
+ * `dataDirOverride` lets tests target a tmp dir; production uses
+ * `resolveMachinePaths().dataDir`.
+ */
+export async function checkUserStore(
+  opts: { readonly env?: NodeJS.ProcessEnv; readonly dataDirOverride?: string } = {},
+): Promise<CheckResult> {
+  return timed('user-store', async () => {
+    const env = opts.env ?? process.env;
+    if (env.CLAUDE_OS_AUTH_TOKEN === undefined || env.CLAUDE_OS_AUTH_TOKEN.length === 0) {
+      return {
+        name: 'user-store',
+        severity: 'ok',
+        message: 'not in server mode (skipped — multi-user Stage-2 is server-only)',
+      };
+    }
+    const { resolveMachinePaths } = await import('../paths/index.js');
+    const { resolveUsersDbPath, UserRepository } = await import('../../domains/users/index.js');
+    const dataDir = opts.dataDirOverride ?? resolveMachinePaths({ env }).dataDir;
+    const dbPath = resolveUsersDbPath(dataDir);
+    if (!existsSync(dbPath)) {
+      return {
+        name: 'user-store',
+        severity: 'ok',
+        message: 'no users.sqlite (Stage-1 token-only — multi-user via "claude-os users create")',
+      };
+    }
+    try {
+      const repo = await UserRepository.open({ dataDir, autoRebuildOnSchemaDrift: false });
+      const n = repo.countAll();
+      repo.close();
+      return {
+        name: 'user-store',
+        severity: 'ok',
+        message: `users.sqlite ok (${n} user${n === 1 ? '' : 's'})`,
+      };
+    } catch (err) {
+      return {
+        name: 'user-store',
+        severity: 'fail',
+        message: 'users.sqlite present but unreadable',
+        detail: err instanceof Error ? err.message : String(err),
+        hint: 'Restore from backup, or re-init via "claude-os users create --email <e> --password <p>" after removing the corrupt file.',
+      };
+    }
+  });
+}
+
 export async function checkWritePermission(rootPath: string): Promise<CheckResult> {
   return timed('write-permission', () => {
     try {

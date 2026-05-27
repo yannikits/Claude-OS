@@ -14,9 +14,11 @@
  * @module @domains/tenant/resolve-token
  */
 import { createHash } from 'node:crypto';
+import type { User } from '../users/index.js';
 import type { ServerTenantContext } from './types.js';
 
 const TOKEN_TENANT_ID_LENGTH = 12;
+const USER_TENANT_ID_LENGTH = 12;
 
 /**
  * Deterministic tenant-id from a bearer token. SHA-256 → first 12 hex
@@ -51,5 +53,39 @@ export function resolveTenantFromToken(token: string): ServerTenantContext {
     workspace: 'personal',
     tenant: null,
     tokenTenantId: tokenToTenantId(token),
+  };
+}
+
+/**
+ * Deterministic tenant-id from a `User` (Phase Web-7-3). Override
+ * wins (power-feature: shared family-tenant). Default
+ * `'user-' + sha256(user.id).slice(0,12)` is stable across container
+ * restarts and survives ID resets — the source-of-truth `user.id`
+ * itself comes from `crypto.randomUUID()` so it is global-unique even
+ * across multi-tenant deployments that share storage.
+ *
+ * Coexists with `tokenToTenantId`: a server can have both Email-Users
+ * AND Bearer-Token-Users at the same time, each with their own stable
+ * tenant-id. Token-derived ids start with the hash digit; user-derived
+ * ids start with the literal prefix `user-`. The two namespaces cannot
+ * collide.
+ */
+export function userToTenantId(user: User): string {
+  if (user.tenantIdOverride !== null && user.tenantIdOverride.length > 0) {
+    return user.tenantIdOverride;
+  }
+  return `user-${createHash('sha256').update(user.id, 'utf8').digest('hex').slice(0, USER_TENANT_ID_LENGTH)}`;
+}
+
+/**
+ * Resolve an authenticated `User` to a `ServerTenantContext`.
+ * Workspace stays `personal` until Phase Web-9 introduces per-user
+ * vault subdirs.
+ */
+export function resolveTenantFromUser(user: User): ServerTenantContext {
+  return {
+    workspace: 'personal',
+    tenant: null,
+    tokenTenantId: userToTenantId(user),
   };
 }

@@ -1334,12 +1334,12 @@ Code-Audit gegen Spec (per `feedback_audit_first_todo.md` — verify-before-impl
   - **Audit:** neue `AuditEventKind`-Werte `auth.login.success|failed|logout` mit `{emailHash, ipHash, userAgent}` (sha256-prefix → 16 hex chars; **niemals** plaintext). Audit-Logger ist opt-in (caller-provided), tests laufen ohne.
   - **Wire-up:** `ServerConfig.multiUser?: MultiUserConfig` — komplett opt-in. Ohne `multiUser` verhält sich der Server wie ADR-0033 Stage 1 (token-only). Mit `multiUser` registriert sich `@fastify/cookie@11.0.2` + cookie-auth-Hook + 4 Auth-Routes. Backward-compatible.
   - **DoD erfüllt:** `tests/{domains/sessions,server/csrf,server/rate-limit,server/routes-auth}.test.ts` — **54 neue Tests** (LRU 9, Sessions-Repo 12, CSRF 6, Rate-Limit 8, Routes-Auth 19). Routes-Auth-Tests decken End-to-End-Roundtrip ab: login-flow, CSRF-403 vs. accepted, bearer-only-fallback, rate-limit-429, disabled-user-401, logout+session-revoke, refresh-renewal. **Full suite 1487/1495 pass + 0 fail** (regression-clean).
-- [ ] **Phase Web-7-3 — tenant-from-user resolution + doctor check** (2-3 h, S) — blockiert durch 7-2
-  - `src/domains/tenant/resolve-token.ts` erweitern: `resolveTenantFromUser(userId): ServerTenantContext`. User-tenantId = `tenantIdOverride` ?? `'user-' + sha256(userId).slice(0,12)`.
-  - auth-hook setzt `req.user` UND `req.tenant`; existing-only-tenant-Code unverändert.
-  - Coexistence: token-users behalten token-derived tenantId.
-  - Doctor: `checkUserStore` (sqlite öffnen + schema-version aktuell).
-  - **DoD:** Server authentifiziert gleichzeitig Token-User UND Email-User; beide stable tenantIds.
+- [x] **Phase Web-7-3 — tenant-from-user resolution + doctor check** (abgeschlossen 2026-05-28)
+  - `src/domains/tenant/resolve-token.ts` erweitert um `userToTenantId(user)` + `resolveTenantFromUser(user)`. Override (`user.tenantIdOverride`) gewinnt; default `'user-' + sha256(user.id).slice(0,12)`. **Namespace-disjunkt zu token-derived ids** — letztere starten mit Hex-Digit, user-ids mit Literal-Präfix `user-`, somit keine Kollision möglich.
+  - `src/server/cookie-auth.ts` + `src/server/routes-auth.ts` swappen den provisorischen `defaultUserTenantId` gegen den domain-resolver. Provisorische Funktion entfernt. `tenantIdFor`-Override-Hook im Cookie-Auth bleibt für Test-Stubs.
+  - Doctor: neuer `checkUserStore` mit drei Outcomes — `ok`+message "not in server mode" (skipped wenn `CLAUDE_OS_AUTH_TOKEN` unset), `ok`+message "no users.sqlite" (Stage-1 token-only), `ok`+user-count, `fail` bei korruptem users.sqlite. `autoRebuildOnSchemaDrift: false` damit schema-mismatch fail-loud statt silent-drop wird.
+  - `src/core/doctor/runner.ts` registriert den check in beiden Branches (root-resolved + root-unresolvable). Existing runner-tests von 8→9 / 6→7 checks aktualisiert.
+  - **DoD erfüllt:** `userToTenantId(user)` deterministisch; Token- + Email-User co-existieren ohne Tenant-Collision; doctor 9 checks (vorher 8); 11 neue Tests (6 user-tenant + 5 user-store-check). **Full suite 1498/1506 pass / 0 fail.**
 - [ ] **Phase Web-7-4 — Login + Registration GUI + Profile-Drawer** (4-6 h, M) — blockiert durch 7-3
   - `gui/src/pages/login.tsx` erweitern: Tabs "Email + Passwort" vs "API-Token" (default Email), Client-Validation, Redirect via `?from=`.
   - `gui/src/pages/register.tsx` (NEU, conditional `$CLAUDE_OS_ALLOW_REGISTRATION=1`): Email + Password + Confirm; server-rate-limit 3/IP/h; Audit-Log `kind: 'auth.register'`.

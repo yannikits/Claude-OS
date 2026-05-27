@@ -11,8 +11,8 @@
  * methods (POST/PUT/PATCH/DELETE) — bearer-only clients skip CSRF.
  *
  * The `tenantIdFor(user)` callback computes the tenant-id from a User.
- * Default in `defaultUserTenantId` (Phase Web-7-3 will provide the
- * production resolver via `domains/tenant/resolve-token.ts`).
+ * Default since Phase Web-7-3 is the canonical `userToTenantId` from
+ * `domains/tenant/resolve-token.ts`. Tests can inject a stub.
  *
  * Layering reminder (mirrors `src/server/auth.ts` header): this is a
  * transport-layer composition; domains (`users`, `sessions`,
@@ -20,11 +20,11 @@
  *
  * @module @server/cookie-auth
  */
-import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { SessionRepository } from '../domains/sessions/index.js';
+import { tokenToTenantId, userToTenantId } from '../domains/tenant/index.js';
 import type { User, UserRepository } from '../domains/users/index.js';
-import { type AuthError, extractBearer, matchBearerToken, tokenToTenantId } from './auth.js';
+import { type AuthError, extractBearer, matchBearerToken } from './auth.js';
 import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, SESSION_COOKIE_NAME } from './cookies.js';
 import { csrfEquals } from './csrf.js';
 
@@ -52,22 +52,11 @@ export interface CookieAuthDeps {
   readonly tenantIdFor?: (user: User) => string;
 }
 
-/**
- * Default deterministic per-user tenant-id. Phase Web-7-3 will replace
- * this with the resolver from `domains/tenant/resolve-token.ts`.
- */
-export function defaultUserTenantId(user: User): string {
-  if (user.tenantIdOverride !== null && user.tenantIdOverride.length > 0) {
-    return user.tenantIdOverride;
-  }
-  return `user-${createHash('sha256').update(user.id, 'utf8').digest('hex').slice(0, 12)}`;
-}
-
 export function makeCookieAuthHook(deps: CookieAuthDeps) {
   if (deps.expectedTokens.length === 0) {
     throw new Error('makeCookieAuthHook: expectedTokens must contain at least one entry');
   }
-  const tenantIdFor = deps.tenantIdFor ?? defaultUserTenantId;
+  const tenantIdFor = deps.tenantIdFor ?? userToTenantId;
 
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!req.url.startsWith('/api/')) return;
