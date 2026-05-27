@@ -1,6 +1,6 @@
 # Stop-Hook-Hänger ("Running stop hooks… 3/4") — Diagnose & Mitigation
 
-**Letztes Update:** 2026-05-20 (Auftrag 2)
+**Letztes Update:** 2026-05-27 (zweite Iteration — siehe §"Update 2026-05-27 (zweite Iteration)")
 
 ## Symptom
 
@@ -125,6 +125,72 @@ foreach ($f in $files) {
 **Empfehlung für eine permanente Lösung:**
 - Self-Modification von `~/.claude/helpers/patch-broken-stop-hooks.mjs` wäre die saubere Variante, aber claude-code's auto-classifier blockt agent-side edits in `~/.claude/`. Yannik kann das selbst editieren (siehe vorgeschlagene `PLUGIN_MARKETPLACES`-Erweiterung als Skizze in der Diskussion zu diesem Issue 2026-05-27).
 - Eigentlich richtiger Fix: Upstream PR an `ruvnet/ruflo` mit korrektem cross-platform Quoting in den Hook-Commands (z.B. via cross-env oder über inline-shell-detection).
+
+## Update 2026-05-27 (zweite Iteration) — User-Report "3/4 tritt wieder auf"
+
+Re-Audit hat **zwei zusätzliche Befunde** zutage gefördert, die der 2026-05-20-Pass übersehen hatte:
+
+### Befund 1 — UI zählt nicht nur `Stop`-Event
+
+Claude-Code's UI-Counter "running stop hooks… N/M" umfasst **alle drei** Session-Terminator-Lifecycle-Events:
+
+- `Stop` (echtes Session-Ende, User drückt /exit oder Ctrl-D)
+- `SessionEnd` (alle Session-Beendigungen inkl. /compact, /clear, Ctrl-C)
+- `SubagentStop` (Subagent-Beendigung)
+
+`scripts/check-stop-hooks.mjs` scannte vor 2026-05-27 nur `Stop` — daher Diagnose "0 Risiko" obwohl 3 Hooks risk-high waren. Script wurde 2026-05-27 erweitert auf alle drei Events.
+
+### Befund 2 — `git status` ohne Timeout = OneDrive-Falle
+
+`~/.claude/settings.json` hatte einen SessionEnd-Hook ohne `timeout`-Feld:
+
+```jsonc
+{
+  "type": "command",
+  "command": "git status --short && echo Reminder: git push to sync to other PC"
+  // KEIN timeout! → hängt indefinit wenn OneDrive .git syncen
+}
+```
+
+OneDrive-Filesystem-Locks auf der `.git`-Tree lassen `git status` indefinit warten — und Claude-Code wartet seinerseits indefinit auf den Hook (kein Default-Timeout für Stop-Events).
+
+**Fix:** Timeout 5000ms hinzufügen. PowerShell-Einzeiler:
+
+```powershell
+$f="$env:USERPROFILE\.claude\settings.json"
+$obj=Get-Content $f -Raw | ConvertFrom-Json
+$obj.hooks.SessionEnd[1].hooks[0] | Add-Member -NotePropertyName timeout -NotePropertyValue 5000 -Force
+$obj | ConvertTo-Json -Depth 100 | Set-Content $f -Encoding UTF8
+```
+
+(Claude-Code's Auto-Classifier blockt agent-side Edits in `~/.claude/`, daher muss Yannik das selbst tun.)
+
+### Befund 3 — ruflo marketplace SessionEnd + SubagentStop mit POSIX-Bug
+
+`~/.claude/plugins/marketplaces/ruflo/.claude/settings.json` enthält weiterhin POSIX-`$CLAUDE_PROJECT_DIR`-Calls in den `SessionEnd`- und `SubagentStop`-Sektionen. Die 2026-05-27-Pass-1-Mitigation hatte nur `Stop: []` gepatcht — `SessionEnd`/`SubagentStop` blieben buggy.
+
+**Fix (PowerShell):**
+
+```powershell
+$f="$env:USERPROFILE\.claude\plugins\marketplaces\ruflo\.claude\settings.json"
+$obj=Get-Content $f -Raw | ConvertFrom-Json
+if ($obj.hooks.SessionEnd)   { $obj.hooks.SessionEnd = @() }
+if ($obj.hooks.SubagentStop) { $obj.hooks.SubagentStop = @() }
+$obj | ConvertTo-Json -Depth 100 | Set-Content $f -Encoding UTF8
+```
+
+Vorsicht — auch dieses File liegt unter `~/.claude/`, also Auto-Classifier-blocked für Agents. Muss Yannik selbst laufen lassen.
+
+### Verifikation nach Patch
+
+```powershell
+node "$(git rev-parse --show-toplevel)\scripts\check-stop-hooks.mjs"
+# Erwartung: Zusammenfassung "X Stop-Hook(s) gefunden, 0 mit Risiko"
+```
+
+### Permanente Lösung wäre…
+
+`~/.claude/helpers/patch-broken-stop-hooks.mjs` (SessionStart-Hook auf Yannik's Maschine) müsste **um SessionEnd- und SubagentStop-Patches erweitert** werden — analog zur existierenden `Stop: []`-Logik. Aber: dasselbe Auto-Classifier-Block-Problem. Yannik muss das selbst tun ODER ein Upstream-PR an `ruvnet/ruflo` für korrektes Cross-Platform-Quoting in `SessionEnd`/`SubagentStop` zu schicken.
 
 ## Honest Disclosure
 

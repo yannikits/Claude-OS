@@ -2,11 +2,16 @@
 // biome-ignore-all lint/suspicious/noConsole: CLI-Tool — console-Output ist gewollt.
 // Diagnose-Skript für Stop-Hook-Hänger auf Windows.
 //
+// Scannt drei Session-Terminator-Lifecycle-Events: Stop, SessionEnd,
+// SubagentStop. Claude Code's UI "running stop hooks… N/M" addiert
+// alle drei in der Anzeige — wer nur Stop scannt, sieht zu wenig.
+//
 // Liest alle settings*.json unter ~/.claude/{settings.json,plugins/marketplaces/**/.claude/settings.json}
-// und gibt pro Stop-Hook eine Zeile aus mit:
+// und gibt pro Hook eine Zeile aus mit:
 //   - Pfad der Settings-Datei
+//   - Event-Label ([Stop] / [SessionEnd] / [SubagentStop])
 //   - Command (ggf. mit hervorgehobenem POSIX-$VAR-Risiko)
-//   - Timeout / continueOnError
+//   - Timeout / continueOnError (fehlender Timeout = RISK-HIGH)
 //   - "OK" / "RISK" Marker
 //
 // Aufruf:  node scripts/check-stop-hooks.mjs
@@ -71,24 +76,43 @@ function safeParse(filePath) {
   }
 }
 
+// Claude Code UI's "running stop hooks… N/M" zaehlt alle Session-
+// Terminator-Lifecycle-Events: Stop, SessionEnd, SubagentStop. Wir
+// scannen daher alle drei, sonst sieht der Audit zu wenig Hooks.
+const STOP_EVENTS = ['Stop', 'SessionEnd', 'SubagentStop'];
+
 function extractStopHooks(parsed) {
   if (!parsed.hooks) return [];
-  const stop = parsed.hooks.Stop;
-  if (!Array.isArray(stop)) return [];
   const flat = [];
-  for (const group of stop) {
-    if (!Array.isArray(group?.hooks)) continue;
-    for (const h of group.hooks) flat.push(h);
+  for (const eventName of STOP_EVENTS) {
+    const groups = parsed.hooks[eventName];
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!Array.isArray(group?.hooks)) continue;
+      for (const h of group.hooks) flat.push({ ...h, _event: eventName });
+    }
   }
   return flat;
 }
 
-function classifyCommand(cmd) {
+function classifyCommand(cmd, hook) {
   const isWindows = process.platform === 'win32';
   // POSIX-Env-Var-Pattern: $VAR oder ${VAR} außerhalb von "echo"-Strings.
-  const posixVar = /\$\{?[A-Z_][A-Z0-9_]*\}?/.test(cmd);
+  // ${CLAUDE_PLUGIN_ROOT} ist explizit ausgenommen — Claude Code expandiert
+  // diesen ${...}-Style fuer Plugin-Hooks selbst (siehe Hooks-Spec).
+  const cmdNoPluginRoot = cmd.replace(/\$\{?CLAUDE_PLUGIN_ROOT\}?/g, '');
+  const posixVar = /\$\{?[A-Z_][A-Z0-9_]*\}?/.test(cmdNoPluginRoot);
   // cmd.exe-Aufruf?
   const isCmdInvoke = /^\s*cmd\s+\/c\b/i.test(cmd);
+  // Untimeoutete Hooks haengen indefinit bei FS-/IO-Locks (z.B. OneDrive
+  // synct .git, git status haengt). Pflicht-Flag.
+  const hasTimeout = typeof hook?.timeout === 'number' && hook.timeout > 0;
+  if (!hasTimeout) {
+    return {
+      risk: 'high',
+      reason: 'Kein timeout gesetzt — Hook kann indefinit haengen bei FS-/Git-Locks (OneDrive-Falle)',
+    };
+  }
   if (isWindows && posixVar && !isCmdInvoke) {
     return {
       risk: 'high',
@@ -128,7 +152,7 @@ function main() {
     console.info(`--- ${file.replace(homedir(), '~')} ---`);
     for (const hook of hooks) {
       totalHooks++;
-      const klass = classifyCommand(hook.command ?? '');
+      const klass = classifyCommand(hook.command ?? '', hook);
       const marker =
         klass.risk === 'high'
           ? '[RISK-HIGH]'
@@ -141,7 +165,8 @@ function main() {
       const tmo = hook.timeout ?? '(default)';
       const onErr =
         hook.continueOnError === true ? 'continueOnError=true' : 'continueOnError=false';
-      console.info(`  ${marker}  timeout=${tmo}  ${onErr}`);
+      const evt = hook._event ? `[${hook._event}] ` : '';
+      console.info(`  ${marker}  ${evt}timeout=${tmo}  ${onErr}`);
       console.info(`    cmd: ${hook.command}`);
       console.info(`    why: ${klass.reason}`);
     }
