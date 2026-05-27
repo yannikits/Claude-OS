@@ -89,7 +89,7 @@ Optionale Felder:
 - Pfad: `<dataDir>/audit/audit-YYYY-MM-DD.jsonl` (UTC-day-Rotation, automatisch)
 - Append-only — kein Edit, kein Delete (außer Retention-Cleanup via `pruneAuditFiles`)
 - File-Mode `0o600` (per-machine, nicht world-readable)
-- Retention: **90 Tage default** (per `DEFAULT_RETENTION_DAYS`), konfigurierbar bis 7 Jahre (DSGVO MSP-Kontext) via `$CLAUDE_OS_AUDIT_RETENTION_DAYS` env-var
+- Retention: **90 Tage default** (per `DEFAULT_RETENTION_DAYS`), konfigurierbar bis **10 Jahre** (`§147 AO` Tax-Authorities, dominiert DSGVO MSP-Kontext 7y) via `$CLAUDE_OS_AUDIT_RETENTION_DAYS` env-var
 - Retention-Cleanup: `pruneAuditFiles()` aus `@core/audit/retention` — idempotent, dry-run-Mode, filename-driven (löscht NUR `audit-YYYY-MM-DD.jsonl`, lässt `.gz`-Archives + stray files alleine)
 - gzip-Archives: Phase-5-future (optional; aktuell wird `audit-YYYY-MM-DD.jsonl` nach Ablauf einfach gelöscht)
 

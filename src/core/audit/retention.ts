@@ -24,7 +24,13 @@ import { AuditError } from './types.js';
 
 export const DEFAULT_RETENTION_DAYS = 90;
 export const MIN_RETENTION_DAYS = 1;
-export const MAX_RETENTION_DAYS = 7 * 365; // DSGVO MSP-context cap (7y)
+/**
+ * Maximum retention window. 10 Jahre — deutsche Tax-Authorities-
+ * Aufbewahrungsfrist (`§147 AO`) für Buchführungsunterlagen, dominiert
+ * die kürzere 7y-DSGVO-Frist. Höher würde keinen MSP-Use-Case treffen.
+ * Yannik-Entscheidung 2026-05-27 (vorher 7y, jetzt 10y).
+ */
+export const MAX_RETENTION_DAYS = 10 * 365;
 
 const AUDIT_FILE_PATTERN = /^audit-(\d{4})-(\d{2})-(\d{2})\.jsonl$/;
 
