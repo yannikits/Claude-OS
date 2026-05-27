@@ -1275,158 +1275,62 @@ button.danger:disabled {
   }
 }
 
-/* ---------- Sidebar Workspace Switcher (MSP-D) ---------- */
+/* ---------- Quick-Capture Live-Suggestions (MSP-C) ---------- */
 
-.workspace-switcher {
-  position: relative;
+.quick-capture-suggestions {
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: rgba(109, 139, 255, 0.06);
+  border: 1px solid rgba(109, 139, 255, 0.18);
+  border-radius: 6px;
+}
+
+.quick-capture-suggestions__header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.quick-capture-suggestions ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px 8px;
-  margin: 0 0 8px;
-  border-radius: 6px;
-  background: var(--bg);
-  border: 1px solid var(--border);
 }
 
-.workspace-switcher__label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
-.workspace-switcher__button {
+.quick-capture-suggestions li {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   padding: 4px 6px;
-  background: transparent;
-  border: none;
   border-radius: 4px;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 12px;
 }
 
-.workspace-switcher__button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.workspace-switcher__button:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
-.workspace-switcher__value {
+.quick-capture-suggestion__title {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.workspace-switcher__chevron {
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.workspace-switcher--customer .workspace-switcher__value {
-  color: #ffc36b;
-}
-.workspace-switcher--internal .workspace-switcher__value {
-  color: #6ed0ff;
-}
-.workspace-switcher--warning .workspace-switcher__value {
-  color: #ff8080;
-}
-.workspace-switcher--personal .workspace-switcher__value {
-  color: var(--accent);
-}
-
-.workspace-switcher--customer {
-  border-color: rgba(255, 165, 0, 0.4);
-}
-.workspace-switcher--internal {
-  border-color: rgba(0, 180, 255, 0.35);
-}
-.workspace-switcher--warning {
-  border-color: rgba(255, 80, 80, 0.4);
-}
-.workspace-switcher--error .workspace-switcher__value {
-  color: #ff8080;
-}
-
-.workspace-switcher__menu {
-  position: absolute;
-  top: 100%;
-  left: 4px;
-  right: 4px;
-  margin-top: 4px;
-  padding: 4px;
-  list-style: none;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  z-index: 40;
-  max-height: 280px;
-  overflow-y: auto;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.workspace-switcher__item button {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  width: 100%;
-  padding: 6px 8px;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
   color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
-  text-align: left;
 }
 
-.workspace-switcher__item button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.workspace-switcher__item button:disabled {
-  cursor: default;
-}
-
-.workspace-switcher__item--active button {
-  background: rgba(109, 139, 255, 0.12);
-}
-
-.workspace-switcher__item-label {
-  font-weight: 600;
-}
-
-.workspace-switcher__item.workspace-switcher--customer .workspace-switcher__item-label {
-  color: #ffc36b;
-}
-.workspace-switcher__item.workspace-switcher--internal .workspace-switcher__item-label {
-  color: #6ed0ff;
-}
-.workspace-switcher__item.workspace-switcher--personal .workspace-switcher__item-label {
-  color: var(--accent);
-}
-
-.workspace-switcher__item-id {
+.quick-capture-suggestion__score {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 10px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
-.workspace-switcher__item-hint {
-  font-size: 10px;
+.quick-capture-suggestions__hint {
+  margin: 6px 0 0;
+  font-size: 11px;
   font-style: italic;
   color: var(--muted);
 }

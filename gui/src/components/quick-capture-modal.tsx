@@ -18,7 +18,13 @@
  * @module gui/components/quick-capture-modal
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getQuickCaptureMeta, type QuickCaptureMeta, quickCaptureNote } from '../lib/rpc';
+import {
+  type CrossWorkspaceHitDto,
+  crossWorkspaceSearch,
+  getQuickCaptureMeta,
+  type QuickCaptureMeta,
+  quickCaptureNote,
+} from '../lib/rpc';
 
 interface Props {
   onClose: () => void;
@@ -41,6 +47,8 @@ export function QuickCaptureModal({ onClose, onCaptured }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<CrossWorkspaceHitDto[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   const titleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -91,6 +99,46 @@ export function QuickCaptureModal({ onClose, onCaptured }: Props) {
     if (workspace === 'personal') return 'Persönlich';
     return workspace;
   }, [isUnsorted, isCustomer, workspace]);
+
+  // MSP-C — Live-Suggestions: debounce 500ms gegen `title + body`, scope =
+  // default (active + msp-internal, KEIN cross-customer hier — wir wollen
+  // keine Audit-Log-Floods bei jedem Tastenanschlag). Bei <15 Zeichen keine
+  // Suche (zu noisy).
+  useEffect(() => {
+    if (isUnsorted || meta === null) {
+      setSuggestions([]);
+      return;
+    }
+    const combined = `${title} ${body}`.trim();
+    if (combined.length < 15) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    const timer = setTimeout(() => {
+      void crossWorkspaceSearch({
+        text: combined,
+        topK: 3,
+        crossCustomer: false, // never cross-customer in suggestion mode
+      })
+        .then((res) => {
+          if (cancelled) return;
+          setSuggestions(res.hits);
+          setSuggestionsLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setSuggestions([]);
+          setSuggestionsLoading(false);
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [title, body, isUnsorted, meta]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -275,6 +323,50 @@ export function QuickCaptureModal({ onClose, onCaptured }: Props) {
               placeholder="T-12345"
             />
           </label>
+
+          {(suggestions.length > 0 || suggestionsLoading) && !isUnsorted && (
+            <div className="quick-capture-suggestions">
+              <div className="quick-capture-suggestions__header">
+                {suggestionsLoading
+                  ? 'Suche ähnliche Notizen …'
+                  : `Ähnliche Notizen (${suggestions.length})`}
+              </div>
+              {suggestions.length > 0 && (
+                <ul>
+                  {suggestions.map((hit) => {
+                    const filename =
+                      hit.path.split(/[\\/]/).pop()?.replace(/\.md$/, '') ?? hit.path;
+                    const wsLabel = hit.workspace.startsWith('msp-customers/')
+                      ? hit.workspace.slice('msp-customers/'.length)
+                      : hit.workspace === 'msp-internal'
+                        ? 'MSP-Intern'
+                        : hit.workspace;
+                    return (
+                      <li key={hit.path} title={hit.path}>
+                        <span
+                          className={`quick-capture-badge ${
+                            hit.workspace.startsWith('msp-customers/')
+                              ? 'badge-customer'
+                              : 'badge-internal'
+                          }`}
+                          style={{ fontSize: '10px', padding: '1px 6px' }}
+                        >
+                          {wsLabel}
+                        </span>
+                        <span className="quick-capture-suggestion__title">{filename}</span>
+                        <span className="quick-capture-suggestion__score">
+                          {hit.score.toFixed(2)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="quick-capture-suggestions__hint">
+                Wenn das Problem schon gelöst ist: Note öffnen statt neu schreiben (Memory-Page).
+              </p>
+            </div>
+          )}
 
           {error !== null && <p className="error-banner">Fehler: {error}</p>}
 
