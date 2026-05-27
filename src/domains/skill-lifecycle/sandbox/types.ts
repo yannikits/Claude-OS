@@ -37,9 +37,11 @@ export interface SandboxOpts {
    */
   readonly timeoutMs?: number;
   /**
-   * Hostname-Allowlist for outbound network. Default `[]` — no net.
-   * NOTE: Foundation-spike documents this; actual `fetch`/`net`
-   * patching is deferred to Phase-5b.
+   * Phase-5b net-guard hostname-allowlist for outbound `fetch`.
+   * Default `[]` — deny all. `['*']` is an escape-hatch (Promote-
+   * Review should forbid this for quarantined-skills). Only `fetch`
+   * is patched; raw `node:net`/`node:http` are documented out-of-
+   * scope (Phase-5c).
    */
   readonly netAllowlist?: readonly string[];
   /**
@@ -107,6 +109,12 @@ export interface SandboxIpcRequest {
   readonly skillId: string;
   readonly skillScriptPath: string;
   readonly input: unknown;
+  /**
+   * Phase-5b net-guard hostname-allowlist for outbound `fetch`.
+   * Child installs the guard before skill-import. Empty/undefined
+   * → deny all. `['*']` is an escape-hatch.
+   */
+  readonly netAllowlist?: readonly string[];
 }
 
 export type SandboxIpcResponse =

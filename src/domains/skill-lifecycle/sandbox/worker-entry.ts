@@ -23,6 +23,7 @@
  *
  * @module @domains/skill-lifecycle/sandbox/worker-entry
  */
+import { installNetGuard } from './net-guard.js';
 import type { SandboxIpcRequest, SandboxIpcResponse } from './types.js';
 
 type SkillRun = (input: unknown) => unknown | Promise<unknown>;
@@ -33,6 +34,12 @@ interface SkillModule {
 }
 
 async function loadAndRun(req: SandboxIpcRequest): Promise<SandboxIpcResponse> {
+  // Phase-5b net-guard MUST be installed before skill-import so that
+  // top-level `await fetch(...)` in the skill module already sees the
+  // guarded version. Empty/undefined allowlist → deny all.
+  const allowlist = req.netAllowlist ?? [];
+  installNetGuard(allowlist);
+
   let mod: SkillModule;
   try {
     // Dynamic-import — works for both ESM (.mjs) and CJS (.cjs).

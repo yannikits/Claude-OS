@@ -10,6 +10,12 @@
  */
 
 export {
+  hostAllowed,
+  type InstalledNetGuard,
+  installNetGuard,
+  NetGuardError,
+} from './net-guard.js';
+export {
   assertSkillScriptUnderRoot,
   assertValidSandboxRoot,
   assertValidSkillId,

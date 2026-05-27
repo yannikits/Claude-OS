@@ -164,6 +164,9 @@ export function runSkillInSandbox(
       skillId: input.skillId,
       skillScriptPath: normalizedScript,
       input: input.input,
+      // Phase-5b net-guard: forwards the parent's allowlist to the
+      // child via IPC. Child installs the guard before skill-import.
+      netAllowlist: opts.netAllowlist ?? [],
     };
 
     try {
