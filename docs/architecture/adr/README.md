@@ -37,6 +37,11 @@ Dokumentiert die fundamentalen Architektur-Entscheidungen für die Evolution von
 | [0029](0029-license-mit-public-core.md) | Lizenz: MIT für Public-Core, proprietär für Private-Repos | Akzeptiert | 2026-05-24 |
 | [0030](0030-repo-strategy-hybrid.md) | Repo-Strategie: Hybrid Public-Core + Private MSP/House | Akzeptiert | 2026-05-24 |
 | [0031](0031-vault-multi-workspace.md) | Vault-Strategie: Multi-Workspace mit `personal/` als Default | Akzeptiert | 2026-05-24 |
+| [0032](0032-server-deployment-headless-http.md) | Server-Deployment: Headless HTTP-Variante | Akzeptiert | 2026-05-26 |
+| [0033](0033-server-multi-user-token-list.md) | Server Multi-User Stage 1 (Token-Liste) | Akzeptiert | 2026-05-26 |
+| [0034](0034-skill-sandbox-process-isolation.md) | Skill-Sandbox via `child_process.fork` | Akzeptiert | 2026-05-27 |
+| [0035](0035-signing-ed25519-foundation.md) | Yannik-Ed25519-Signatur-Flow (Foundation) | Akzeptiert | 2026-05-27 |
+| [0036](0036-multi-user-stage-2-email-password.md) | Server Multi-User Stage 2 (Email/Passwort + Session-Cookies) | Akzeptiert | 2026-05-28 |
 
 ## Format
 

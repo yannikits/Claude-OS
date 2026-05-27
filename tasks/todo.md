@@ -1357,15 +1357,19 @@ Code-Audit gegen Spec (per `feedback_audit_first_todo.md` — verify-before-impl
     - `styles.css` (ERWEITERT): `.login-tabs`/`.login-tab[--active]`, `.login-banner-success`, `.profile-drawer{,__trigger,__menu,__backdrop,__meta,__tenant,__status,__label,--bearer,--loading}`.
   - **Tests:** +33 neue (Backend +14, Frontend +22, korrigierte runner-counts 7→9/5→7 weitergegeben aus 7-3). Backend: 33/33 (14 neu für register + change-password + me-allowReg-flag); Frontend: 22/22 (auth-api 11, login-page 6, register-page 5). Backend full-suite: **1512 pass / 8 skip / 0 fail**. GUI: 22/22 neuer Tests grün; 30 pre-existing flakes in dashboard/catalog/mcp/schedule/chat/auth-login-modal/secrets — auf `main` ebenfalls failing, nicht Web-7-4-Regression.
   - **DoD-Status:** Plan-Login-Endpoint roundtrip funktional über `app.inject`; Browser-Session-Survival via `/me`-Probe ist gewired (Manual-Curl-Test bleibt Yannik-post-merge). CSRF-Failed-Request → 403 verifiziert in Backend-Tests.
-- [ ] **Phase Web-7-5 — Admin-CLI `users` subcommand** (2-3 h, S) — blockiert durch 7-3 (parallel zu 7-4)
-  - `src/cli/commands/users.ts`: `create/list/disable/enable/reset-password/sessions list/sessions revoke`.
+- [x] **Phase Web-7-5 — Admin-CLI `users` subcommand** (abgeschlossen 2026-05-28)
+  - `src/cli/commands/users.ts`: 7 Subcommands (`create/list/disable/enable/reset-password/sessions list/sessions revoke`). JSON-Mode parallel. Exit-Codes 0/1/2 (success/error/no-op).
   - Wire in `src/cli/index.ts` SUBCOMMAND_LOADERS.
-  - **DoD:** Admin kann ohne Browser alle User-Ops durchführen; CI/CD-seedbar.
-- [ ] **Phase Web-7-6 — ADR-0036 + Doku + CHANGELOG** (2-3 h, S) — blockiert durch 7-4 + 7-5
-  - ADR-0036 (oder ADR-0033 §"Stage 2"-Erweiterung): User-Model + Password-Hashing + Session-Strategy + CSRF-Approach.
-  - `docs/server-deployment.md`: neue Sektion "Multi-User mit Email-Login (Stage 2)", Migrations-Guide Stage 1 → Stage 2, Self-Registration Trade-offs (Trusted-Network).
-  - `README.md`: Server-Deployment-Sektion verlinkt Multi-User-Setup.
-  - CHANGELOG: `feat(server): Phase Web-7 — Multi-User Login + Registration (Stage 2 per ADR-0033)`.
+  - `reset-password --random` generiert 144-bit base64url-Passwort, einmalige Ausgabe + "Save this now — won't be shown again".
+  - **Sessions-Caveat:** in-memory only — separater Prozess vom Server. Explizite Warnung im Output.
+  - **DoD erfüllt:** Real-CLI-Smoke (`users create → list → disable → list --include-disabled --json`) alle grün auf Windows. UserRepository-Tests aus 7-1 decken Unterlogik komplett ab.
+- [x] **Phase Web-7-6 — ADR-0036 + Doku + CHANGELOG** (abgeschlossen 2026-05-28)
+  - `docs/architecture/adr/0036-multi-user-stage-2-email-password.md`: Volle ADR mit 10 Entscheidungspunkten (Domain-Layout, Password-Hashing, Session-Store, Cookies/CSRF, Enumeration-Defense, Rate-Limit, Audit-Events, tenant-from-user, Auth-Hook-Order, v1-Vereinfachungen). OWASP-2023 scrypt-Parameter-Tabelle. Migrations-Pfad Stage 1 → Stage 2 dokumentiert. Out-of-Scope sauber abgegrenzt.
+  - `docs/architecture/adr/README.md`: Index um ADR-0032..0036 ergänzt (vorher fehlten 0032/0033/0034/0035).
+  - `docs/server-deployment.md`: neue Sektion "Multi-User mit Email-Login (Stage 2)" — Schritt 1 Admin-CLI provisioning, Schritt 2 Browser-Login, Schritt 3 optional Self-Registration mit Trusted-Network-Warnung. Migrations-Pfad-Tabelle. Backup-Erweiterung für `users.sqlite`. Sessions-Caveat.
+  - `CHANGELOG.md`: `[Unreleased]` Section mit vollem Web-7 Stage-2-Block — alle 5 Sub-Phasen + Audit-Events + Deps + Tests + Operator-Caveat.
+  - `README.md`: Server-Deployment-Link aktualisiert mit "Inklusive Multi-User-Setup".
+  - **DoD erfüllt:** Outside-Tester kann von leerem Container zu Multi-User-Setup in den dokumentierten Schritten.
 
 ### Pflicht-Sicherheits-Gates (gilt parallel zu allen Sub-Phasen)
 
