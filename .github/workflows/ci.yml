@@ -59,6 +59,19 @@ jobs:
       - name: vitest
         run: npx vitest run --coverage
 
+      # Phase Web-7 end-to-end smoke — verifies users-create / serve /
+      # cookie-login / CSRF / logout against a real spawned server.
+      # Linux only because the script uses POSIX bash idioms
+      # (mktemp -d, trap, sleep) that are flaky under windows-bash on
+      # github-actions.
+      - name: web-7 multi-user smoke (linux only)
+        if: matrix.os == 'ubuntu-22.04'
+        run: SKIP_BUILD=1 bash scripts/smoke-multi-user.sh
+
+      - name: web-7 multi-user smoke — session persistence (linux only)
+        if: matrix.os == 'ubuntu-22.04'
+        run: SKIP_BUILD=1 PERSIST=1 PORT=31425 bash scripts/smoke-multi-user.sh
+
   rust-shell:
     name: cargo check (gui/src-tauri)
     runs-on: ubuntu-22.04

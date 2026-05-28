@@ -15,7 +15,11 @@ import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import { AuditLogger } from '../../core/audit/index.js';
 import { resolveMachinePaths } from '../../core/paths/index.js';
-import { SessionRepository } from '../../domains/sessions/index.js';
+import {
+  type SessionPersistAdapter,
+  SessionRepository,
+  SqlSessionPersistAdapter,
+} from '../../domains/sessions/index.js';
 import { resolveUsersDbPath, UserRepository } from '../../domains/users/index.js';
 import { startServer } from '../../server/index.js';
 import { LoginRateLimiter } from '../../server/rate-limit.js';
@@ -66,14 +70,30 @@ function envFlag(name: string): boolean {
  *
  * Override: `$CLAUDE_OS_DISABLE_MULTI_USER=1` forces back to Stage 1.
  */
-async function maybeMultiUserConfig(dataDir: string): Promise<MultiUserConfig | undefined> {
+interface MultiUserBundle {
+  readonly config: MultiUserConfig;
+  readonly sessionPersist: SessionPersistAdapter | null;
+}
+
+async function maybeMultiUserConfig(dataDir: string): Promise<MultiUserBundle | undefined> {
   if (envFlag('CLAUDE_OS_DISABLE_MULTI_USER')) return undefined;
   const usersDbExists = existsSync(resolveUsersDbPath(dataDir));
   const forced = envFlag('CLAUDE_OS_MULTI_USER');
   if (!usersDbExists && !forced) return undefined;
 
   const userRepo = await UserRepository.open({ dataDir });
-  const sessionRepo = new SessionRepository();
+
+  // Optional persistent session-store (Web-7-persist). When the
+  // operator opts in via $CLAUDE_OS_SESSION_PERSIST=1, sessions
+  // survive container restarts via sessions.sqlite. Otherwise the
+  // repo stays in-memory (container restart = re-login).
+  const sessionPersist: SessionPersistAdapter | null = envFlag('CLAUDE_OS_SESSION_PERSIST')
+    ? await SqlSessionPersistAdapter.open({ dataDir })
+    : null;
+  const sessionRepo = new SessionRepository(
+    sessionPersist !== null ? { persist: sessionPersist } : {},
+  );
+
   const rateLimiter = new LoginRateLimiter({ capacity: 5 });
   const audit = new AuditLogger();
   const insecureCookies = envFlag('CLAUDE_OS_INSECURE_COOKIES');
@@ -84,14 +104,17 @@ async function maybeMultiUserConfig(dataDir: string): Promise<MultiUserConfig | 
     : undefined;
 
   return {
-    userRepo,
-    sessionRepo,
-    rateLimiter,
-    audit,
-    insecureCookies,
-    sessionMaxAgeSec,
-    ...(allowRegistration ? { allowRegistration: true } : {}),
-    ...(registrationRateLimiter !== undefined ? { registrationRateLimiter } : {}),
+    config: {
+      userRepo,
+      sessionRepo,
+      rateLimiter,
+      audit,
+      insecureCookies,
+      sessionMaxAgeSec,
+      ...(allowRegistration ? { allowRegistration: true } : {}),
+      ...(registrationRateLimiter !== undefined ? { registrationRateLimiter } : {}),
+    },
+    sessionPersist,
   };
 }
 
@@ -134,15 +157,16 @@ export function registerServeCommand(program: Command): void {
         corsOrigin: opts.corsOrigin ?? DEFAULT_SERVER_CONFIG.corsOrigin,
         sseHeartbeatMs: DEFAULT_SERVER_CONFIG.sseHeartbeatMs,
         trustProxy: DEFAULT_SERVER_CONFIG.trustProxy,
-        ...(multiUser !== undefined ? { multiUser } : {}),
+        ...(multiUser !== undefined ? { multiUser: multiUser.config } : {}),
       };
 
       if (multiUser !== undefined) {
-        const userCount = multiUser.userRepo.countAll();
+        const userCount = multiUser.config.userRepo.countAll();
         console.error(
           `claude-os serve: Multi-User Stage 2 enabled (${userCount} users)` +
-            (multiUser.allowRegistration === true ? `, self-registration ON` : '') +
-            (multiUser.insecureCookies ? `, INSECURE cookies — dev only` : ''),
+            (multiUser.config.allowRegistration === true ? `, self-registration ON` : '') +
+            (multiUser.sessionPersist !== null ? `, sessions persisted` : ', sessions in-memory') +
+            (multiUser.config.insecureCookies ? `, INSECURE cookies — dev only` : ''),
         );
       }
 
@@ -152,7 +176,10 @@ export function registerServeCommand(program: Command): void {
         console.error(`\nclaude-os serve: received ${signal}, shutting down...`);
         try {
           await handle.shutdown();
-          if (multiUser !== undefined) multiUser.userRepo.close();
+          if (multiUser !== undefined) {
+            multiUser.config.userRepo.close();
+            multiUser.sessionPersist?.close();
+          }
           process.exit(0);
         } catch (err) {
           console.error(
