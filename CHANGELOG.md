@@ -4,6 +4,38 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-05-28
+
+### MSP-E — Note-to-Skill GUI (Phase 2 GUI)
+
+GUI-Layer obendrauf auf das MSP-E Backend (PR #195/#196): von der Memory-Page wird jede Vault-Note in zwei Klicks zu einem Draft-Skill — direkte Brücke vom Memory-MVP in die Phase-5c Skill-Promotion-Pipeline (Quarantäne → Sandbox → Signatur).
+
+**Frontend (PR #197):**
+- `gui/src/lib/rpc.ts` — typed wrappers `proposeNoteAsSkill` + `createSkillDraftFromNote` mit `NoteToSkillError`-Envelope (`note-not-found` | `draft-exists` | `invalid-name`).
+- `gui/src/components/note-to-skill-modal.tsx` — initial Proposal-Fetch + 250ms-debounce-Re-Propose + Customer-Confidential-Banner + alreadyExists-Guard.
+- `gui/src/pages/memory.tsx` — per-Hit `→ Skill`-Button + Toast mit Link auf `/skill-review`.
+- 7 RTL-Tests, biome + tsc clean.
+
+### Phase Web-7-7 — Admin HTTP API + Smoke
+
+Letzter Baustein der Web-7-Multi-User-Arbeit (PR #198): HTTP-Pendants zur `claude-os users` CLI, damit ein Linux/Web-Deployment ohne Shell-Access administriert werden kann.
+
+**Endpoints** unter `/api/admin/users` (gegated via `CLAUDE_OS_ADMIN_EMAILS` env, comma-separated):
+- `GET /api/admin/users` — full list (incl. disabled), safe shape (no passwordHash leak)
+- `POST /api/admin/users` — create (201/409/400)
+- `POST /api/admin/users/:idOrEmail/disable` — flip + revoke all target-sessions
+- `POST /api/admin/users/:idOrEmail/enable`
+- `POST /api/admin/users/:idOrEmail/reset-password` — sets new password + revokes all target-sessions
+
+**No-Schema-Migration:** Admin-Set kommt aus env beim Boot statt aus `users.sqlite` (kein Touch an ADR-0036). Trade-off: Restart bei Admin-Set-Änderung — akzeptabel für typische Small-Team-Deployments. Audit-Events `admin.user.{create,disable,enable,reset-password}` mit hashed Admin-Email (no plaintext PII per SECURITY.md §4).
+
+**Smoke (`scripts/smoke-multi-user.sh`):**
+- Section 7 — Admin HTTP API E2E (list, create, duplicate-409, disable + login-denied)
+- Section 8 — MSP-E Note-to-Skill RPC + Draft-Materialisation auf Disk
+- Logout renumbered to Section 9. Vault-Bootstrap (workspaces/personal + vault-config.json) upfront prepared.
+
+**Tests:** +16 routes-admin (vitest). Full backend suite: **1601 pass / 8 skip / 0 fail.**
+
 ### Phase 5c — Skill-Promotion-Pipeline (ADR-0026 Gate 3 Closeout)
 
 End-to-end Self-Improvement-Loop ist deployment-ready. Lessons werden zu Draft-Skills (existing), Yannik promotet sie durch Quarantäne → optional sandbox-run → Ed25519-Signatur → aktiv. CLI + Sidecar-RPCs + GUI alle wired auf eine einzige `promote.ts` als Foundation.
