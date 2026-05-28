@@ -4,6 +4,12 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.7.3] — 2026-05-28
+
+### Fixed
+
+- **PTY-WebSocket akzeptiert Cookie-Auth (PR #205):** Nach Stage-2-Rollout (ADR-0036) verlangte `/api/pty/ws` immer noch den Stage-1 Bearer-Token via `?token=…`. Browser im Cookie-Mode haben keinen Token zum Anhängen → Chat-Page + Anthropic-Login schlugen mit `pty-ws: unauthorized: invalid or missing token` fehl. Fix: `registerPtyWebSocket` akzeptiert optional `sessionRepo` + `userRepo` und prüft `claude_os_session`-Cookie auf dem WS-Upgrade. Fallback auf `?token=…` bleibt für Stage-1 erhalten.
+
 ## [1.7.2] — 2026-05-28
 
 ### Fixed
