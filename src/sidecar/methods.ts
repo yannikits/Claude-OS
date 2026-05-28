@@ -31,6 +31,7 @@ import { registerRetrievalMethods } from './methods/retrieval.js';
 import { registerScheduleMethods } from './methods/schedule.js';
 import { registerSecretsMethods } from './methods/secrets.js';
 import { registerSettingsMethods } from './methods/settings.js';
+import { registerSkillLifecycleMethods } from './methods/skill-lifecycle.js';
 import { registerVaultMethods } from './methods/vault.js';
 import { registerWorkspaceMethods } from './methods/workspace.js';
 import { createMtimeCache } from './mtime-cache.js';
@@ -116,6 +117,11 @@ export function registerMethods(dispatcher: RpcDispatcher, opts: MethodOpts = {}
   registerWorkspaceMethods(dispatcher, opts.emit ?? (() => {}));
   registerNotesMethods(dispatcher);
   registerRetrievalMethods(dispatcher);
+
+  // Phase 5c-3 — skill-lifecycle (list/promote/approve). Read-only RPCs
+  // degrade gracefully when no vault is configured (return empty
+  // entries[]). Mutating RPCs surface PromoteError as a typed envelope.
+  registerSkillLifecycleMethods(dispatcher, ctx);
 
   // Phase 3f (Memory FTS). Memory.* RPCs only registered when the sidecar
   // has actually booted a MemoryIndexService (vault-configured + db open).
