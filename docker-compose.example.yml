@@ -10,6 +10,18 @@
 #      CLAUDE_OS_SECRETS_PASSPHRASE=<openssl rand -hex 32>
 # 3. docker compose pull && docker compose up -d
 # 4. docker exec -it claude-os claude auth login  (one-time, persists in volume)
+#
+# Optional Multi-User Stage 2 (Email/Passwort-Login per ADR-0036):
+#  a. Stop the container:   docker compose stop claude-os
+#  b. Create the first admin (sql.js is single-writer — container MUST
+#     be stopped):
+#       docker compose run --rm claude-os \
+#           node /app/dist/cli/index.js users create \
+#               --email you@example.com --password 'long-passphrase-12+'
+#  c. docker compose start claude-os  → Stage 2 auto-detected
+#  d. Open https://<your-domain>/login and use the "Email + Passwort"-tab
+#  e. Optional self-registration: uncomment CLAUDE_OS_ALLOW_REGISTRATION
+#     below (DANGER: only behind Cloudflare Access / VPN / trusted network)
 
 services:
   claude-os:
@@ -45,6 +57,26 @@ services:
       # HOST: "0.0.0.0"
       # CLAUDE_OS_VAULT_PATH: /data/vault
       # CLAUDE_OS_DATA_DIR: /data/config
+
+      # --- Multi-User Stage 2 (Web-7, ADR-0036) ---
+      # Stage 2 is auto-detected by the presence of users.sqlite in
+      # CLAUDE_OS_DATA_DIR. Force it ON for self-registration-only
+      # deployments where the file doesn't exist yet:
+      # CLAUDE_OS_MULTI_USER: "1"
+      #
+      # Escape-hatch to force Stage 2 OFF (Stage-1 token-only fallback):
+      # CLAUDE_OS_DISABLE_MULTI_USER: "1"
+      #
+      # Enable POST /api/auth/register (Self-Registration).
+      # WARNUNG: only behind Cloudflare Access / VPN / trusted network —
+      # otherwise brute-force + account-enumeration are trivial. Off by
+      # default.
+      # CLAUDE_OS_ALLOW_REGISTRATION: "1"
+      #
+      # Dev/Localhost only: drop the `Secure` flag on session cookies so
+      # plain HTTP testing works. NEVER set this in production where you
+      # terminate TLS upstream.
+      # CLAUDE_OS_INSECURE_COOKIES: "1"
 
     volumes:
       # Vault + config + Anthropic auth all live in the same volume so
