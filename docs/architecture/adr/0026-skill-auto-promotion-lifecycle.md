@@ -1,7 +1,7 @@
 # ADR-0026 — Skill-Auto-Promotion Lifecycle
 
-**Status:** Akzeptiert (Konzept) — Implementation gated auf Self-Improvement-Phase
-**Datum:** 2026-05-24
+**Status:** Akzeptiert — Phase 5c shipped 2026-05-28 (Gates 1-4)
+**Datum:** 2026-05-24 (Konzept), 2026-05-28 (Implementation-Closeout für Gate 3)
 **Bedingt durch:** Spec-Split (PR #123) — Self-Improving-Skill-Loop braucht Security-Gate
 
 ## Kontext
@@ -42,14 +42,32 @@ Quarantined-Skills laufen in eigenem Worker-Thread oder separatem Sidecar-Proces
 - Kein Vault-Zugriff außer in `workspaces/_sandbox/`
 - 30s Timeout pro Operation, hard kill bei Überschreitung
 
-### Implementation Gated
+### Implementation Status (2026-05-28)
 
-Phase darf erst starten, wenn:
-- Sandbox-Process-Isolation prototyped und in Vitest verifiziert — **Foundation erledigt 2026-05-27** (ADR-0034 via `child_process.fork`); fs/net-Patching in Phase-5b
-- Yannik-Signatur-Flow im Tauri-GUI implementiert (analog ADR-0023 Native-Password-Pattern) — **Public-Core-Foundation erledigt 2026-05-27** (ADR-0035: Ed25519-Keypair + sign/verify + key-store); **GUI-Modal weiterhin offen** (Folge-PR)
-- Audit-Log-Format finalisiert (siehe SECURITY.md §4) — **erledigt 2026-05-27** (Phase-5-completion-PR; v1-Schema, schema_version-Feld, retention-Policy, file-mode 0o600, UTC-day-Rotation)
+Alle Gates der Self-Improvement-Phase sind shipped als gestackte PRs in Phase 5c:
 
-Discovery + next-steps für die GUI-Modal-Folge siehe `three-brain-out/2026-05-27-phase-5-completion/plan.md`.
+| Gate | Anforderung | Status |
+|---|---|---|
+| 1 | Sandbox-Process-Isolation via `child_process.fork` | ✓ ADR-0034 (PR #177) — net-guard Phase 5b (PR #181) |
+| 2 | Ed25519-Signatur-Foundation (Public-Core) | ✓ ADR-0035 (PRs #178 + #179 + #180) |
+| 3 | State-Transition-Pipeline + CLI + RPCs + GUI | ✓ Phase 5c (PRs #191, #192, #193, #194) |
+| 4 | Audit-Log-Format finalisiert (SECURITY.md §4) | ✓ PR #176 (v1-Schema, schema_version, retention, mode 0o600, UTC-day-Rotation) |
+
+**Phase 5c-1** (PR #191) — `src/domains/skill-lifecycle/promote.ts`: sechs Pure-Async-Transitions (`promoteDraftToQuarantined` / `runQuarantinedSandbox` / `proposeReview` / `approveReview` / `deprecate` / `disable` / `reactivate`) mit typed `PromoteError(code)`. `diffHash` = SHA-256 über canonical `{beforeContent, afterContent, classification}`, bound in die `ReviewApprovalPayload` damit ein Tamper-Between-Sign-And-Activate `signature-mismatch-diff-hash` triggert.
+
+**Phase 5c-2** (PR #192) — `claude-os skill` CLI: `list-drafts` / `list-quarantined` / `list-pending-review` / `propose-review` / `promote <name> --to-quarantined|--run-sandbox|--to-active|--deprecate|--disable|--reactivate`. JSON-mode propagiert `PromoteError.code` direkt.
+
+**Phase 5c-3** (PR #193) — Sidecar-RPCs `skill.*`: 9 Methods wired in `src/sidecar/methods/skill-lifecycle.ts`. Mutating-RPCs **nicht** über MCP-Tools exposed (approval gehört nicht über Tool-Calls).
+
+**Phase 5c-4** (PR #194) — GUI: `SkillReviewPage` mit Pending-List + Side-by-Side-Diff via `diff@9` + Customer-Confidential-Warn-Banner + Sandbox-Run-Card. "Signieren + aktivieren …" als CTA. Web-Build zeigt CLI-Hint-Modal (offline-sign + `--signed-envelope`-Pfad); Tauri-Build dazu folgt in Phase 5c-5.
+
+**Phase 5c-5** (offen) — Tauri-Native-Password-Approval analog ADR-0023 (`sign_skill_promotion_native` Rust-command + spawn_blocking native dialog). **Niedrige Priorität** seit dem Distribution-Pivot 2026-05-27 (Web/Linux ist Primary; Tauri-Desktop-Signing deprioritisiert). Browser-Flow via CLI ist funktional.
+
+**Phase 5c-6** (dieses PR) — ADR-Closeout + `docs/skill-promotion-workflow.md`.
+
+### MSP-E Note-to-Skill (depends auf 5c)
+
+Mit Phase 5c gemerged ist die MSP-E-Spec (`tasks/phase-msp-e-note-to-skill.md`) unlocked: aus einer Note wird ein Draft via `noteToDraftSkill()`, der dann durch die Standard-Pipeline läuft. Folge-PR.
 
 ## Konsequenzen
 

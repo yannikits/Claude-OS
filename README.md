@@ -210,6 +210,7 @@ Voraussetzung: Rust-Toolchain via [rustup](https://rustup.rs/) + plattformspezif
 
 - **[`docs/setup-guide.md`](docs/setup-guide.md) — Detaillierte Schritt-für-Schritt Setup-Anleitung (Szenario A: App, B: + CLI, C: + Dev) inkl. Troubleshooting**
 - **[`docs/server-deployment.md`](docs/server-deployment.md) — Server-Variante per Docker (Proxmox-Homelab + Cloudflare + nginx proxy manager). Inklusive Multi-User-Setup (Phase Web-7, ADR-0036) mit Email/Passwort-Login + Session-Cookies + Admin-CLI.**
+- **[`docs/skill-promotion-workflow.md`](docs/skill-promotion-workflow.md) — Self-Improvement-Loop end-to-end: Lesson → Draft → Quarantäne → Sandbox-Run → Ed25519-Signatur → aktiv. CLI + Sidecar-RPCs + GUI (Phase 5c, ADR-0026).**
 - [`docs/cloud-providers.md`](docs/cloud-providers.md) — Setup für OneDrive, Drive, Dropbox, Nextcloud, rclone, abraunegg/onedrive
 - [`docs/migration-from-portable.md`](docs/migration-from-portable.md) — 7-Schritte-Migration von claude-portable v0.x (USB) zu claude-os v1
 - [`docs/macos-gatekeeper.md`](docs/macos-gatekeeper.md) — unsignierte DMG auf macOS öffnen

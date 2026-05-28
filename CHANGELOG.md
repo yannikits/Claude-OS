@@ -4,6 +4,34 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+### Phase 5c — Skill-Promotion-Pipeline (ADR-0026 Gate 3 Closeout)
+
+End-to-end Self-Improvement-Loop ist deployment-ready. Lessons werden zu Draft-Skills (existing), Yannik promotet sie durch Quarantäne → optional sandbox-run → Ed25519-Signatur → aktiv. CLI + Sidecar-RPCs + GUI alle wired auf eine einzige `promote.ts` als Foundation.
+
+**Domain:** `src/domains/skill-lifecycle/promote.ts` — sechs pure async state-transitions (`promoteDraftToQuarantined` / `runQuarantinedSandbox` / `proposeReview` / `approveReview` / `deprecate` / `disable` / `reactivate`) mit typed `PromoteError(code: 'not-found' | 'wrong-state' | 'signature-invalid' | 'signature-mismatch-diff-hash' | 'audit-write-failed' | 'fs-failed')`. `diffHash` = SHA-256 über canonical `{beforeContent, afterContent, classification}` — bound in die `ReviewApprovalPayload` sodass ein Tamper zwischen Sign und Activate `signature-mismatch-diff-hash` triggert.
+
+**CLI:** `claude-os skill list-drafts` / `list-quarantined` / `list-pending-review` / `propose-review` / `promote <name> --to-quarantined|--run-sandbox|--to-active|--deprecate|--disable|--reactivate`. JSON-mode propagiert `PromoteError.code` direkt.
+
+**Sidecar-RPCs:** 9 neue Methods unter `skill.*`. Mutating RPCs **nicht** über MCP-Tools exposed (approval gehört nicht über agentic Tool-Calls).
+
+**GUI:** neue `SkillReviewPage` (`/skill-review`) — Pending-List + Side-by-Side-Diff via `diff@9` + Customer-Confidential-Warn-Banner (rot) + Sandbox-Run-Card. "Signieren + aktivieren …" CTA mit CLI-Hint-Modal (offline-sign + `--signed-envelope`-Pfad). Tauri-Native-Password-Approval (Phase 5c-5) folgt — niedrige Priorität seit Distribution-Pivot (Web/Linux ist Primary).
+
+**Audit-Trail:** jede Transition schreibt JSONL nach `<dataDir>/audit/audit-YYYY-MM-DD.jsonl` (UTC-day-Rotation, mode `0o600`). Audit-FIRST auf Approve → Audit-Store-Failure → kein half-moved Skill.
+
+**Sicherheits-Bindungen:**
+- `diffHash` in SignedEnvelope (Tamper-Protection)
+- skillId-Binding (Envelope.payload.skillId muss zum approveReview-Argument matchen)
+- Optionaler `expectedPublicKeyB64`-Pin (Keypair-Swap-Defense)
+- Snapshot-on-Overwrite via `<name>.prev-<ts>/` (Rollback-Pfad)
+
+**Docs:** [`docs/skill-promotion-workflow.md`](docs/skill-promotion-workflow.md) — End-to-End-Walkthrough (de).
+
+**ADR:** [`docs/architecture/adr/0026-skill-auto-promotion-lifecycle.md`](docs/architecture/adr/0026-skill-auto-promotion-lifecycle.md) — Status auf "shipped 2026-05-28" geflippt.
+
+**Tests:** +42 vitest (18 promote.ts + 17 sidecar-RPCs + 6 GUI + 1 CLI-help-smoke). Backend full suite: **1560 pass / 8 skip / 0 fail**.
+
+**Operator-Caveat:** sandbox-run benötigt `--script-path` zum Loadable-Modul. Standard-Skills ohne eigenes Script können Quarantäne ohne Run durchlaufen.
+
 ### Multi-User Stage 2 — Email + Passwort + Session-Cookies (Phase Web-7, ADR-0036)
 
 Persistente Email/Passwort-Identitäten obendrauf auf Stage 1 (ADR-0033 Bearer-Token). Opt-in via `ServerConfig.multiUser` — wenn nicht gesetzt, verhält sich der Server exakt wie ADR-0033 Stage 1.
