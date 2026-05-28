@@ -5,7 +5,10 @@
 # docs/server-deployment.md for the full walkthrough.
 #
 # 1. Copy this file to docker-compose.yml
-# 2. Create a .env file with at minimum:
+# 2. Run the interactive setup wizard to create .env (prompts for
+#    admin email, generates tokens, sets sensible defaults):
+#      curl -fsSL https://raw.githubusercontent.com/yannikits/Claude-portable/main/scripts/setup.sh | bash
+#    Manual alternative — create .env with at minimum:
 #      CLAUDE_OS_AUTH_TOKEN=<openssl rand -hex 32>
 #      CLAUDE_OS_SECRETS_PASSPHRASE=<openssl rand -hex 32>
 # 3. docker compose pull && docker compose up -d
@@ -29,7 +32,7 @@
 services:
   claude-os:
     # Use the prebuilt image — pin to a semver tag for production:
-    image: ghcr.io/yannikits/claude-os:v1.7.1
+    image: ghcr.io/yannikits/claude-os:v1.7.2
     # …or track latest:
     # image: ghcr.io/yannikits/claude-os:latest
     # …or build locally from the repo:
@@ -64,6 +67,25 @@ services:
       # CLAUDE_OS_DATA_DIR: /data/config
 
       # --- Multi-User Stage 2 (Web-7, ADR-0036) ---
+
+      # Session-persistence (sessions.sqlite). Without this every
+      # container restart logs everyone out. Recommended for production
+      # — set CLAUDE_OS_SESSION_PERSIST=1 in .env.
+      CLAUDE_OS_SESSION_PERSIST: "${CLAUDE_OS_SESSION_PERSIST:-0}"
+
+      # Admin-HTTP-API allowlist (Phase Web-7-7, v1.7.1+). Empty default
+      # → routes /api/admin/users* are NOT registered. To enable, set
+      # CLAUDE_OS_ADMIN_EMAILS=you@example.com in .env (comma-separated
+      # for multiple). The email(s) must exactly match what you used in
+      # `users create`; admin set changes require a container restart.
+      CLAUDE_OS_ADMIN_EMAILS: "${CLAUDE_OS_ADMIN_EMAILS:-}"
+
+      # Skip the doctor pre-flight at container start. Default 0 (run
+      # doctor as gate). Set CLAUDE_OS_SKIP_DOCTOR=1 in .env only as a
+      # temporary escape if a check is wrong-blocking the boot — fix
+      # the underlying config instead.
+      CLAUDE_OS_SKIP_DOCTOR: "${CLAUDE_OS_SKIP_DOCTOR:-0}"
+
       # Stage 2 is auto-detected by the presence of users.sqlite in
       # CLAUDE_OS_DATA_DIR. Force it ON for self-registration-only
       # deployments where the file doesn't exist yet:
@@ -77,19 +99,6 @@ services:
       # otherwise brute-force + account-enumeration are trivial. Off by
       # default.
       # CLAUDE_OS_ALLOW_REGISTRATION: "1"
-      #
-      # Persist sessions across container restarts via sessions.sqlite
-      # in /data. Without this, every restart logs everyone out and they
-      # re-login. Recommended for production.
-      # CLAUDE_OS_SESSION_PERSIST: "1"
-      #
-      # Admin-HTTP-API allowlist (Phase Web-7-7, v1.7.1+). When set, the
-      # routes under /api/admin/users* are mounted and gated to these
-      # emails. Comma-separated, lowercased + trimmed at boot. **Empty
-      # → routes not registered at all.** The email(s) must exactly
-      # match what you used in `users create`; admin set changes require
-      # a container restart.
-      # CLAUDE_OS_ADMIN_EMAILS: "${CLAUDE_OS_ADMIN_EMAILS:-}"
       #
       # Dev/Localhost only: drop the `Secure` flag on session cookies so
       # plain HTTP testing works. NEVER set this in production where you

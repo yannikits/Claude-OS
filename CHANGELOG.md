@@ -4,6 +4,21 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.7.2] — 2026-05-28
+
+### Fixed
+
+- **Doctor blockt eigene Default-Config (PR #203):** Der `server-env`-Check verlangte `CLAUDE_OS_SECRETS_BACKEND === 'file'`, einen Backend-Wert der gar nicht existiert. Die `SecretBackend`-Union ist `'keyring' | 'encrypted-file'` und das Dockerfile setzt `encrypted-file` als Default → jeder Container der das offizielle Image ohne `CLAUDE_OS_SKIP_DOCTOR=1` startete fiel in eine Restart-Schleife. Fix akzeptiert jetzt `encrypted-file` und leeres/unset (Factory probet selbst), lehnt `keyring` mit klarer Headless-Begründung ab. `scripts/smoke-multi-user.sh` exportierte denselben kaputten `=file`-Wert — auch korrigiert.
+
+### Added
+
+- **`scripts/setup.sh` — interaktiver First-Time-Setup-Wizard.** Generiert `CLAUDE_OS_AUTH_TOKEN` + `CLAUDE_OS_SECRETS_PASSPHRASE` (je 32-byte hex), fragt nach Admin-Email + Session-Persistenz + Self-Registration. Schreibt `.env` mit `chmod 600` und zeigt am Ende die nächsten 3 Befehle (`docker compose pull/up`, `users create`). Idempotent: bestehende `.env` wird per `.env.bak` gesichert. Vereinfacht den TL;DR auf vier Befehle.
+
+### Changed
+
+- **`docker-compose.example.yml`:** `CLAUDE_OS_SESSION_PERSIST`, `CLAUDE_OS_ADMIN_EMAILS` und `CLAUDE_OS_SKIP_DOCTOR` aus den auskommentierten Beispielen in den aktiven `environment:`-Block gehoben — mit `${VAR:-default}`-Syntax, sodass sie ohne `.env`-Eintrag safe-default werden und mit Eintrag sofort greifen (kein zusätzliches `docker-compose.yml`-Edit pro Deployment mehr nötig). Image-Tag im Default jetzt `:v1.7.2`.
+- **`tasks/v1.7.1-install-anleitung.md`:** Titel + Inhalt auf v1.7.2 aktualisiert, neue TL;DR-Section mit Wizard-Pfad oben.
+
 ## [1.7.1] — 2026-05-28
 
 ### Fixed
