@@ -2,8 +2,15 @@
  * WebSocket bridge for interactive PTY sessions.
  *
  * Each WS connection manages exactly one PTY session for its lifetime.
- * Auth happens via `?token=...` (same fallback path as SSE) — browsers
- * cannot attach `Authorization` headers to `new WebSocket(url)`.
+ * Auth happens via:
+ *   1. `claude_os_session` cookie (Stage 2 cookie-mode, ADR-0036) — the
+ *      browser auto-attaches the cookie to the WS upgrade GET, which we
+ *      validate via `sessionRepo.resolve()` and `userRepo.findById()`.
+ *   2. Fallback: `?token=...` query string (Stage 1 token-mode).
+ *
+ * Browsers cannot attach `Authorization` headers to `new WebSocket(url)`,
+ * so we don't accept bearer-via-header. The `/api/*` preHandler hook
+ * does NOT run on WS upgrades — auth is re-checked inline.
  *
  * Wire-protocol (JSON-encoded text frames):
  *  Client → Server:
@@ -25,8 +32,11 @@
  * @module @server/ws-pty
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { SessionRepository } from '../domains/sessions/index.js';
+import type { UserRepository } from '../domains/users/index.js';
 import type { PtyChatSessions } from '../sidecar/pty-chat-sessions.js';
 import { verifyBearerToken } from './auth.js';
+import { SESSION_COOKIE_NAME } from './cookies.js';
 import type { NotificationBus } from './events-sse.js';
 
 interface PtyDataEvent {
@@ -53,6 +63,13 @@ interface RegisterPtyWsOptions {
   readonly pty: PtyChatSessions | null;
   readonly bus: NotificationBus;
   readonly expectedToken: string;
+  /**
+   * When multi-user Stage 2 is active, the session+user repos are passed
+   * so the cookie-attached `claude_os_session` can authenticate the WS.
+   * Unset → cookie-mode disabled, only bearer-token auth works.
+   */
+  readonly sessionRepo?: SessionRepository;
+  readonly userRepo?: UserRepository;
 }
 
 function isPositiveInt(v: unknown): v is number {
@@ -67,16 +84,46 @@ function resolveQueryToken(req: FastifyRequest): string | null {
   return null;
 }
 
+/**
+ * Try cookie-mode auth: read `claude_os_session` from the WS upgrade
+ * request, resolve it against the session repo, and verify the user
+ * still exists and is not disabled. Returns true when the session is
+ * a valid, active user.
+ */
+function checkSessionCookie(
+  req: FastifyRequest,
+  sessionRepo: SessionRepository,
+  userRepo: UserRepository,
+): boolean {
+  const cookies = (req as FastifyRequest & { cookies?: Record<string, string | undefined> })
+    .cookies;
+  const sessionId = cookies?.[SESSION_COOKIE_NAME];
+  if (sessionId === undefined || sessionId.length === 0) return false;
+  const session = sessionRepo.resolve(sessionId);
+  if (session === null) return false;
+  const user = userRepo.findById(session.userId);
+  return user !== null && !user.disabled;
+}
+
 export async function registerPtyWebSocket(
   app: FastifyInstance,
   opts: RegisterPtyWsOptions,
 ): Promise<void> {
   app.get('/api/pty/ws', { websocket: true }, (socket, req) => {
     // Auth — browsers can't attach Authorization to `new WebSocket(url)`,
-    // so the token rides in the query string. The /api/* preHandler hook
-    // does NOT run on websocket upgrades, so we re-check here.
-    const presented = resolveQueryToken(req);
-    if (presented === null || !verifyBearerToken(presented, opts.expectedToken)) {
+    // so we try cookie-mode first (browser auto-attaches the session
+    // cookie to the upgrade GET) and fall back to `?token=…` query
+    // string for Stage-1 token-mode. The /api/* preHandler hook does
+    // NOT run on websocket upgrades, so we re-check here.
+    let authed = false;
+    if (opts.sessionRepo !== undefined && opts.userRepo !== undefined) {
+      authed = checkSessionCookie(req, opts.sessionRepo, opts.userRepo);
+    }
+    if (!authed) {
+      const presented = resolveQueryToken(req);
+      authed = presented !== null && verifyBearerToken(presented, opts.expectedToken);
+    }
+    if (!authed) {
       try {
         socket.send(
           JSON.stringify({

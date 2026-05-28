@@ -260,6 +260,12 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
     pty: services.ptyChatSessions,
     bus,
     expectedToken: config.authToken,
+    ...(config.multiUser !== undefined
+      ? {
+          sessionRepo: config.multiUser.sessionRepo,
+          userRepo: config.multiUser.userRepo,
+        }
+      : {}),
   });
 
   if (config.staticDir !== null) {
