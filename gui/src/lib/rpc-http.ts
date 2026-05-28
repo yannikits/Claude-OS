@@ -3,11 +3,30 @@
  * server (`src/server/`) via `fetch` for RPCs and `EventSource` for
  * notifications.
  *
+ * Two auth modes coexist (Web-7-tail):
+ *  - **Bearer-Token (Stage 1, ADR-0033)**: sessionStorage-persisted
+ *    token, attached as `Authorization: Bearer …` header on every
+ *    fetch. `?token=…` query-string for EventSource + WebSocket
+ *    (those transports can't set custom headers).
+ *  - **Cookie (Stage 2, ADR-0036)**: `claude_os_session` HTTP-only
+ *    cookie auto-attached by the browser for same-origin requests.
+ *    No bearer header. CSRF double-submit: `x-csrf-token` header is
+ *    echoed from the readable `claude_os_csrf` cookie on
+ *    state-changing methods. SSE + WS need no `?token=` because
+ *    browsers DO attach cookies to those — only headers are blocked.
+ *
+ * Mode is detected at call-time: cookie wins if `isCookieAuthed()`
+ * (sessionStorage marker set by `auth-api.ts:loginWithCredentials`),
+ * otherwise falls back to Bearer.
+ *
  * @module @lib/rpc-http
  */
+import { CSRF_COOKIE_NAME, isCookieAuthed, readCookie } from './auth-api';
 import type { AuthCapableTransport, UnsubscribeFn } from './rpc-transport';
 
 export const AUTH_STORAGE_KEY = 'claude-os-token';
+
+const UNSAFE_METHODS = new Set<string>(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 interface PtySpawnedFrame {
   type: 'spawned';
@@ -82,9 +101,13 @@ interface SseConnection {
   readonly attached: Set<string>;
 }
 
-function createSseConnection(token: string): SseConnection {
-  const url = `/api/events?token=${encodeURIComponent(token)}`;
-  const source = new EventSource(url);
+function createSseConnection(token: string | null): SseConnection {
+  // Cookie-mode: browser auto-attaches the session cookie to the
+  // EventSource request, so we omit the query-string entirely.
+  // Token-mode: EventSource can't set headers, so the bearer goes
+  // in the URL (logged in proxy logs — token rotation mitigates).
+  const url = token === null ? '/api/events' : `/api/events?token=${encodeURIComponent(token)}`;
+  const source = new EventSource(url, { withCredentials: true });
   return { source, handlers: new Map(), attached: new Set() };
 }
 
@@ -99,6 +122,36 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
   let token: string | null = initialToken ?? readStoredToken();
   let sse: SseConnection | null = null;
   let pty: PtyChannel | null = null;
+
+  function isCookieMode(): boolean {
+    return isCookieAuthed();
+  }
+
+  /**
+   * Resolve the set of auth-related fetch headers + credentials flag
+   * for an outbound RPC. Cookie-mode wins when active — bearer is
+   * skipped entirely, CSRF header attached on state-changing methods.
+   */
+  function authHeaders(method: string): {
+    headers: Record<string, string>;
+    credentials: RequestCredentials;
+  } {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (isCookieMode()) {
+      if (UNSAFE_METHODS.has(method.toUpperCase())) {
+        const csrf = readCookie(CSRF_COOKIE_NAME);
+        if (csrf !== null) headers['x-csrf-token'] = csrf;
+      }
+    } else if (token !== null) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    return { headers, credentials: 'same-origin' };
+  }
+
+  /** Single source of truth: are we authenticated by any mode? */
+  function hasAnyAuth(): boolean {
+    return (token !== null && token.length > 0) || isCookieMode();
+  }
 
   function closeSse(): void {
     if (sse === null) return;
@@ -126,9 +179,13 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
   /** Open the PTY-WebSocket lazily (first pty.spawn call). */
   function ensurePtyChannel(): PtyChannel {
     if (pty !== null) return pty;
-    if (token === null) throw new Error('rpc-http: no auth token set');
+    if (!hasAnyAuth()) throw new Error('rpc-http: no auth (cookie or bearer) for PTY');
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${window.location.host}/api/pty/ws?token=${encodeURIComponent(token)}`;
+    // Cookie-mode: browser auto-attaches the session cookie to the WS
+    // upgrade request. Token-mode: bearer in the URL (WebSocket cannot
+    // set headers, same trade-off as SSE).
+    const baseUrl = `${proto}//${window.location.host}/api/pty/ws`;
+    const url = isCookieMode() ? baseUrl : `${baseUrl}?token=${encodeURIComponent(token ?? '')}`;
     const ws = new WebSocket(url);
     const channel: PtyChannel = {
       ws,
@@ -222,7 +279,7 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
   }
 
   async function call<T>(method: string, params: unknown = null): Promise<T> {
-    if (token === null) throw new Error('rpc-http: no auth token set');
+    if (!hasAnyAuth()) throw new Error('rpc-http: not authenticated (no cookie + no bearer)');
 
     // PTY methods route through the dedicated WebSocket (Phase Web-3).
     // The shape matches the existing sidecar pty.* RPC return types so
@@ -252,12 +309,11 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     // returns {sessionId}. To receive the pty.data/exit stream on our
     // WS, attach the WS to that session id right after the RPC succeeds.
     if (method === 'auth.login') {
+      const { headers, credentials } = authHeaders('POST');
       const res = await fetch('/api/rpc', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
+        credentials,
         body: JSON.stringify({ method, params }),
       });
       if (res.status === 401) {
@@ -309,16 +365,15 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
       return { ok: true } as T;
     }
 
+    const { headers, credentials } = authHeaders('POST');
     const res = await fetch('/api/rpc', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
+      credentials,
       body: JSON.stringify({ method, params }),
     });
     if (res.status === 401) {
-      // Server says our token is invalid — clear locally so the next
+      // Server says our auth is invalid — clear locally so the next
       // navigation lands on the login screen. Caller still sees the throw.
       writeStoredToken(null);
       token = null;
@@ -344,7 +399,7 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
     eventName: string,
     handler: (payload: T) => void,
   ): Promise<UnsubscribeFn> {
-    if (token === null) throw new Error('rpc-http: no auth token for SSE');
+    if (!hasAnyAuth()) throw new Error('rpc-http: not authenticated for SSE');
 
     // pty.* events come over the dedicated WebSocket (Phase Web-3), NOT
     // the shared SSE stream. xterm.js needs sub-100ms round-trips that
@@ -359,7 +414,9 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
       };
     }
 
-    if (sse === null) sse = createSseConnection(token);
+    // Cookie-mode: no token in URL — browser auto-attaches the session
+    // cookie. Token-mode: bearer in the URL (EventSource can't set headers).
+    if (sse === null) sse = createSseConnection(isCookieMode() ? null : token);
 
     let handlerSet = sse.handlers.get(eventName);
     if (handlerSet === undefined) {
@@ -440,7 +497,7 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
   }
 
   function hasAuth(): boolean {
-    return token !== null && token.length > 0;
+    return hasAnyAuth();
   }
 
   return { call, subscribe, setAuth, clearAuth, verifyAuth, hasAuth };
