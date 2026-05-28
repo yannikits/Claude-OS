@@ -855,3 +855,135 @@ export async function crossWorkspaceSearch(opts: {
 }): Promise<CrossWorkspaceSearchResult> {
   return rpcCall<CrossWorkspaceSearchResult>('retrieval.crossWorkspaceSearch', opts);
 }
+
+// ─── Phase 5c skill-lifecycle ─────────────────────────────────────
+
+export interface SkillBucketSummary {
+  name: string;
+  path: string;
+  mtimeMs: number;
+}
+export interface SkillQuarantinedSummary extends SkillBucketSummary {
+  hasSandboxRun: boolean;
+}
+
+export interface SkillListDraftsResult {
+  ok: true;
+  workspace: string;
+  entries: SkillBucketSummary[];
+}
+export interface SkillListQuarantinedResult {
+  ok: true;
+  workspace: string;
+  entries: SkillQuarantinedSummary[];
+}
+
+export interface SkillSandboxRunSummary {
+  skillName: string;
+  runAtIso: string;
+  durationMs: number;
+  outcome: 'ok' | 'error' | 'timeout';
+  output: unknown;
+  killedBy: 'timeout' | 'crash' | 'spawn-failure' | 'invalid-path' | null;
+  errorMessage: string | null;
+}
+
+export interface SkillReviewProposal {
+  ok: true;
+  name: string;
+  classification: string;
+  beforeContent: string;
+  afterContent: string;
+  diffHash: string;
+  sandboxRunSummary: SkillSandboxRunSummary | null;
+}
+
+export interface SkillPromoteErrorEnvelope {
+  ok: false;
+  code:
+    | 'not-found'
+    | 'wrong-state'
+    | 'signature-invalid'
+    | 'signature-mismatch-diff-hash'
+    | 'audit-write-failed'
+    | 'fs-failed';
+  message: string;
+}
+
+export type SkillProposeReviewResult = SkillReviewProposal | SkillPromoteErrorEnvelope;
+
+export interface SignedApprovalEnvelope {
+  payload: {
+    skillId: string;
+    diffHash: string;
+    classification: string;
+    reviewedAtIso: string;
+  };
+  signatureB64: string;
+  publicKeyB64: string;
+  signedAt: string;
+  algorithm: string;
+}
+
+export interface SkillPromoteResult {
+  ok: true;
+  name: string;
+  fromState: string;
+  toState: string;
+  path: string;
+}
+
+export async function listSkillDrafts(workspace?: string): Promise<SkillListDraftsResult> {
+  return rpcCall<SkillListDraftsResult>(
+    'skill.listDrafts',
+    workspace === undefined ? {} : { workspace },
+  );
+}
+
+export async function listSkillQuarantined(
+  workspace?: string,
+): Promise<SkillListQuarantinedResult> {
+  return rpcCall<SkillListQuarantinedResult>(
+    'skill.listQuarantined',
+    workspace === undefined ? {} : { workspace },
+  );
+}
+
+export async function proposeSkillReview(name: string): Promise<SkillProposeReviewResult> {
+  return rpcCall<SkillProposeReviewResult>('skill.proposeReview', { name });
+}
+
+export async function promoteSkillDraftToQuarantined(
+  name: string,
+): Promise<SkillPromoteResult | SkillPromoteErrorEnvelope> {
+  return rpcCall<SkillPromoteResult | SkillPromoteErrorEnvelope>(
+    'skill.promoteDraftToQuarantined',
+    { name },
+  );
+}
+
+export async function approveSkillReview(opts: {
+  name: string;
+  signedEnvelope: SignedApprovalEnvelope;
+  expectedPublicKeyB64?: string;
+}): Promise<SkillPromoteResult | SkillPromoteErrorEnvelope> {
+  return rpcCall<SkillPromoteResult | SkillPromoteErrorEnvelope>('skill.approveReview', opts);
+}
+
+export async function deprecateSkill(
+  name: string,
+): Promise<SkillPromoteResult | SkillPromoteErrorEnvelope> {
+  return rpcCall<SkillPromoteResult | SkillPromoteErrorEnvelope>('skill.deprecate', { name });
+}
+
+export async function disableSkill(
+  name: string,
+): Promise<SkillPromoteResult | SkillPromoteErrorEnvelope> {
+  return rpcCall<SkillPromoteResult | SkillPromoteErrorEnvelope>('skill.disable', { name });
+}
+
+export async function reactivateSkill(
+  name: string,
+): Promise<SkillPromoteResult | SkillPromoteErrorEnvelope> {
+  return rpcCall<SkillPromoteResult | SkillPromoteErrorEnvelope>('skill.reactivate', { name });
+}

@@ -33,6 +33,7 @@ import {
 import { LoginPage } from './pages/login';
 import { MemoryPage } from './pages/memory';
 import { RegisterPage } from './pages/register';
+import { SkillReviewPage } from './pages/skill-review';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
@@ -41,6 +42,7 @@ const NAV = [
   { to: '/catalog', label: 'Catalog' },
   { to: '/vault', label: 'Vault' },
   { to: '/agent-runs', label: 'Agent Runs' },
+  { to: '/skill-review', label: 'Skill-Review' },
   { to: '/schedule', label: 'Schedule' },
   { to: '/mcp-clients', label: 'MCP-Clients' },
   { to: '/secrets', label: 'Secrets' },
@@ -405,6 +407,7 @@ function AuthenticatedApp({ authMode, onLogout }: AuthenticatedAppProps) {
               <Route path="catalog" element={<CatalogPage />} />
               <Route path="vault" element={<VaultPage />} />
               <Route path="agent-runs" element={<AgentRunsPage />} />
+              <Route path="skill-review" element={<SkillReviewPage />} />
               <Route path="schedule" element={<SchedulePage />} />
               <Route path="mcp-clients" element={<McpClientsPage />} />
               <Route path="secrets" element={<SecretsPage />} />
