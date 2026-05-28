@@ -22,11 +22,16 @@
 #  d. Open https://<your-domain>/login and use the "Email + Passwort"-tab
 #  e. Optional self-registration: uncomment CLAUDE_OS_ALLOW_REGISTRATION
 #     below (DANGER: only behind Cloudflare Access / VPN / trusted network)
+#  f. Optional Admin-HTTP-API (Phase Web-7-7, v1.7.1+): set
+#     CLAUDE_OS_ADMIN_EMAILS in .env to the comma-separated allowlist
+#     (must match the email you used in `users create` exactly).
 
 services:
   claude-os:
-    # Use the prebuilt image:
-    image: ghcr.io/iteenschmiede/claude-os:latest
+    # Use the prebuilt image — pin to a semver tag for production:
+    image: ghcr.io/yannikits/claude-os:v1.7.1
+    # …or track latest:
+    # image: ghcr.io/yannikits/claude-os:latest
     # …or build locally from the repo:
     # build: .
     container_name: claude-os
@@ -72,6 +77,19 @@ services:
       # otherwise brute-force + account-enumeration are trivial. Off by
       # default.
       # CLAUDE_OS_ALLOW_REGISTRATION: "1"
+      #
+      # Persist sessions across container restarts via sessions.sqlite
+      # in /data. Without this, every restart logs everyone out and they
+      # re-login. Recommended for production.
+      # CLAUDE_OS_SESSION_PERSIST: "1"
+      #
+      # Admin-HTTP-API allowlist (Phase Web-7-7, v1.7.1+). When set, the
+      # routes under /api/admin/users* are mounted and gated to these
+      # emails. Comma-separated, lowercased + trimmed at boot. **Empty
+      # → routes not registered at all.** The email(s) must exactly
+      # match what you used in `users create`; admin set changes require
+      # a container restart.
+      # CLAUDE_OS_ADMIN_EMAILS: "${CLAUDE_OS_ADMIN_EMAILS:-}"
       #
       # Dev/Localhost only: drop the `Secure` flag on session cookies so
       # plain HTTP testing works. NEVER set this in production where you
