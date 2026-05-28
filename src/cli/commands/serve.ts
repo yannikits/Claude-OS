@@ -23,6 +23,7 @@ import {
 import { resolveUsersDbPath, UserRepository } from '../../domains/users/index.js';
 import { startServer } from '../../server/index.js';
 import { LoginRateLimiter } from '../../server/rate-limit.js';
+import { parseAdminEmails } from '../../server/routes-admin.js';
 import {
   DEFAULT_SERVER_CONFIG,
   type MultiUserConfig,
@@ -102,6 +103,7 @@ async function maybeMultiUserConfig(dataDir: string): Promise<MultiUserBundle | 
   const registrationRateLimiter = allowRegistration
     ? new LoginRateLimiter({ capacity: 3, refillIntervalMs: 60 * 60 * 1000 })
     : undefined;
+  const adminEmails = parseAdminEmails(process.env.CLAUDE_OS_ADMIN_EMAILS);
 
   return {
     config: {
@@ -113,6 +115,7 @@ async function maybeMultiUserConfig(dataDir: string): Promise<MultiUserBundle | 
       sessionMaxAgeSec,
       ...(allowRegistration ? { allowRegistration: true } : {}),
       ...(registrationRateLimiter !== undefined ? { registrationRateLimiter } : {}),
+      ...(adminEmails.length > 0 ? { adminEmails } : {}),
     },
     sessionPersist,
   };

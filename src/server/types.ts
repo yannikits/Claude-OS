@@ -40,6 +40,13 @@ export interface MultiUserConfig {
    * IP / hour.
    */
   readonly registrationRateLimiter?: LoginRateLimiter;
+  /**
+   * Lowercased + trimmed admin email allowlist (Phase Web-7-7). When
+   * non-empty, `POST/GET /api/admin/users*` routes are registered and
+   * gated to these emails. Empty (default) → no admin HTTP API; the
+   * `claude-os users` CLI remains the only management surface.
+   */
+  readonly adminEmails?: readonly string[];
 }
 
 export interface ServerConfig {

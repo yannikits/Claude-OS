@@ -30,6 +30,7 @@ import { type InboxOutboxWatchers, setupWatchers } from '../sidecar/watchers.js'
 import { makeAuthHook, parseTokenList } from './auth.js';
 import { makeCookieAuthHook } from './cookie-auth.js';
 import { createNotificationBus, registerSseRoute } from './events-sse.js';
+import { registerAdminRoutes } from './routes-admin.js';
 import { registerAuthRoutes } from './routes-auth.js';
 import { registerInboxUpload, registerRpcRoutes } from './rpc-http.js';
 import { registerStaticRoutes } from './static.js';
@@ -217,6 +218,18 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
           }
         : {}),
     });
+    if (config.multiUser.adminEmails !== undefined && config.multiUser.adminEmails.length > 0) {
+      registerAdminRoutes(fastify, {
+        userRepo: config.multiUser.userRepo,
+        sessionRepo: config.multiUser.sessionRepo,
+        ...(config.multiUser.audit !== undefined ? { audit: config.multiUser.audit } : {}),
+        adminEmails: config.multiUser.adminEmails,
+      });
+      log.info(
+        { adminCount: config.multiUser.adminEmails.length },
+        'server: admin HTTP API enabled (Web-7-7)',
+      );
+    }
   } else {
     log.info(
       { tokenCount: expectedTokens.length },

@@ -36,7 +36,11 @@ export type AuditEventKind =
   | 'auth.login.failed'
   | 'auth.logout'
   | 'auth.register'
-  | 'auth.password.change';
+  | 'auth.password.change'
+  | 'admin.user.create'
+  | 'admin.user.disable'
+  | 'admin.user.enable'
+  | 'admin.user.reset-password';
 
 /**
  * Audit-log schema version. Bumped only when a backwards-incompatible

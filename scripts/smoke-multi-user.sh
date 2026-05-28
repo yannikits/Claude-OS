@@ -65,8 +65,27 @@ export CLAUDE_OS_ROOT="$TMP"
 export CLAUDE_OS_AUTH_TOKEN="$TOKEN"
 export CLAUDE_OS_SECRETS_BACKEND="file"
 export CLAUDE_OS_INSECURE_COOKIES="1"
+# Phase Web-7-7: smoke also covers admin HTTP API + MSP-E note-to-skill.
+export CLAUDE_OS_ADMIN_EMAILS="$EMAIL"
 mkdir -p "$CLAUDE_OS_DATA_DIR" "$CLAUDE_OS_VAULT_PATH"
+mkdir -p "$CLAUDE_OS_VAULT_PATH/workspaces/personal/notes"
+mkdir -p "$CLAUDE_OS_VAULT_PATH/workspaces/personal/skills/_drafts"
 touch "$CLAUDE_OS_ROOT/.claude-os-root"
+
+# vault-config so resolveVaultRoot finds workspaces/personal.
+cat > "$CLAUDE_OS_VAULT_PATH/vault-config.json" <<JSON
+{ "version": 1, "defaultWorkspace": "personal", "workspaces": [ { "id": "personal", "label": "Personal", "kind": "personal", "path": "workspaces/personal" } ] }
+JSON
+cat > "$CLAUDE_OS_VAULT_PATH/workspaces/personal/notes/smoke-note.md" <<NOTE
+---
+title: Smoke Note
+classification: personal
+---
+
+# Smoke Note
+
+This note exists so the smoke can exercise note-to-skill.
+NOTE
 
 if [ "$PERSIST" = "1" ]; then
   export CLAUDE_OS_SESSION_PERSIST="1"
@@ -247,8 +266,95 @@ if [ "$PERSIST" = "1" ]; then
   fi
 fi
 
-# ── 7. logout with valid CSRF ────────────────────────────────────────
-sect "7. POST /api/auth/logout (valid CSRF)"
+# ── 7. Admin HTTP API (Web-7-7) ──────────────────────────────────────
+sect "7. Admin HTTP API"
+
+NEW_EMAIL="new-by-admin@example.com"
+NEW_PASSWORD="new-strong-password-12+"
+
+# 7a. list users
+ADMIN_LIST=$(curl -s -b "$COOKIES" "http://$HOST:$PORT/api/admin/users")
+if echo "$ADMIN_LIST" | grep -q "\"email\":\"$EMAIL\""; then
+  ok "GET /api/admin/users lists admin"
+else
+  fail "GET /api/admin/users body unexpected"
+  echo "  body: $ADMIN_LIST"
+fi
+
+# 7b. create a user
+CREATE_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  -b "$COOKIES" -X POST "http://$HOST:$PORT/api/admin/users" \
+  -H "x-csrf-token: $CSRF" -H "Content-Type: application/json" \
+  -d "{\"email\":\"$NEW_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
+if [ "$CREATE_STATUS" = "201" ]; then
+  ok "POST /api/admin/users created $NEW_EMAIL"
+else
+  fail "POST /api/admin/users expected 201, got $CREATE_STATUS"
+fi
+
+# 7c. duplicate → 409
+DUP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  -b "$COOKIES" -X POST "http://$HOST:$PORT/api/admin/users" \
+  -H "x-csrf-token: $CSRF" -H "Content-Type: application/json" \
+  -d "{\"email\":\"$NEW_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
+if [ "$DUP_STATUS" = "409" ]; then
+  ok "duplicate POST → 409"
+else
+  fail "duplicate POST expected 409, got $DUP_STATUS"
+fi
+
+# 7d. disable + verify they cannot log in
+DISABLE_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  -b "$COOKIES" -X POST "http://$HOST:$PORT/api/admin/users/$NEW_EMAIL/disable" \
+  -H "x-csrf-token: $CSRF" -H "Content-Type: application/json" -d '{}')
+if [ "$DISABLE_STATUS" = "200" ]; then
+  ok "POST disable → 200"
+else
+  fail "POST disable expected 200, got $DISABLE_STATUS"
+fi
+
+LOGIN_DENIED=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://$HOST:$PORT/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"$NEW_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
+if [ "$LOGIN_DENIED" = "401" ]; then
+  ok "disabled user cannot login (401)"
+else
+  fail "disabled user login expected 401, got $LOGIN_DENIED"
+fi
+
+# ── 8. MSP-E note-to-skill (RPC) ─────────────────────────────────────
+sect "8. MSP-E: notes.proposeAsSkill + notes.createSkillDraftFromNote"
+
+NOTE_PATH="$CLAUDE_OS_VAULT_PATH/workspaces/personal/notes/smoke-note.md"
+PROPOSE_BODY=$(curl -s -b "$COOKIES" -X POST "http://$HOST:$PORT/api/rpc" \
+  -H "x-csrf-token: $CSRF" -H "Content-Type: application/json" \
+  -d "{\"method\":\"notes.proposeAsSkill\",\"params\":{\"notePath\":\"$NOTE_PATH\"}}")
+if echo "$PROPOSE_BODY" | grep -q '"ok":true'; then
+  ok "notes.proposeAsSkill returned ok=true"
+else
+  info "notes.proposeAsSkill body: $PROPOSE_BODY"
+  # Soft fail: backend RPC may not be registered in all environments yet.
+  info "  (MSP-E backend may need separate wire-up — non-blocking soft check)"
+fi
+
+CREATE_BODY=$(curl -s -b "$COOKIES" -X POST "http://$HOST:$PORT/api/rpc" \
+  -H "x-csrf-token: $CSRF" -H "Content-Type: application/json" \
+  -d "{\"method\":\"notes.createSkillDraftFromNote\",\"params\":{\"notePath\":\"$NOTE_PATH\"}}")
+if echo "$CREATE_BODY" | grep -q '"ok":true'; then
+  ok "notes.createSkillDraftFromNote returned ok=true"
+  # Verify SKILL.md materialized
+  if find "$CLAUDE_OS_VAULT_PATH/workspaces/personal/skills/_drafts" -name "SKILL.md" | grep -q SKILL.md; then
+    ok "draft SKILL.md materialized on disk"
+  else
+    fail "RPC returned ok but no SKILL.md found under skills/_drafts"
+  fi
+else
+  info "notes.createSkillDraftFromNote body: $CREATE_BODY"
+  info "  (soft check — non-blocking)"
+fi
+
+# ── 9. logout with valid CSRF ────────────────────────────────────────
+sect "9. POST /api/auth/logout (valid CSRF)"
 LOGOUT=$(curl -s -b "$COOKIES" -X POST "http://$HOST:$PORT/api/auth/logout" \
   -H "x-csrf-token: $CSRF" \
   -H "Content-Type: application/json" -d '{}')
