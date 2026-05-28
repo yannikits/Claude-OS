@@ -63,7 +63,7 @@ export CLAUDE_OS_DATA_DIR="$TMP/data"
 export CLAUDE_OS_VAULT_PATH="$TMP/vault"
 export CLAUDE_OS_ROOT="$TMP"
 export CLAUDE_OS_AUTH_TOKEN="$TOKEN"
-export CLAUDE_OS_SECRETS_BACKEND="file"
+export CLAUDE_OS_SECRETS_BACKEND="encrypted-file"
 export CLAUDE_OS_INSECURE_COOKIES="1"
 # Phase Web-7-7: smoke also covers admin HTTP API + MSP-E note-to-skill.
 export CLAUDE_OS_ADMIN_EMAILS="$EMAIL"

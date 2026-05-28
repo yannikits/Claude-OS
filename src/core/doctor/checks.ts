@@ -168,10 +168,13 @@ export async function checkWindowsLongPaths(): Promise<CheckResult> {
  *  1. `CLAUDE_OS_AUTH_TOKEN` set → otherwise the server's
  *     `makeAuthHook` would refuse-boot anyway, but later in startup
  *     and with a less-greppable message.
- *  2. `CLAUDE_OS_SECRETS_BACKEND=file` → headless containers have no
- *     keyring/DBus; the encrypted-file backend is the only viable
- *     choice. Catching a mis-set `=keyring` here saves a confusing
- *     runtime crash on the first `secrets.set` call.
+ *  2. `CLAUDE_OS_SECRETS_BACKEND` must not be `keyring` in headless
+ *     containers (no DBus/Secret-Service). The valid headless choice is
+ *     `encrypted-file` (per `SecretBackend` union in
+ *     `src/domains/secrets/types.ts`); empty/unset is also fine since
+ *     `factory.ts` then falls back via capability-probe. Catching a
+ *     mis-set `=keyring` here saves a confusing runtime crash on the
+ *     first `secrets.set` call.
  *  3. `CLAUDE_OS_VAULT_PATH` directory exists and is writable →
  *     otherwise vault-sync, note-write, and FTS-indexer fail later
  *     with cryptic ENOENT/EACCES errors deep in `methods.ts`.
@@ -192,10 +195,18 @@ export async function checkServerEnv(env: NodeJS.ProcessEnv = process.env): Prom
 
     const problems: string[] = [];
 
-    const backend = env.CLAUDE_OS_SECRETS_BACKEND ?? '';
-    if (backend !== 'file') {
+    // Headless containers can only use `encrypted-file` (the
+    // SecretBackend union has exactly two members; `keyring` needs a
+    // desktop session). Empty/unset is acceptable — the factory then
+    // capability-probes and ends up at encrypted-file anyway.
+    const backend = (env.CLAUDE_OS_SECRETS_BACKEND ?? '').trim().toLowerCase();
+    if (backend === 'keyring') {
       problems.push(
-        `CLAUDE_OS_SECRETS_BACKEND="${backend}" — must be "file" in headless containers (keyring backends need a desktop session)`,
+        'CLAUDE_OS_SECRETS_BACKEND="keyring" — keyring backends need a desktop session; use "encrypted-file" in headless containers',
+      );
+    } else if (backend.length > 0 && backend !== 'encrypted-file') {
+      problems.push(
+        `CLAUDE_OS_SECRETS_BACKEND="${env.CLAUDE_OS_SECRETS_BACKEND}" — unknown backend (expected "encrypted-file" or unset)`,
       );
     }
 
@@ -216,7 +227,7 @@ export async function checkServerEnv(env: NodeJS.ProcessEnv = process.env): Prom
       return Promise.resolve({
         name: 'server-env',
         severity: 'ok',
-        message: 'server-mode env complete (token + file-backend + writable vault)',
+        message: 'server-mode env complete (token + encrypted-file backend + writable vault)',
       });
     }
 

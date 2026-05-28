@@ -160,14 +160,22 @@ describe('checkServerEnv', () => {
   it('returns ok when all server-mode env-vars are set correctly', async () => {
     const result = await checkServerEnv({
       CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
-      CLAUDE_OS_SECRETS_BACKEND: 'file',
+      CLAUDE_OS_SECRETS_BACKEND: 'encrypted-file',
       CLAUDE_OS_VAULT_PATH: tmpVault,
     });
     expect(result.severity).toBe('ok');
     expect(result.message).toContain('server-mode env complete');
   });
 
-  it('fails when CLAUDE_OS_SECRETS_BACKEND is wrong', async () => {
+  it('returns ok when CLAUDE_OS_SECRETS_BACKEND is unset (factory falls back)', async () => {
+    const result = await checkServerEnv({
+      CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      CLAUDE_OS_VAULT_PATH: tmpVault,
+    });
+    expect(result.severity).toBe('ok');
+  });
+
+  it('fails when CLAUDE_OS_SECRETS_BACKEND is keyring (needs desktop session)', async () => {
     const result = await checkServerEnv({
       CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
       CLAUDE_OS_SECRETS_BACKEND: 'keyring',
@@ -175,13 +183,23 @@ describe('checkServerEnv', () => {
     });
     expect(result.severity).toBe('fail');
     expect(result.detail).toContain('CLAUDE_OS_SECRETS_BACKEND');
-    expect(result.detail).toContain('headless');
+    expect(result.detail).toContain('keyring');
+  });
+
+  it('fails when CLAUDE_OS_SECRETS_BACKEND is an unknown value', async () => {
+    const result = await checkServerEnv({
+      CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      CLAUDE_OS_SECRETS_BACKEND: 'plaintext',
+      CLAUDE_OS_VAULT_PATH: tmpVault,
+    });
+    expect(result.severity).toBe('fail');
+    expect(result.detail).toContain('unknown backend');
   });
 
   it('fails when CLAUDE_OS_VAULT_PATH is unset', async () => {
     const result = await checkServerEnv({
       CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
-      CLAUDE_OS_SECRETS_BACKEND: 'file',
+      CLAUDE_OS_SECRETS_BACKEND: 'encrypted-file',
     });
     expect(result.severity).toBe('fail');
     expect(result.detail).toContain('CLAUDE_OS_VAULT_PATH is unset');
@@ -190,7 +208,7 @@ describe('checkServerEnv', () => {
   it('fails when CLAUDE_OS_VAULT_PATH does not exist', async () => {
     const result = await checkServerEnv({
       CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
-      CLAUDE_OS_SECRETS_BACKEND: 'file',
+      CLAUDE_OS_SECRETS_BACKEND: 'encrypted-file',
       CLAUDE_OS_VAULT_PATH: join(tmpVault, 'nope'),
     });
     expect(result.severity).toBe('fail');
@@ -200,6 +218,7 @@ describe('checkServerEnv', () => {
   it('aggregates multiple problems in one detail string', async () => {
     const result = await checkServerEnv({
       CLAUDE_OS_AUTH_TOKEN: 'deadbeef',
+      CLAUDE_OS_SECRETS_BACKEND: 'keyring',
       // backend wrong + vault missing → both surface
     });
     expect(result.severity).toBe('fail');
