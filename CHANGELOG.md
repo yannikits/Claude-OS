@@ -4,7 +4,51 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
-_(noch keine Aenderungen)_
+### Multi-User Stage 2 — Email + Passwort + Session-Cookies (Phase Web-7, ADR-0036)
+
+Persistente Email/Passwort-Identitäten obendrauf auf Stage 1 (ADR-0033 Bearer-Token). Opt-in via `ServerConfig.multiUser` — wenn nicht gesetzt, verhält sich der Server exakt wie ADR-0033 Stage 1.
+
+**Neue Domains:**
+- `src/domains/users/` — sql.js-backed `UserRepository` mit schema-versioned migration (v1), atomic-save mit POSIX-mode `0o600`. scrypt-Hashing (`N=16384, r=8, p=1, dkLen=64`, OWASP-2023-Baseline) mit algorithm-tagged Format `scrypt$N=…$r=…$p=…$<salt-b64>$<hash-b64>` für künftige KDF-Migration. `MIN_PASSWORD_LEN=12`, `timingSafeEqual` über derived buffers, user-enumeration defense via lazy fake-hash.
+- `src/domains/sessions/` — `SessionRepository` mit in-memory LRU (default 1000 entries), 30-Tage sliding-TTL, 256-bit CSPRNG session-ids (base64url, 43 chars). Injectable `now()` für Tests.
+
+**Neue Server-Module:**
+- `src/server/cookies.ts` — Set-Cookie builders mit HttpOnly + SameSite=Strict + conditional Secure, dev-bypass via `$CLAUDE_OS_INSECURE_COOKIES=1`.
+- `src/server/csrf.ts` — double-submit token + timingSafeEqual.
+- `src/server/rate-limit.ts` — per-IP token-bucket (login 5/15min, registration 3/h), max-tracked-IPs 10k mit oldest-eviction.
+- `src/server/cookie-auth.ts` — cookie-first → bearer-fallback hook. CSRF enforced auf unsafe-methods im cookie-Pfad; Bearer-only Clients skippen CSRF.
+- `src/server/routes-auth.ts` — `POST /api/auth/{login,logout,refresh,register,change-password}` + `GET /api/auth/me`.
+
+**Neue tenant-Resolver:**
+- `userToTenantId(user)` + `resolveTenantFromUser(user)` in `domains/tenant/resolve-token.ts`. Namespace-disjunkt zu `tokenToTenantId` (user-prefix vs hex-prefix → keine Kollision).
+
+**Doctor:**
+- `checkUserStore` — öffnet `users.sqlite` mit `autoRebuildOnSchemaDrift=false` (schema-mismatch fail-loud statt silent-drop). Drei Outcomes: not-in-server-mode-skip, no-file-ok, openable-ok-mit-count, corrupt-fail.
+
+**Admin-CLI** (Phase Web-7-5):
+- `claude-os users create --email <e> --password <p> [--tenant-override <id>]`
+- `claude-os users list [--include-disabled] [--json]`
+- `claude-os users disable <id-or-email>` / `enable …`
+- `claude-os users reset-password <id-or-email> [--password <p> | --random]`
+- `claude-os users sessions list [--user <id-or-email>]` / `sessions revoke <id>`
+
+**Frontend (gui/src/):**
+- `lib/auth-api.ts` — standalone fetch wrappers für login/register/logout/me/changePassword. CSRF-Header aus Cookie. `isCookieAuthed()`-Flag in sessionStorage (session cookie ist HttpOnly → JS kann es nicht direkt prüfen).
+- `pages/login.tsx` — refactored mit Tabs (Email default, API-Token legacy). `onSwitchToRegister` + `successBanner` props.
+- `pages/register.tsx` — NEU. Email+Passwort+Confirm, client-side Validation, server-codes auf Deutsch.
+- `components/profile-drawer.tsx` — NEU. Sidebar-Widget mit email + tenant + logout + change-password.
+- `components/change-password-modal.tsx` — NEU. Pattern aus secret-add-modal, 3 Password-Felder mit clear-on-submit.
+- `App.tsx` — `useAuthGate` widened von binary auf `AuthMode = 'tauri'|'cookie'|'token'|'none'`. Mount-Time `/api/auth/me` Probe upgraded `'none' → 'cookie'` bei vorhandener Session-Cookie.
+
+**Audit-Events (neu in `AuditEventKind`):** `auth.login.success`, `auth.login.failed`, `auth.logout`, `auth.register`, `auth.password.change`. Pflicht-Hashing von email+IP (sha256-prefix, 16 hex chars).
+
+**Deps:** `@fastify/cookie@11.0.2`.
+
+**Tests:** +144 (Backend 111: UserRepo 46, Sessions 21, CSRF 6, Rate-Limit 8, Routes-Auth 33, Tenant 6, Doctor 5 + audit-kind extension; Frontend 33: auth-api 11, login-page 6, register-page 5 + die Web-7-5-CLI ist real-smoke-verifiziert). Full backend suite: **1512 passed / 8 skipped / 0 failed**.
+
+**ADR:** [`docs/architecture/adr/0036-multi-user-stage-2-email-password.md`](docs/architecture/adr/0036-multi-user-stage-2-email-password.md)
+
+**Operator-Caveat:** sql.js ist single-writer. Admin-CLI muss laufen während der Server gestoppt ist. Documented in `docs/server-deployment.md` §"Multi-User mit Email-Login (Stage 2)".
 
 ## [1.6.0] — 2026-05-21
 

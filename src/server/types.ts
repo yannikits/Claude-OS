@@ -7,6 +7,40 @@
  *
  * @module @server/types
  */
+import type { AuditLogger } from '../core/audit/index.js';
+import type { SessionRepository } from '../domains/sessions/index.js';
+import type { UserRepository } from '../domains/users/index.js';
+import type { LoginRateLimiter } from './rate-limit.js';
+
+/**
+ * Phase Web-7-2 multi-user-stage-2 config (per ADR-0036 draft). When
+ * present, the server activates email/password login routes and the
+ * cookie-first auth hook on top of the existing Stage-1 bearer-token
+ * surface. When `undefined`, the server behaves exactly as before
+ * (Stage 1 token-only — ADR-0033).
+ */
+export interface MultiUserConfig {
+  readonly userRepo: UserRepository;
+  readonly sessionRepo: SessionRepository;
+  readonly rateLimiter: LoginRateLimiter;
+  readonly audit?: AuditLogger;
+  /** When true, drops the `Secure` flag on cookies (dev/localhost only). */
+  readonly insecureCookies: boolean;
+  /** Session-cookie `Max-Age=` in seconds. Default 30 days. */
+  readonly sessionMaxAgeSec: number;
+  /**
+   * When true, exposes `POST /api/auth/register`. Off by default —
+   * production deployments use the Admin-CLI (Web-7-5) for provisioning
+   * and run behind Cloudflare Access / VPN.
+   */
+  readonly allowRegistration?: boolean;
+  /**
+   * Separate rate-limit bucket for registrations. Required when
+   * `allowRegistration` is true. Default in `index.ts` is 3 attempts /
+   * IP / hour.
+   */
+  readonly registrationRateLimiter?: LoginRateLimiter;
+}
 
 export interface ServerConfig {
   /** Bind host. `0.0.0.0` for container, `127.0.0.1` for local-only. */
@@ -41,6 +75,12 @@ export interface ServerConfig {
    * behind Cloudflare. Fastify uses this for correct `req.ip` resolution.
    */
   readonly trustProxy: number | boolean;
+  /**
+   * Optional multi-user (Stage 2 per ADR-0033) configuration. When set,
+   * enables email/password login + session-cookies on top of bearer
+   * tokens. Unset (default) → behaviour identical to ADR-0032 single-user.
+   */
+  readonly multiUser?: MultiUserConfig;
 }
 
 export const DEFAULT_SERVER_CONFIG: Omit<ServerConfig, 'authToken' | 'staticDir'> = {

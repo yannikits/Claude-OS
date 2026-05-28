@@ -18,7 +18,7 @@ Diese Anleitung beschreibt das selbst-gehostete Deployment von Claude-OS als Hea
 
 - Native Drag-and-Drop im Browser (Tauri-only)
 - Live Chat-PTY-Streaming im Browser (kommt in Phase Web-3)
-- Multi-User-Login mit Registrierung (siehe ADR-0032 §"Out-of-Scope")
+- ~~Multi-User-Login mit Registrierung~~ — **shipped seit Phase Web-7 (ADR-0036)** — siehe §"Multi-User mit Email-Login (Stage 2)" weiter unten
 - MSP-Bridges (TANSS/Ninja/Veeam) — leben im privaten `claude-os-msp`-Repo
 
 ---
@@ -404,10 +404,95 @@ Oder von vornherein mit `sudo -i` einsteigen (Login-Shell mit korrektem Root-PAT
 
 ---
 
+## Multi-User mit Email-Login (Stage 2 per ADR-0036)
+
+Seit Phase Web-7 unterstützt Claude-OS zwei Authentifizierungs-Modi **parallel**:
+
+| Modus | Setup | Zielgruppe |
+|---|---|---|
+| **Bearer-Token** (Stage 1, ADR-0033) | `CLAUDE_OS_AUTH_TOKEN` als CSV in `.env` | Service-Tokens, CLI/CI, Power-User |
+| **Email + Passwort** (Stage 2, ADR-0036) | `users.sqlite` + Login-Form im Browser | Reguläre Browser-User, Multi-User-Setup |
+
+Stage 2 ist **opt-in**. Ohne `users.sqlite` und ohne `MultiUserConfig` läuft der Server exakt wie ADR-0033 Stage 1.
+
+### Schritt 1 — Erste User via Admin-CLI anlegen
+
+Auf dem Server-Host (Container muss **gestoppt** sein, sql.js ist single-writer):
+
+```bash
+docker compose stop claude-os
+docker compose run --rm claude-os claude-os users create \
+    --email alice@example.com \
+    --password 'long-passphrase-12-or-more'
+
+# Optional: shared-tenant via override (Family-Account)
+docker compose run --rm claude-os claude-os users create \
+    --email family@example.com \
+    --password 'shared-secret-long' \
+    --tenant-override shared-fam
+
+docker compose run --rm claude-os claude-os users list
+docker compose start claude-os
+```
+
+Weitere Admin-Subcommands: `users disable <id-or-email>`, `users enable …`, `users reset-password … [--password <p> | --random]`, `users sessions list [--user …]`, `users sessions revoke <id>`.
+
+### Schritt 2 — Browser-Login
+
+Öffne `https://<deine-domain>/login`. Tab **"Email + Passwort"** ist Default. Bei Submit:
+
+1. Server prüft scrypt-Hash via `timingSafeEqual`
+2. Setzt HTTP-only Session-Cookie + readbare CSRF-Cookie
+3. Frontend speichert Cookie-Auth-Flag in sessionStorage → AuthGate flippt auf "authed"
+4. Bei Page-Reload bleibst du eingeloggt (Browser sendet die Session-Cookie automatisch)
+
+Profile-Drawer (Sidebar, klick auf Email) hat Logout + "Passwort ändern". Beim Passwort-Wechsel werden alle anderen Sessions des Users automatisch revoked (Defence-in-Depth).
+
+### Schritt 3 — Optional: Self-Registration
+
+```yaml
+# docker-compose.yml
+environment:
+  - CLAUDE_OS_ALLOW_REGISTRATION=1
+```
+
+Dann erscheint im Login-Form ein "Registrieren"-Link. Rate-Limit: 3 Registrierungen / IP / Stunde.
+
+**WARNUNG:** Niemals mit `ALLOW_REGISTRATION=1` direkt am offenen Internet betreiben. Schutzschichten:
+
+- **Cloudflare Access** (zero-trust SSO vor dem Login)
+- **WireGuard / Tailscale / Cloudflare Tunnel** (gar kein offener Port nach außen)
+- **OPNsense IP-Whitelist** auf die nginx-proxy-manager-Regel
+
+### Migrations-Pfad: Stage 1 → Stage 2
+
+Beide Modi laufen parallel. Stage-1-Token-Clients merken nichts vom Stage-2-Rollout. Empfohlener Übergang:
+
+1. **Tag 0:** Server läuft Stage-1-only. Yannik nutzt seinen Token im Browser.
+2. **Tag 1:** Admin legt Email-Account an via CLI. Email-Login wird parallel zum Token getestet.
+3. **Tag 7:** Token bleibt nur für CLI/CI. Browser-User wechseln auf Email.
+
+### Backup-Erweiterung
+
+`users.sqlite` lebt in `<dataDir>` (default `/data/users.sqlite` im Container). Backup-Plan muss es einschließen:
+
+- Proxmox-VM-Snapshot deckt es automatisch
+- rsync-Pull-Script: zusätzlich `/data/users.sqlite` ins Backup-Volume
+- Restore: Datei zurückkopieren → Server-Restart, fertig
+
+`users.sqlite` enthält scrypt-Hashes — kein Plaintext-Risiko. Trotzdem wie Secrets behandeln (file-mode `0o600` POSIX automatisch gesetzt).
+
+### Sessions-Caveat
+
+Session-Cookies leben aktuell **nur in Prozess-Memory** (in-memory LRU, default 1000 entries, 30-Tage-sliding-TTL). Container-Restart = alle eingeloggten User müssen erneut Login. Opt-in persistent ist `$CLAUDE_OS_SESSION_PERSIST=1` (Phase-Web-7-tail) — schreibt zusätzlich in `users.sqlite`.
+
+Der CLI-`users sessions list / revoke` sieht eine FRISCHE empty Session-Repository, NICHT die vom laufenden Server. Wird mit explizitem Warning ausgegeben.
+
 ## Weiter
 
-- **Phase Web-3** (folgt): Chat/PTY-Streaming via WebSocket — interaktive Claude-Sessions im Browser
-- **Phase Multi-User** (späterer ADR): mehrere User mit pro-User-Workspace-Isolation
-- **MSP-Customer-Workspace via Server**: konzeptuell vorbereitet via `tenant`-Domain, Auth-Layer-Erweiterung nötig
+- **Phase Web-3** ✓ shipped: Chat/PTY-Streaming via WebSocket
+- **Phase Web-7** ✓ shipped (ADR-0036): Multi-User Email/Passwort + Sessions + Profile-Drawer + Admin-CLI
+- **Phase Web-8** (folgt): OAuth-Provider (GitHub/Google), persistent Rate-Store, Password-Reset via SMTP
+- **Phase Web-9** (folgt): Per-User-Vault-FS-Isolation (`vault/users/<id>/`)
 
 Fragen, Bugs, Wünsche → GitHub-Issues im Repo.
