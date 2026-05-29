@@ -1046,3 +1046,110 @@ export async function createSkillDraftFromNote(opts: {
     ...(opts.draftSpec !== undefined ? { draftSpec: opts.draftSpec } : {}),
   });
 }
+
+// ─── Audit-Trail Dashboard (Phase Audit-Trail-Dashboard) ─────────────
+//
+// Read-only HTTP-Endpoints (NICHT JSON-RPC) weil Audit caller-context
+// braucht. Siehe src/server/routes-audit.ts.
+
+export type AuditEventKind =
+  | 'bridge.read'
+  | 'bridge.write'
+  | 'workspace.switch'
+  | 'secret.read'
+  | 'secret.write'
+  | 'skill.promote'
+  | 'skill.invoke'
+  | 'note.write'
+  | 'auth.login.success'
+  | 'auth.login.failed'
+  | 'auth.logout'
+  | 'auth.register'
+  | 'auth.password.change'
+  | 'admin.user.create'
+  | 'admin.user.disable'
+  | 'admin.user.enable'
+  | 'admin.user.reset-password';
+
+export interface AuditEntry {
+  readonly schema_version: number;
+  readonly at: string;
+  readonly kind: AuditEventKind | string;
+  readonly action: string;
+  readonly workspace: string;
+  readonly tenant?: string;
+  readonly outcome: 'ok' | 'denied' | 'error';
+  readonly details?: Record<string, unknown>;
+  readonly pid: number;
+  readonly hostname: string;
+}
+
+export interface AuditQuery {
+  readonly from?: string;
+  readonly to?: string;
+  readonly kinds?: readonly string[];
+  readonly workspace?: string;
+  readonly tenant?: string;
+  readonly outcome?: 'ok' | 'denied' | 'error';
+  readonly actionContains?: string;
+  readonly offset?: number;
+  readonly limit?: number;
+}
+
+export interface AuditPage {
+  readonly entries: readonly AuditEntry[];
+  readonly total: number;
+  readonly query: AuditQuery;
+}
+
+export interface AuditStats {
+  readonly counts: Partial<Record<string, number>>;
+  readonly totalEvents: number;
+  readonly from?: string;
+  readonly to?: string;
+}
+
+export interface AuditExportResult {
+  readonly content: string;
+  readonly suggestedFilename: string;
+}
+
+function buildAuditQs(query: AuditQuery): string {
+  const sp = new URLSearchParams();
+  if (query.from !== undefined) sp.set('from', query.from);
+  if (query.to !== undefined) sp.set('to', query.to);
+  if (query.workspace !== undefined) sp.set('workspace', query.workspace);
+  if (query.tenant !== undefined) sp.set('tenant', query.tenant);
+  if (query.outcome !== undefined) sp.set('outcome', query.outcome);
+  if (query.actionContains !== undefined) sp.set('actionContains', query.actionContains);
+  if (query.offset !== undefined) sp.set('offset', String(query.offset));
+  if (query.limit !== undefined) sp.set('limit', String(query.limit));
+  if (query.kinds !== undefined && query.kinds.length > 0) sp.set('kinds', query.kinds.join(','));
+  return sp.toString();
+}
+
+async function auditGet<T>(path: string, query: AuditQuery, extraQs = ''): Promise<T> {
+  const qs = buildAuditQs(query);
+  const url = `/api/audit/${path}?${qs}${extraQs.length > 0 ? `&${extraQs}` : ''}`;
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`audit ${path} ${res.status}: ${text}`);
+  }
+  return (await res.json()) as T;
+}
+
+export function auditList(query: AuditQuery): Promise<AuditPage> {
+  return auditGet<AuditPage>('list', query);
+}
+
+export function auditStats(query: AuditQuery): Promise<AuditStats> {
+  return auditGet<AuditStats>('stats', query);
+}
+
+export function auditExport(
+  query: AuditQuery,
+  format: 'jsonl' | 'csv',
+): Promise<AuditExportResult> {
+  return auditGet<AuditExportResult>('export', query, `format=${format}`);
+}

@@ -19,6 +19,9 @@ export interface AuthUser {
   readonly id: string;
   readonly email: string;
   readonly tenantId: string;
+  /** True wenn die Email in `CLAUDE_OS_ADMIN_EMAILS` allowlist ist (Web-7-7).
+   *  Steuert Sichtbarkeit von Admin-only Nav-Entries (Audit-Trail, etc.). */
+  readonly isAdmin?: boolean;
 }
 
 export interface MeResponse {

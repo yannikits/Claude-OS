@@ -2340,3 +2340,161 @@ button.danger:disabled {
   padding: 8px 12px;
   border-radius: 4px;
 }
+
+/* ─── Audit-Trail-Dashboard (Phase Audit-Trail-Dashboard) ─────────── */
+
+.audit-page {
+  /* Page container — slightly wider than default so the data-table breathes */
+}
+
+.audit-stats-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  align-items: center;
+}
+.audit-stats-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.18rem 0.55rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.audit-stats-pill__count {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.audit-stats-pill__kind {
+  color: var(--text);
+}
+.audit-stats-total {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.audit-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem 1.25rem;
+  align-items: end;
+  margin: 0 0 0.6rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.audit-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.audit-filter-group--wide {
+  flex: 1;
+  min-width: 200px;
+}
+.audit-filter-group:last-child {
+  flex-direction: row;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+.audit-filter-label {
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.audit-kinds-picker {
+  margin: 0 0 1rem;
+}
+.audit-kinds-picker summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.35rem 0;
+}
+.audit-kinds-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.3rem 0.85rem;
+  padding: 0.6rem 0;
+}
+.audit-kind-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.audit-table tbody tr.audit-row--ok {
+  /* default tbody hover from .data-table already applies */
+}
+.audit-table tbody tr.audit-row--denied td {
+  color: var(--warn);
+}
+.audit-table tbody tr.audit-row--error td {
+  color: var(--danger);
+}
+
+.audit-row__expand {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 0 0.4rem;
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.audit-row__details {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.7rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  max-width: 60vw;
+  overflow-x: auto;
+}
+
+.audit-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+.audit-pagination label {
+  margin-left: auto;
+  color: var(--muted);
+}

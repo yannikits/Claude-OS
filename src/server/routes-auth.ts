@@ -58,6 +58,13 @@ export interface AuthRoutesDeps {
    * rate-limiter so a registration flood can't block legitimate logins.
    */
   readonly registrationRateLimiter?: LoginRateLimiter;
+  /**
+   * Lowercased admin email allowlist (mirror of `MultiUserConfig.adminEmails`).
+   * Used to populate `isAdmin` on `/api/auth/me` so the GUI can show/hide
+   * admin-only navigation (Audit-Trail-Page, Web-7-7 Admin-UI).
+   * Empty / undefined → all users see `isAdmin: false`.
+   */
+  readonly adminEmails?: readonly string[];
 }
 
 interface LoginBody {
@@ -235,6 +242,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     reply.send({ expiresAt: session.expiresAt });
   });
 
+  const adminAllowlist = new Set((deps.adminEmails ?? []).map((e) => e.toLowerCase()));
+
   app.get('/api/auth/me', async (req, reply) => {
     if (req.user === undefined) {
       // Cookie-less request authenticated via bearer — no user-of-record.
@@ -246,6 +255,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
         id: req.user.id,
         email: req.user.email,
         tenantId: userToTenantId(req.user),
+        isAdmin: adminAllowlist.has(req.user.email.toLowerCase()),
       },
       allowRegistration: deps.allowRegistration === true,
     });

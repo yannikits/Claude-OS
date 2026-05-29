@@ -218,6 +218,9 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
               : {}),
           }
         : {}),
+      ...(config.multiUser.adminEmails !== undefined
+        ? { adminEmails: config.multiUser.adminEmails }
+        : {}),
     });
     if (config.multiUser.adminEmails !== undefined && config.multiUser.adminEmails.length > 0) {
       registerAdminRoutes(fastify, {

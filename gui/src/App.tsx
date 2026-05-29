@@ -30,6 +30,7 @@ import {
   SettingsPage,
   VaultPage,
 } from './pages';
+import { AuditPage } from './pages/audit';
 import { LoginPage } from './pages/login';
 import { MemoryPage } from './pages/memory';
 import { RegisterPage } from './pages/register';
@@ -47,6 +48,8 @@ interface NavEntry {
   readonly label: string;
   readonly section: 'overview' | 'content' | 'runtime' | 'system';
   readonly led: LedState;
+  /** When true, only renders for admin users (CLAUDE_OS_ADMIN_EMAILS allowlist). */
+  readonly adminOnly?: boolean;
 }
 const NAV: readonly NavEntry[] = [
   { to: '/', label: 'Dashboard', section: 'overview', led: 'up' },
@@ -62,6 +65,7 @@ const NAV: readonly NavEntry[] = [
 
   { to: '/mcp-clients', label: 'MCP-Clients', section: 'system', led: 'idle' },
   { to: '/secrets', label: 'Secrets', section: 'system', led: 'idle' },
+  { to: '/audit', label: 'Audit-Log', section: 'system', led: 'idle', adminOnly: true },
   { to: '/settings', label: 'Settings', section: 'system', led: 'idle' },
 ];
 
@@ -81,14 +85,17 @@ const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '?';
 interface LayoutProps {
   readonly authMode: AuthMode;
   readonly onLogout: () => void;
+  readonly isAdmin: boolean;
 }
 
-function Layout({ authMode, onLogout }: LayoutProps) {
+function Layout({ authMode, onLogout, isAdmin }: LayoutProps) {
   const showProfile = authMode === 'cookie' || authMode === 'token';
   // Group nav entries by section so we can render labeled rules between groups.
+  // Filter adminOnly entries when not admin.
   const grouped = (() => {
     const map = new Map<NavEntry['section'], NavEntry[]>();
     for (const n of NAV) {
+      if (n.adminOnly === true && !isAdmin) continue;
       const arr = map.get(n.section);
       if (arr === undefined) map.set(n.section, [n]);
       else arr.push(n);
@@ -173,6 +180,7 @@ type AuthMode = 'tauri' | 'cookie' | 'token' | 'none';
 interface AuthGateState {
   readonly mode: AuthMode;
   readonly allowRegistration: boolean;
+  readonly isAdmin: boolean;
   readonly ready: boolean;
   markAuthenticated(mode: 'cookie' | 'token', user?: AuthUser): void;
   markLoggedOut(): void;
@@ -183,9 +191,10 @@ function useAuthGate(): AuthGateState {
     if (isTauriRuntime()) return 'tauri';
     if (isCookieAuthed()) return 'cookie';
     const t = getAuthTransport();
-    return t !== null && t.hasAuth() ? 'token' : 'none';
+    return t?.hasAuth() ? 'token' : 'none';
   });
   const [allowRegistration, setAllowRegistration] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [ready, setReady] = useState<boolean>(() => isTauriRuntime());
 
   useEffect(() => {
@@ -198,6 +207,7 @@ function useAuthGate(): AuthGateState {
       .then((me) => {
         if (cancelled) return;
         setAllowRegistration(me.allowRegistration);
+        setIsAdmin(me.user?.isAdmin === true);
         if (me.user !== null && mode === 'none') setMode('cookie');
         setReady(true);
       })
@@ -212,11 +222,13 @@ function useAuthGate(): AuthGateState {
   return {
     mode,
     allowRegistration,
+    isAdmin,
     ready,
     markAuthenticated: (m) => setMode(m),
     markLoggedOut: () => {
       const t = getAuthTransport();
       if (t !== null) t.clearAuth();
+      setIsAdmin(false);
       setMode('none');
     },
   };
@@ -260,15 +272,18 @@ export function App() {
     );
   }
 
-  return <AuthenticatedApp authMode={gate.mode} onLogout={gate.markLoggedOut} />;
+  return (
+    <AuthenticatedApp authMode={gate.mode} onLogout={gate.markLoggedOut} isAdmin={gate.isAdmin} />
+  );
 }
 
 interface AuthenticatedAppProps {
   readonly authMode: AuthMode;
   readonly onLogout: () => void;
+  readonly isAdmin: boolean;
 }
 
-function AuthenticatedApp({ authMode, onLogout }: AuthenticatedAppProps) {
+function AuthenticatedApp({ authMode, onLogout, isAdmin }: AuthenticatedAppProps) {
   const [showLoading, setShowLoading] = useState(true);
   const [failure, setFailure] = useState<SidecarFailedPayload | null>(null);
   const [lastInbox, setLastInbox] = useState<WatcherChangeEvent | null>(null);
@@ -448,7 +463,10 @@ function AuthenticatedApp({ authMode, onLogout }: AuthenticatedAppProps) {
             />
           )}
           <Routes>
-            <Route path="/" element={<Layout authMode={authMode} onLogout={onLogout} />}>
+            <Route
+              path="/"
+              element={<Layout authMode={authMode} onLogout={onLogout} isAdmin={isAdmin} />}
+            >
               <Route index element={<Dashboard />} />
               <Route path="memory" element={<MemoryPage />} />
               <Route path="chat" element={<ChatPage />} />
@@ -459,6 +477,7 @@ function AuthenticatedApp({ authMode, onLogout }: AuthenticatedAppProps) {
               <Route path="schedule" element={<SchedulePage />} />
               <Route path="mcp-clients" element={<McpClientsPage />} />
               <Route path="secrets" element={<SecretsPage />} />
+              {isAdmin && <Route path="audit" element={<AuditPage />} />}
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Routes>
