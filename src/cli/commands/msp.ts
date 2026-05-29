@@ -14,6 +14,7 @@
 import { join } from 'node:path';
 import type { Command } from 'commander';
 import { resolveRoot } from '../../core/environment/index.js';
+import { SecurepointBridge } from '../../domains/msp-bridges/securepoint/index.js';
 import { SophosBridge } from '../../domains/msp-bridges/sophos/index.js';
 import type { SophosBridgeConfig } from '../../domains/msp-bridges/sophos/types.js';
 import { TanssBridge } from '../../domains/msp-bridges/tanss/index.js';
@@ -32,6 +33,12 @@ interface ProbeOpts {
 
 interface ProbeSophosOpts {
   readonly insecureTls?: boolean;
+  readonly timeoutMs?: string;
+}
+
+interface ProbeSecurepointOpts {
+  readonly baseUrl?: string;
+  readonly apiVersion?: string;
   readonly timeoutMs?: string;
 }
 
@@ -294,6 +301,79 @@ async function actProbeSophos(
   process.exit(probe.result.kind === 'ok' ? 0 : 1);
 }
 
+async function actProbeSecurepoint(
+  slug: string,
+  opts: ProbeSecurepointOpts,
+  command: Command,
+): Promise<void> {
+  const globals = command.optsWithGlobals<GlobalOpts>();
+  const json = globals.json === true;
+
+  let timeoutMs: number | undefined;
+  try {
+    timeoutMs = parseTimeout(opts.timeoutMs);
+  } catch (err) {
+    printErr(`msp probe securepoint: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+
+  const vaultRoot = resolveVaultRoot(globals);
+  const repo = new CustomerRepository({ vaultRoot, autoCreate: false });
+  const customer = await repo.get(slug);
+  if (customer === null) {
+    printErr(
+      `msp probe securepoint: customer "${slug}" not found at vault/workspaces/msp-customers/${slug}/`,
+    );
+    process.exit(1);
+  }
+  if (!customer.bridges?.securepoint) {
+    printErr(
+      `msp probe securepoint: customer "${slug}" has no bridges.securepoint in customer.yaml`,
+    );
+    process.exit(1);
+  }
+
+  const store = createSecretStore();
+  const baseUrl = opts.baseUrl ?? process.env.CLAUDE_OS_SECUREPOINT_BASE_URL;
+  const apiVersion = opts.apiVersion ?? process.env.CLAUDE_OS_SECUREPOINT_API_VERSION;
+
+  const bridge = new SecurepointBridge({
+    getApiKey: () => store.get('securepoint/apiKey'),
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
+    ...(apiVersion !== undefined ? { apiVersion } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  });
+
+  const probe = await bridge.probe(customer);
+
+  if (json) {
+    printJson(probe);
+    process.exit(probe.result.kind === 'ok' ? 0 : 1);
+  }
+
+  printLine(`[${probe.result.kind === 'ok' ? 'OK' : 'FAIL'}] securepoint.probe ${slug}`);
+  printLine(`  bridgeKind=${probe.bridgeKind}  durationMs=${probe.durationMs}`);
+  printLine(`  result.kind=${probe.result.kind}`);
+  if (probe.result.kind === 'ok') {
+    const d = probe.result.data;
+    printLine(`  deviceId=${d.deviceId}  online=${d.online}`);
+    printLine(
+      `  license=${d.licenseStatus}` +
+        (d.licenseDaysRemaining !== null ? `  days=${d.licenseDaysRemaining}` : ''),
+    );
+    if (d.additionalMetrics.length > 0) {
+      printLine(`  +${d.additionalMetrics.length} additional metric(s)`);
+      for (const m of d.additionalMetrics.slice(0, 5)) {
+        printLine(`    ${m.name} = ${m.value}`);
+      }
+    }
+  } else if ('message' in probe.result && probe.result.message !== undefined) {
+    printLine(`  message=${probe.result.message}`);
+  }
+
+  process.exit(probe.result.kind === 'ok' ? 0 : 1);
+}
+
 export function registerMspCommand(program: Command): void {
   const msp = program
     .command('msp')
@@ -311,6 +391,24 @@ export function registerMspCommand(program: Command): void {
         await actProbeTanss(slug, opts, command);
       } catch (err) {
         printErr(`msp probe tanss: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  probe
+    .command('securepoint <slug>')
+    .description('Probe the Securepoint USC Read-Bridge for the customer with given slug')
+    .option(
+      '--base-url <url>',
+      'Override $CLAUDE_OS_SECUREPOINT_BASE_URL (default portal.securepoint.cloud)',
+    )
+    .option('--api-version <ver>', 'Override $CLAUDE_OS_SECUREPOINT_API_VERSION (default 2.2)')
+    .option('--timeout-ms <ms>', 'Override request timeout (default 15000)')
+    .action(async (slug: string, opts: ProbeSecurepointOpts, command: Command) => {
+      try {
+        await actProbeSecurepoint(slug, opts, command);
+      } catch (err) {
+        printErr(`msp probe securepoint: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
     });

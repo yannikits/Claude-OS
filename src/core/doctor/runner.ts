@@ -10,6 +10,7 @@ import {
   checkGitAvailable,
   checkMountReachable,
   checkNodeVersion,
+  checkSecurepointConfig,
   checkServerEnv,
   checkSigningKeypair,
   checkSophosConfig,
@@ -64,6 +65,7 @@ export async function runDoctor(
       checkTanssConfig(),
       checkVeeamConfig(),
       checkSophosConfig(),
+      checkSecurepointConfig(),
     ]);
     return summarize(checks, Date.now() - startedAt);
   }
@@ -87,6 +89,7 @@ export async function runDoctor(
     checkTanssConfig(),
     checkVeeamConfig(),
     checkSophosConfig(),
+    checkSecurepointConfig(),
   ]);
   return summarize([rootResolutionFail, ...independent], Date.now() - startedAt);
 }

@@ -1218,10 +1218,21 @@ export interface SophosCellData {
   readonly subscriptions: readonly SophosSubscription[];
 }
 
+export type SecurepointLicenseStatus = 'valid' | 'expiring-soon' | 'expired' | 'unknown';
+
+export interface SecurepointCellData {
+  readonly online: boolean;
+  readonly licenseDaysRemaining: number | null;
+  readonly licenseStatus: SecurepointLicenseStatus;
+  readonly deviceId: string;
+  readonly additionalMetrics: readonly { readonly name: string; readonly value: number }[];
+}
+
 export interface CustomerHealthCells {
   readonly tanss?: BridgeCellResult<TanssCellData>;
   readonly veeam?: BridgeCellResult<VeeamCellData>;
   readonly sophos?: BridgeCellResult<SophosCellData>;
+  readonly securepoint?: BridgeCellResult<SecurepointCellData>;
 }
 
 export interface CustomerHealthRow {

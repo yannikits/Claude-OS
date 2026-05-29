@@ -18,6 +18,7 @@ import { resolveRoot } from '../../core/environment/index.js';
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import { AggregateCache, MspHealthAggregator } from '../../domains/msp-aggregate/index.js';
 import { BridgeRegistry, withAuditTrail } from '../../domains/msp-bridges/index.js';
+import { SecurepointBridge } from '../../domains/msp-bridges/securepoint/index.js';
 import { SophosBridge } from '../../domains/msp-bridges/sophos/index.js';
 import { TanssBridge } from '../../domains/msp-bridges/tanss/index.js';
 import { VeeamBridge } from '../../domains/msp-bridges/veeam/index.js';
@@ -179,6 +180,22 @@ async function maybeMspHealthAggregator(
   } catch {
     customers = [];
   }
+  // Securepoint USC — register iff any customer has bridges.securepoint
+  if (customers.some((c) => c.bridges?.securepoint !== undefined)) {
+    const baseUrl = process.env.CLAUDE_OS_SECUREPOINT_BASE_URL;
+    const apiVersion = process.env.CLAUDE_OS_SECUREPOINT_API_VERSION;
+    const ttlEnv = process.env.CLAUDE_OS_SECUREPOINT_METRICS_TTL_SEC;
+    const ttlNum = ttlEnv !== undefined ? Number.parseInt(ttlEnv, 10) : Number.NaN;
+    const securepoint = new SecurepointBridge({
+      getApiKey: () => secrets.get('securepoint/apiKey'),
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(apiVersion !== undefined ? { apiVersion } : {}),
+      ...(Number.isFinite(ttlNum) && ttlNum > 0 ? { metricsTtlSec: ttlNum } : {}),
+    });
+    registry.register(withAuditTrail(securepoint, audit));
+    bridgeCount += 1;
+  }
+
   // Sophos — register iff any customer has bridges.sophos
   if (customers.some((c) => c.bridges?.sophos !== undefined)) {
     if (process.env.CLAUDE_OS_SOPHOS_INSECURE_TLS === '1') {

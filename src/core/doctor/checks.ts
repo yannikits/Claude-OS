@@ -583,6 +583,124 @@ export async function checkSophosConfig(
 }
 
 /**
+ * Securepoint USC config pre-flight (ADR-0043, Phase 7-D.2).
+ *
+ * Single MSP-wide API key. Three states:
+ *  - no customer has bridges.securepoint     → ok (skipped)
+ *  - has-customer AND apiKey in secrets      → ok
+ *  - has-customer but no apiKey              → warn
+ *
+ * Never fails — Securepoint is optional.
+ */
+export async function checkSecurepointConfig(
+  opts: {
+    readonly vaultRoot?: string;
+    readonly secretsProbe?: (key: string) => Promise<string | null>;
+    readonly listSlugsFn?: (vaultRoot: string) => readonly string[];
+    readonly getCustomerFn?: (
+      vaultRoot: string,
+      slug: string,
+    ) => Promise<{
+      readonly bridges?: { readonly securepoint?: { readonly deviceId: string } };
+    } | null>;
+  } = {},
+): Promise<CheckResult> {
+  return timed('securepoint-config', async () => {
+    let vaultRoot = opts.vaultRoot;
+    if (vaultRoot === undefined) {
+      try {
+        const { resolveRoot } = await import('../environment/index.js');
+        const root = resolveRoot();
+        vaultRoot = join(root.path, 'vault');
+      } catch (err) {
+        return {
+          name: 'securepoint-config',
+          severity: 'ok' as const,
+          message: 'vault unreachable — Securepoint check skipped',
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+
+    let slugs: readonly string[];
+    try {
+      if (opts.listSlugsFn !== undefined) {
+        slugs = opts.listSlugsFn(vaultRoot);
+      } else {
+        const { listCustomerSlugs } = await import('../../domains/msp-customers/paths.js');
+        slugs = listCustomerSlugs(vaultRoot);
+      }
+    } catch (err) {
+      return {
+        name: 'securepoint-config',
+        severity: 'warn',
+        message: 'failed to enumerate customer-workspaces',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    let configuredCount = 0;
+    for (const slug of slugs) {
+      let record: { bridges?: { securepoint?: { deviceId: string } } } | null = null;
+      try {
+        if (opts.getCustomerFn !== undefined) {
+          record = await opts.getCustomerFn(vaultRoot, slug);
+        } else {
+          const { CustomerRepository } = await import('../../domains/msp-customers/index.js');
+          const repo = new CustomerRepository({ vaultRoot, autoCreate: false });
+          record = await repo.get(slug);
+        }
+      } catch {
+        continue;
+      }
+      if (record?.bridges?.securepoint?.deviceId) configuredCount += 1;
+    }
+
+    if (configuredCount === 0) {
+      return {
+        name: 'securepoint-config',
+        severity: 'ok',
+        message: 'no customer-workspaces reference bridges.securepoint (skipped)',
+      };
+    }
+
+    const probe =
+      opts.secretsProbe ??
+      (async (k: string) => {
+        const { createSecretStore } = await import('../../domains/secrets/index.js');
+        return createSecretStore().get(k);
+      });
+
+    let apiKey: string | null;
+    try {
+      apiKey = await probe('securepoint/apiKey');
+    } catch (err) {
+      return {
+        name: 'securepoint-config',
+        severity: 'warn',
+        message: 'secrets-store probe failed during securepoint-config check',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    if (apiKey === null || apiKey.length === 0) {
+      return {
+        name: 'securepoint-config',
+        severity: 'warn',
+        message: `${configuredCount} customer(s) reference bridges.securepoint but no API-Key in secrets-backend`,
+        hint: 'Run: claude-os secrets set securepoint/apiKey <key>',
+      };
+    }
+
+    return {
+      name: 'securepoint-config',
+      severity: 'ok',
+      message: `Securepoint USC configured (${configuredCount} customer device(s))`,
+    };
+  });
+}
+
+/**
  * Server-mode signing-keypair pre-flight (ADR-0035).
  *
  * Returns `warn` if no keypair is initialized — that's the lazy
