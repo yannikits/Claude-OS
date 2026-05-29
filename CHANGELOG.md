@@ -9,6 +9,7 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 ### Fixed
 
 - **Sidebar-Brand zeigte hardcoded v1.7.3 trotz v1.7.4-Deployment.** `APP_VERSION` war als String-Konstante in `gui/src/App.tsx` gepflegt → wurde beim Version-Bump zu v1.7.4 vergessen. Fix: vite.config.ts liest jetzt `version` aus `gui/package.json` zur Build-Zeit und injectet sie als `__APP_VERSION__` define. `App.tsx` liest die Konstante mit `declare const`-Fallback auf `'?'` für vitest-Runs ohne Bundler. Drift-Trap geschlossen — alle künftigen Version-Bumps propagieren automatisch in die Brand.
+- **`claude auth login` credentials werden jetzt im Volume persistiert.** Die `claude`-CLI hardcoded `~/.claude/.credentials.json` und ignoriert `$ANTHROPIC_CONFIG_DIR` für die Credentials-Datei. Resultat: nach `claude auth login` im Container landeten die Credentials im RootFS (verschwinden bei Container-Restart) und die Settings-Page zeigt "nicht vorhanden" obwohl Login durch war. Fix in `docker/entrypoint.sh`: symlinkt `/root/.claude/.credentials.json` zum Volume-Pfad `${ANTHROPIC_CONFIG_DIR}/.credentials.json` beim Container-Start. Idempotent + migrate-fähig (bestehende RootFS-Datei wird beim ersten Boot ins Volume verschoben).
 
 ## [1.7.4] — 2026-05-29
 
