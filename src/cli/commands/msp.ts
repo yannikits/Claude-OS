@@ -14,6 +14,8 @@
 import { join } from 'node:path';
 import type { Command } from 'commander';
 import { resolveRoot } from '../../core/environment/index.js';
+import { SophosBridge } from '../../domains/msp-bridges/sophos/index.js';
+import type { SophosBridgeConfig } from '../../domains/msp-bridges/sophos/types.js';
 import { TanssBridge } from '../../domains/msp-bridges/tanss/index.js';
 import { VeeamBridge } from '../../domains/msp-bridges/veeam/index.js';
 import type { VeeamCredentials } from '../../domains/msp-bridges/veeam/types.js';
@@ -25,6 +27,11 @@ const TANSS_API_TOKEN_KEY = 'tanss/apiToken';
 
 interface ProbeOpts {
   readonly serverUrl?: string;
+  readonly timeoutMs?: string;
+}
+
+interface ProbeSophosOpts {
+  readonly insecureTls?: boolean;
   readonly timeoutMs?: string;
 }
 
@@ -41,6 +48,18 @@ async function getVeeamCredsFromStore(
   const [username, password] = await Promise.all([
     store.get(`veeam/${host}/username`),
     store.get(`veeam/${host}/password`),
+  ]);
+  if (username === null || password === null) return null;
+  return { username, password };
+}
+
+async function getSophosCredsFromStore(
+  store: SecretStore,
+  host: string,
+): Promise<{ username: string; password: string } | null> {
+  const [username, password] = await Promise.all([
+    store.get(`sophos/${host}/username`),
+    store.get(`sophos/${host}/password`),
   ]);
   if (username === null || password === null) return null;
   return { username, password };
@@ -197,6 +216,84 @@ async function actProbeVeeam(slug: string, opts: ProbeVeeamOpts, command: Comman
   process.exit(probe.result.kind === 'ok' ? 0 : 1);
 }
 
+async function actProbeSophos(
+  slug: string,
+  opts: ProbeSophosOpts,
+  command: Command,
+): Promise<void> {
+  const globals = command.optsWithGlobals<GlobalOpts>();
+  const json = globals.json === true;
+
+  let timeoutMs: number | undefined;
+  try {
+    timeoutMs = parseTimeout(opts.timeoutMs);
+  } catch (err) {
+    printErr(`msp probe sophos: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+
+  const vaultRoot = resolveVaultRoot(globals);
+  const repo = new CustomerRepository({ vaultRoot, autoCreate: false });
+  const customer = await repo.get(slug);
+  if (customer === null) {
+    printErr(
+      `msp probe sophos: customer "${slug}" not found at vault/workspaces/msp-customers/${slug}/`,
+    );
+    process.exit(1);
+  }
+  if (!customer.bridges?.sophos) {
+    printErr(`msp probe sophos: customer "${slug}" has no bridges.sophos in customer.yaml`);
+    process.exit(1);
+  }
+
+  const insecureTls =
+    opts.insecureTls === true || process.env.CLAUDE_OS_SOPHOS_INSECURE_TLS === '1';
+  if (insecureTls) {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  }
+
+  const store = createSecretStore();
+  const bridgeCfg: SophosBridgeConfig = {
+    getCredentialsForHost: (host) => getSophosCredsFromStore(store, host),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    insecureTls,
+  };
+  const bridge = new SophosBridge(bridgeCfg);
+
+  const probe = await bridge.probe(customer);
+
+  if (json) {
+    printJson(probe);
+    process.exit(probe.result.kind === 'ok' ? 0 : 1);
+  }
+
+  printLine(`[${probe.result.kind === 'ok' ? 'OK' : 'FAIL'}] sophos.probe ${slug}`);
+  printLine(`  bridgeKind=${probe.bridgeKind}  durationMs=${probe.durationMs}`);
+  printLine(`  result.kind=${probe.result.kind}`);
+  if (probe.result.kind === 'ok') {
+    const d = probe.result.data;
+    printLine(
+      `  firmware=${d.firmwareVersion}${d.firmwareType !== null ? ` (${d.firmwareType})` : ''}`,
+    );
+    printLine(
+      `  license=${d.licenseSummary}` +
+        (d.daysToEarliestExpiry !== null ? `  earliest-expiry=${d.daysToEarliestExpiry}d` : ''),
+    );
+    for (const s of d.subscriptions.slice(0, 6)) {
+      printLine(
+        `    [${s.status}] ${s.name}` +
+          (s.expiresAt !== null
+            ? `  exp=${s.expiresAt.slice(0, 10)}${s.daysRemaining !== null ? ` (${s.daysRemaining}d)` : ''}`
+            : ''),
+      );
+    }
+  } else if ('message' in probe.result && probe.result.message !== undefined) {
+    printLine(`  message=${probe.result.message}`);
+  }
+
+  process.exit(probe.result.kind === 'ok' ? 0 : 1);
+}
+
 export function registerMspCommand(program: Command): void {
   const msp = program
     .command('msp')
@@ -214,6 +311,23 @@ export function registerMspCommand(program: Command): void {
         await actProbeTanss(slug, opts, command);
       } catch (err) {
         printErr(`msp probe tanss: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  probe
+    .command('sophos <slug>')
+    .description('Probe the Sophos XG/XGS Firewall Read-Bridge for the customer with given slug')
+    .option(
+      '--insecure-tls',
+      'Accept self-signed firewall cert (also via $CLAUDE_OS_SOPHOS_INSECURE_TLS=1)',
+    )
+    .option('--timeout-ms <ms>', 'Override request timeout (default 15000)')
+    .action(async (slug: string, opts: ProbeSophosOpts, command: Command) => {
+      try {
+        await actProbeSophos(slug, opts, command);
+      } catch (err) {
+        printErr(`msp probe sophos: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
     });

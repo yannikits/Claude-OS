@@ -12,6 +12,7 @@ import {
   checkNodeVersion,
   checkServerEnv,
   checkSigningKeypair,
+  checkSophosConfig,
   checkTanssConfig,
   checkUserStore,
   checkVeeamConfig,
@@ -62,6 +63,7 @@ export async function runDoctor(
       checkUserStore(),
       checkTanssConfig(),
       checkVeeamConfig(),
+      checkSophosConfig(),
     ]);
     return summarize(checks, Date.now() - startedAt);
   }
@@ -84,6 +86,7 @@ export async function runDoctor(
     checkUserStore(),
     checkTanssConfig(),
     checkVeeamConfig(),
+    checkSophosConfig(),
   ]);
   return summarize([rootResolutionFail, ...independent], Date.now() - startedAt);
 }

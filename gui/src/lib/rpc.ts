@@ -1201,9 +1201,27 @@ export interface VeeamCellData {
   }[];
 }
 
+export interface SophosSubscription {
+  readonly name: string;
+  readonly status: string;
+  readonly expiresAt: string | null;
+  readonly daysRemaining: number | null;
+}
+
+export type SophosLicenseSummary = 'active' | 'expiring-soon' | 'expired' | 'mixed' | 'unknown';
+
+export interface SophosCellData {
+  readonly firmwareVersion: string;
+  readonly firmwareType: string | null;
+  readonly licenseSummary: SophosLicenseSummary;
+  readonly daysToEarliestExpiry: number | null;
+  readonly subscriptions: readonly SophosSubscription[];
+}
+
 export interface CustomerHealthCells {
   readonly tanss?: BridgeCellResult<TanssCellData>;
   readonly veeam?: BridgeCellResult<VeeamCellData>;
+  readonly sophos?: BridgeCellResult<SophosCellData>;
 }
 
 export interface CustomerHealthRow {

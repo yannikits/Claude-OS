@@ -22,6 +22,7 @@ import {
   mspHealthConfig,
   mspHealthRefresh,
   mspHealthRows,
+  type SophosCellData,
   type TanssCellData,
   type VeeamCellData,
 } from '../lib/rpc';
@@ -82,6 +83,37 @@ function TanssCell({ cell }: { cell: BridgeCellResult<TanssCellData> | undefined
   );
 }
 
+function SophosCell({ cell }: { cell: BridgeCellResult<SophosCellData> | undefined }) {
+  if (cell === undefined) return <span className="cell-dim">—</span>;
+  if (cell.kind !== 'ok') {
+    return (
+      <span className="cell-status">
+        <strong>{cell.kind}</strong>
+        {'message' in cell && cell.message !== undefined && (
+          <span className="cell-msg"> · {cell.message}</span>
+        )}
+      </span>
+    );
+  }
+  const d = cell.data;
+  const licClass =
+    d.licenseSummary === 'active'
+      ? ''
+      : d.licenseSummary === 'expiring-soon' || d.licenseSummary === 'mixed'
+        ? ' cell-msg-warn'
+        : '';
+  return (
+    <span className="cell-status">
+      <strong>{d.firmwareVersion || '—'}</strong>
+      <span className={`cell-msg${licClass}`}>
+        {' '}
+        · {d.licenseSummary}
+        {d.daysToEarliestExpiry !== null ? ` (${d.daysToEarliestExpiry}d)` : ''}
+      </span>
+    </span>
+  );
+}
+
 function VeeamCell({ cell }: { cell: BridgeCellResult<VeeamCellData> | undefined }) {
   if (cell === undefined) return <span className="cell-dim">—</span>;
   if (cell.kind !== 'ok') {
@@ -117,7 +149,7 @@ function fmtDate(iso: string): string {
 function RowDetails({ row }: { row: CustomerHealthRow }) {
   return (
     <div className="msp-health-details">
-      {(['tanss', 'veeam'] as const).map((k) => {
+      {(['tanss', 'veeam', 'sophos'] as const).map((k) => {
         const cell = row.cells[k] as BridgeCellResult<unknown> | undefined;
         if (cell === undefined) return null;
         return (
@@ -253,6 +285,9 @@ function RowGroup({ row, bridges, expanded, onToggle }: RowGroupProps) {
               )}
               {b === 'veeam' && (
                 <VeeamCell cell={cell as BridgeCellResult<VeeamCellData> | undefined} />
+              )}
+              {b === 'sophos' && (
+                <SophosCell cell={cell as BridgeCellResult<SophosCellData> | undefined} />
               )}
             </td>
           );

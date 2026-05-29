@@ -18,6 +18,7 @@ import { resolveRoot } from '../../core/environment/index.js';
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import { AggregateCache, MspHealthAggregator } from '../../domains/msp-aggregate/index.js';
 import { BridgeRegistry, withAuditTrail } from '../../domains/msp-bridges/index.js';
+import { SophosBridge } from '../../domains/msp-bridges/sophos/index.js';
 import { TanssBridge } from '../../domains/msp-bridges/tanss/index.js';
 import { VeeamBridge } from '../../domains/msp-bridges/veeam/index.js';
 import type { VeeamCredentials } from '../../domains/msp-bridges/veeam/types.js';
@@ -178,6 +179,25 @@ async function maybeMspHealthAggregator(
   } catch {
     customers = [];
   }
+  // Sophos — register iff any customer has bridges.sophos
+  if (customers.some((c) => c.bridges?.sophos !== undefined)) {
+    if (process.env.CLAUDE_OS_SOPHOS_INSECURE_TLS === '1') {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
+    const sophos = new SophosBridge({
+      getCredentialsForHost: async (host) => {
+        const [u, p] = await Promise.all([
+          secrets.get(`sophos/${host}/username`),
+          secrets.get(`sophos/${host}/password`),
+        ]);
+        return u !== null && p !== null ? { username: u, password: p } : null;
+      },
+      insecureTls: process.env.CLAUDE_OS_SOPHOS_INSECURE_TLS === '1',
+    });
+    registry.register(withAuditTrail(sophos, audit));
+    bridgeCount += 1;
+  }
+
   if (customers.some((c) => c.bridges?.veeam !== undefined)) {
     if (process.env.CLAUDE_OS_VEEAM_INSECURE_TLS === '1') {
       // Process-wide TLS relax for the server lifetime — matches the CLI

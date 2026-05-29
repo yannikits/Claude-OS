@@ -457,6 +457,132 @@ export async function checkVeeamConfig(
 }
 
 /**
+ * Sophos-Bridges config pre-flight (ADR-0042, Phase 7-D).
+ *
+ * Same shape as `checkVeeamConfig`: enumerates per-customer firewall
+ * hostnames, verifies `sophos/<host>/{username,password}` are in the
+ * secrets-backend for each. Never fails (Sophos is optional).
+ */
+export async function checkSophosConfig(
+  opts: {
+    readonly vaultRoot?: string;
+    readonly secretsProbe?: (key: string) => Promise<string | null>;
+    readonly listSlugsFn?: (vaultRoot: string) => readonly string[];
+    readonly getCustomerFn?: (
+      vaultRoot: string,
+      slug: string,
+    ) => Promise<{
+      readonly bridges?: { readonly sophos?: { readonly firewallHostname: string } };
+    } | null>;
+  } = {},
+): Promise<CheckResult> {
+  return timed('sophos-config', async () => {
+    let vaultRoot = opts.vaultRoot;
+    if (vaultRoot === undefined) {
+      try {
+        const { resolveRoot } = await import('../environment/index.js');
+        const root = resolveRoot();
+        vaultRoot = join(root.path, 'vault');
+      } catch (err) {
+        return {
+          name: 'sophos-config',
+          severity: 'ok' as const,
+          message: 'vault unreachable — Sophos check skipped',
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+
+    let slugs: readonly string[];
+    try {
+      if (opts.listSlugsFn !== undefined) {
+        slugs = opts.listSlugsFn(vaultRoot);
+      } else {
+        const { listCustomerSlugs } = await import('../../domains/msp-customers/paths.js');
+        slugs = listCustomerSlugs(vaultRoot);
+      }
+    } catch (err) {
+      return {
+        name: 'sophos-config',
+        severity: 'warn',
+        message: 'failed to enumerate customer-workspaces',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    const hosts = new Set<string>();
+    for (const slug of slugs) {
+      let record: { bridges?: { sophos?: { firewallHostname: string } } } | null = null;
+      try {
+        if (opts.getCustomerFn !== undefined) {
+          record = await opts.getCustomerFn(vaultRoot, slug);
+        } else {
+          const { CustomerRepository } = await import('../../domains/msp-customers/index.js');
+          const repo = new CustomerRepository({ vaultRoot, autoCreate: false });
+          record = await repo.get(slug);
+        }
+      } catch {
+        continue;
+      }
+      const host = record?.bridges?.sophos?.firewallHostname;
+      if (typeof host === 'string' && host.length > 0) hosts.add(host);
+    }
+
+    if (hosts.size === 0) {
+      return {
+        name: 'sophos-config',
+        severity: 'ok',
+        message: 'no customer-workspaces reference bridges.sophos (skipped)',
+      };
+    }
+
+    const probe =
+      opts.secretsProbe ??
+      (async (k: string) => {
+        const { createSecretStore } = await import('../../domains/secrets/index.js');
+        return createSecretStore().get(k);
+      });
+
+    const missing: string[] = [];
+    for (const host of hosts) {
+      let u: string | null;
+      let p: string | null;
+      try {
+        [u, p] = await Promise.all([
+          probe(`sophos/${host}/username`),
+          probe(`sophos/${host}/password`),
+        ]);
+      } catch (err) {
+        return {
+          name: 'sophos-config',
+          severity: 'warn',
+          message: 'secrets-store probe failed during sophos-config check',
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
+      if (u === null || u.length === 0 || p === null || p.length === 0) {
+        missing.push(host);
+      }
+    }
+
+    if (missing.length === 0) {
+      return {
+        name: 'sophos-config',
+        severity: 'ok',
+        message: `Sophos configured for ${hosts.size} host(s)`,
+      };
+    }
+    return {
+      name: 'sophos-config',
+      severity: 'warn',
+      message: `Sophos credentials missing for ${missing.length} of ${hosts.size} host(s)`,
+      detail: missing.join(', '),
+      hint: 'Run: claude-os secrets set sophos/<host>/username <user> AND sophos/<host>/password <pwd> for each',
+    };
+  });
+}
+
+/**
  * Server-mode signing-keypair pre-flight (ADR-0035).
  *
  * Returns `warn` if no keypair is initialized — that's the lazy
