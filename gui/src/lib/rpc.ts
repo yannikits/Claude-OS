@@ -1153,3 +1153,103 @@ export function auditExport(
 ): Promise<AuditExportResult> {
   return auditGet<AuditExportResult>('export', query, `format=${format}`);
 }
+
+// ---------------------------------------------------------------------------
+// MSP-Health (Phase 7-E, ADR-0041) — admin-gated GET /api/msp-health/*
+// ---------------------------------------------------------------------------
+
+export type BridgeKind = 'tanss' | 'veeam' | 'sophos' | 'securepoint' | 'm365';
+
+export type BridgeCellResult<T> =
+  | {
+      readonly kind: 'ok';
+      readonly data: T;
+      readonly durationMs: number;
+      readonly probedAt: string;
+    }
+  | { readonly kind: 'misconfigured'; readonly message: string }
+  | { readonly kind: 'auth-failed'; readonly message: string }
+  | { readonly kind: 'unreachable'; readonly message: string }
+  | { readonly kind: 'rate-limited'; readonly retryAfterSec: number; readonly message?: string }
+  | { readonly kind: 'timeout'; readonly message: string }
+  | { readonly kind: 'error'; readonly message: string };
+
+export interface TanssCellData {
+  readonly openCount: number;
+  readonly totalCount: number;
+  readonly newestUpdateAt: string | null;
+  readonly sample: {
+    readonly id: number;
+    readonly subject: string;
+    readonly status: string;
+  } | null;
+}
+
+export interface VeeamCellData {
+  readonly knownJobs: number;
+  readonly missingJobs: readonly string[];
+  readonly okCount: number;
+  readonly warningCount: number;
+  readonly failedCount: number;
+  readonly runningCount: number;
+  readonly newestSuccessAt: string | null;
+  readonly oldestUnsuccessfulAt: string | null;
+  readonly latestRuns: readonly {
+    readonly jobName: string;
+    readonly state: string;
+    readonly endTimeUtc: string | null;
+  }[];
+}
+
+export interface CustomerHealthCells {
+  readonly tanss?: BridgeCellResult<TanssCellData>;
+  readonly veeam?: BridgeCellResult<VeeamCellData>;
+}
+
+export interface CustomerHealthRow {
+  readonly slug: string;
+  readonly displayName: string;
+  readonly cells: CustomerHealthCells;
+}
+
+export interface AggregateSnapshot {
+  readonly snapshotAt: string;
+  readonly durationMs: number;
+  readonly registeredBridges: readonly BridgeKind[];
+  readonly rows: readonly CustomerHealthRow[];
+}
+
+export interface MspHealthConfig {
+  readonly registeredBridges: readonly BridgeKind[];
+  readonly customerCount: number | null;
+  readonly cacheAgeMs: number | null;
+}
+
+async function mspHealthGet<T>(path: string): Promise<T> {
+  const res = await fetch(`/api/msp-health/${path}`, { credentials: 'same-origin' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`msp-health ${path} ${res.status}: ${text}`);
+  }
+  return (await res.json()) as T;
+}
+
+export function mspHealthRows(): Promise<AggregateSnapshot> {
+  return mspHealthGet<AggregateSnapshot>('rows');
+}
+
+export function mspHealthConfig(): Promise<MspHealthConfig> {
+  return mspHealthGet<MspHealthConfig>('config');
+}
+
+export async function mspHealthRefresh(): Promise<AggregateSnapshot> {
+  const res = await fetch('/api/msp-health/refresh', {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`msp-health refresh ${res.status}: ${text}`);
+  }
+  return (await res.json()) as AggregateSnapshot;
+}

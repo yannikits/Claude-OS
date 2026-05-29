@@ -33,6 +33,7 @@ import {
 import { AuditPage } from './pages/audit';
 import { LoginPage } from './pages/login';
 import { MemoryPage } from './pages/memory';
+import { MspHealthPage } from './pages/msp-health';
 import { RegisterPage } from './pages/register';
 import { SkillReviewPage } from './pages/skill-review';
 
@@ -66,6 +67,7 @@ const NAV: readonly NavEntry[] = [
   { to: '/mcp-clients', label: 'MCP-Clients', section: 'system', led: 'idle' },
   { to: '/secrets', label: 'Secrets', section: 'system', led: 'idle' },
   { to: '/audit', label: 'Audit-Log', section: 'system', led: 'idle', adminOnly: true },
+  { to: '/msp-health', label: 'MSP Health', section: 'overview', led: 'idle', adminOnly: true },
   { to: '/settings', label: 'Settings', section: 'system', led: 'idle' },
 ];
 
@@ -478,6 +480,7 @@ function AuthenticatedApp({ authMode, onLogout, isAdmin }: AuthenticatedAppProps
               <Route path="mcp-clients" element={<McpClientsPage />} />
               <Route path="secrets" element={<SecretsPage />} />
               {isAdmin && <Route path="audit" element={<AuditPage />} />}
+              {isAdmin && <Route path="msp-health" element={<MspHealthPage />} />}
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Routes>

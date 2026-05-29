@@ -2498,3 +2498,154 @@ button.danger:disabled {
   margin-left: auto;
   color: var(--muted);
 }
+
+/* ---------------------------------------------------------------------- */
+/* MSP-Health Dashboard (Phase 7-E, ADR-0041)                              */
+/* ---------------------------------------------------------------------- */
+
+.msp-health-page {
+  padding: 24px 32px;
+  color: var(--fg);
+}
+.msp-health-header {
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.msp-health-header h1 {
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+  font-size: 1.4rem;
+  margin: 0;
+  color: var(--accent);
+}
+.msp-health-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+.msp-health-age {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+.msp-health-actions button {
+  font-family: var(--font-mono);
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 6px 16px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+.msp-health-actions button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg);
+}
+.msp-health-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.msp-health-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.msp-health-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+.msp-health-table th {
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.msp-health-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.msp-health-row:hover {
+  background: var(--surface-2);
+}
+.msp-health-row td {
+  padding: 8px 12px;
+  vertical-align: top;
+}
+.cell-slug {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.msp-health-cell {
+  font-variant-numeric: tabular-nums;
+}
+.msp-health-cell strong {
+  color: var(--fg);
+}
+.cell-msg {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.cell-msg-warn {
+  color: var(--warn);
+}
+.cell-dim {
+  color: var(--muted);
+  opacity: 0.4;
+}
+.tone-ok {
+  border-left: 2px solid var(--accent);
+}
+.tone-warn {
+  border-left: 2px solid var(--warn, #f5b500);
+}
+.tone-error {
+  border-left: 2px solid var(--error, #ff5757);
+  color: var(--error, #ff5757);
+}
+.tone-empty {
+  border-left: 2px solid transparent;
+}
+.msp-health-row-expanded td {
+  background: var(--surface-1);
+  padding: 12px 16px;
+}
+.msp-health-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.msp-health-detail-block {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+}
+.msp-health-detail-head {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.msp-health-detail-block pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
