@@ -4,6 +4,25 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.9.4] — 2026-05-30
+
+### Added
+
+- **MSP-Health Dashboard Filter + Sort (Phase 7-E.2):** Zwei Header-Toggles für den Operator bei wachsender Customer-Zahl. Frontend-only.
+  - **„issues only"-Toggle:** Filtert Rows raus wo ALLE configured Cells `ok` (oder `empty`). Pagination-Info zeigt `processedCount of totalCount`. Toggle → Page resettet auf 0.
+  - **„↧ severity"-Toggle:** Sortiert die (gefilterte) Liste nach max-cell-severity descending (error → warn → ok → empty). Stabil per slug bei gleichem Rank.
+  - **`cell-severity.ts`** als neues Modul: `cellSeverity`, `rowMaxSeverity`, `rowHasIssue`, `compareRowsBySeverityDesc`.
+  - Filter und Sort unabhängig kombinierbar. Default beide off → identisch zu v1.9.3.
+
+### Fixed (Doku-Lücke)
+
+- **`docs/server-deployment.md` Schritt 1.5 ergänzt:** **Admin-Email-Allowlist setzen**. Bisher war `CLAUDE_OS_ADMIN_EMAILS` nur als Kommentar in `docker-compose.yml` versteckt — Self-Hoster sahen das MSP-Health-Dashboard nicht und mussten raten warum `isAdmin: false`. Jetzt prominenter Schritt zwischen `users create` und Browser-Login mit Verify-Pfad und den drei häufigsten Stolperfallen (leere `.env`-Zeile, fehlendes `--force-recreate`, alte Browser-Session). Lesson in `tasks/lessons.md`.
+
+### Tests
+
+- **12 neue Tests** für `cell-severity` (alle BridgeResult-kinds, rowMaxSeverity-Aggregat, rowHasIssue, compareRowsBySeverityDesc inkl. Stabilität)
+- Backend-Suite unverändert: **1984 passed / 8 skipped** — keine Regression
+
 ## [1.9.3] — 2026-05-30
 
 ### Added
