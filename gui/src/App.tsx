@@ -72,7 +72,11 @@ const SECTION_LABELS: Record<NavEntry['section'], string> = {
   system: 'SYSTEM',
 };
 
-const APP_VERSION = 'v1.7.3';
+// Vite injects __APP_VERSION__ at build-time from gui/package.json (see
+// vite.config.ts). Falls back to '?' when running outside the bundler
+// (e.g. vitest in node — no build pipeline).
+declare const __APP_VERSION__: string;
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '?';
 
 interface LayoutProps {
   readonly authMode: AuthMode;

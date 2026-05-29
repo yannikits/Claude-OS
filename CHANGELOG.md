@@ -4,6 +4,12 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.7.5] — 2026-05-29
+
+### Fixed
+
+- **Sidebar-Brand zeigte hardcoded v1.7.3 trotz v1.7.4-Deployment.** `APP_VERSION` war als String-Konstante in `gui/src/App.tsx` gepflegt → wurde beim Version-Bump zu v1.7.4 vergessen. Fix: vite.config.ts liest jetzt `version` aus `gui/package.json` zur Build-Zeit und injectet sie als `__APP_VERSION__` define. `App.tsx` liest die Konstante mit `declare const`-Fallback auf `'?'` für vitest-Runs ohne Bundler. Drift-Trap geschlossen — alle künftigen Version-Bumps propagieren automatisch in die Brand.
+
 ## [1.7.4] — 2026-05-29
 
 ### Changed

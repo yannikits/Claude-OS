@@ -1,6 +1,6 @@
 {
   "name": "claude-os-gui",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "private": true,
   "type": "module",
   "description": "Tauri desktop shell for claude-os (Phase 6).",
