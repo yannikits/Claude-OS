@@ -4,6 +4,22 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.7.4] — 2026-05-29
+
+### Changed
+
+- **Frontend "Operator Console" Aesthetic-System (PR #210):** Komplettes Re-Skin von generischem AI-Dashboard-Look (system-ui Font + blue-purple Accent) zu einem distinctive Operator-Console-Stil — inspired by Bloomberg Terminal × Linear × k9s. Funktionalität unverändert; nur Token-Layer + Sidebar-Struktur.
+  - **Surfaces:** warm anthracite (`#16151a`) statt cool blue-grey + elev-1/2/inset Hierarchy
+  - **Accent:** phosphor-cyan (`#5af6cd`) mit dim/glow Varianten; warn=hazard-amber, danger=signal-red, success=status-green — alle mit -dim begleitfarben für banner-Hintergründe
+  - **Fonts:** JetBrains Mono (display + headings + buttons) + Geist (body) + Geist Mono (inline-code) via Google Fonts CDN. Tabular-nums + ss01/cv11 stylistic alts global.
+  - **Sidebar:** Status-LEDs (●●●●) neben jedem Nav-Item via `data-led={idle|up|warn|down}` mit Pulse-Animation für warn. Active-Item bekommt 2px linke Edge-Marker + accent-glow auf der LED. Section-Labels (OVERVIEW/CONTENT/RUNTIME/SYSTEM). Brand zeigt Versions-Tag rechts oben.
+  - **Data-Tables (Catalog/Vault/MCP/Secrets/Agent-Runs/Schedule):** Sticky display-font Header + Mono-Body mit tabular-nums + Hover-LED-Edge auf jedem TR.
+  - **Skill-Review-Page (Phase 5c kritisch):** Diff-View komplett umgebaut — Sensitive-Banner als harter signal-red box mit `SEC`-Prefix (war pastel-rosa), Hunks als Terminal-Block mit 2px linker Edge-Marker pro Status (add=grün/del=rot/hunk=amber), Mono + tabular-nums + bold hunk-headers für besseres Scan-Verhalten.
+  - **Modal-Panel-Bugfix:** referenzierte `var(--bg-panel)` (undefined token, fiel auf transparent zurück) — jetzt korrekt auf bg-elev-1 mit display-font H2 in Caps.
+  - **Buttons:** btn-primary mit dark text auf phosphor-cyan (korrekter Kontrast statt weiß-auf-hell), glow-on-hover. Default-Buttons mit transparent-Rahmen + accent-on-hover.
+  - **Form-Inputs:** bg-inset + 3px accent-focus-ring (statt harter border-change).
+  - **Terminal-Host (Chat + Anthropic-Login-Modal):** pitch-black bg-inset + focus-glow (18px halo).
+
 ## [1.7.3] — 2026-05-28
 
 ### Fixed

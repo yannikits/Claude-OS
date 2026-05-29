@@ -1,6 +1,6 @@
 {
   "name": "claude-develop-environment-os",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "description": "OS-independent development environment built around Anthropic Claude — Tauri GUI + Node CLI + cloud-mount vault sync. Evolution of claude-portable.",
   "private": true,
   "type": "module",
