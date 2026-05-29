@@ -18,6 +18,7 @@
   --bg-elev-1: #1d1c22; /* panel one step up */
   --bg-elev-2: #25232b; /* hover / focused inset */
   --bg-inset: #100f13; /* code blocks, terminals */
+  --panel: var(--bg-elev-1); /* legacy alias — alte Klassen die noch var(--panel) lesen */
 
   /* === Text === */
   --text: #e8e6e0; /* primary (warm white) */
@@ -407,28 +408,71 @@ code {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
 }
 
+/*
+ * Operator-console telemetry tile. Hairline-frame statt rundem Card,
+ * sharp corners, label oben links als "channel name", primary value
+ * groß in display-font, secondary muted-meta drunter.
+ *
+ * Hover gives the accent left-edge marker — gleicher Pattern wie aktive
+ * Nav-Items, propagiert die LED-Sprache von der Sidebar in den Content.
+ */
 .card {
-  background: var(--panel);
+  position: relative;
+  background: var(--bg-elev-1);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem;
+  border-radius: 2px;
+  padding: 0.85rem 1rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition:
+    border-color 100ms ease,
+    box-shadow 100ms ease;
+}
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: inset 2px 0 0 0 var(--accent);
 }
 
 .card h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.9rem;
-  color: var(--muted);
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.card h3::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
 .card p {
   margin: 0;
-  font-size: 1rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+.card p.muted,
+.card .muted {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted-2);
+  letter-spacing: 0;
+  margin-top: 0.1rem;
 }
 
 .data-table {
@@ -958,88 +1002,172 @@ kbd {
 /* ---------- Phase 2f — Memory MVP GUI ---------- */
 
 .page-header {
+  /* Operator-console page-header — h1 left, secondary controls right,
+     hairline rule unter dem ganzen Block statt am h1. */
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.page-header::after {
+  /* zweite hairline-Zeile direkt darunter — engineering plate Optik */
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-strong), transparent 40%);
+}
+.page-header h1 {
+  margin: 0; /* override global .page h1 margin */
+}
+.page-header h1::after {
+  display: none; /* hairline kommt vom page-header, nicht vom h1 */
 }
 
 .workspace-indicator {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem 0.35rem 0.75rem;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text);
+  position: relative;
+}
+.workspace-indicator::before {
+  /* status-LED — gleicher Look wie Sidebar-Items */
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--led-up);
+  box-shadow: 0 0 8px var(--led-up);
 }
 
 .workspace-indicator label {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--muted-2);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 .workspace-indicator select {
-  background: var(--bg);
+  background: var(--bg-inset);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 13px;
-}
-
-.workspace-indicator__kind {
-  color: var(--muted);
-  font-size: 11px;
+  border-radius: 2px;
+  padding: 0.15rem 0.45rem;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
+.workspace-indicator__kind {
+  color: var(--muted-2);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+}
+
 .workspace-indicator--error {
-  color: var(--danger, #ef6f6c);
-  border-color: var(--danger, #ef6f6c);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.workspace-indicator--error::before {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger);
+  animation: led-pulse 1.6s ease-in-out infinite;
 }
 
 .memory-page__header {
+  /* alias auf .page-header — gleiche Treatment */
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.memory-page__header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-strong), transparent 40%);
+}
+.memory-page__header h1 {
+  margin: 0;
+}
+.memory-page__header h1::after {
+  display: none;
 }
 
 .memory-search {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
 }
 
 .memory-search input[type="search"] {
   flex: 1;
-  padding: 8px 12px;
-  background: var(--panel);
+  padding: 0.55rem 0.85rem;
+  background: var(--bg-inset);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+.memory-search input[type="search"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
-.memory-search button {
-  padding: 8px 14px;
-  background: var(--accent, #6d8bff);
-  color: white;
-  border: 0;
-  border-radius: 4px;
+/* memory-search verwendet jetzt globalen button-Style — kein override mehr nötig */
+.memory-search button[type="submit"] {
+  /* primary action — phosphor-cyan */
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #0a1a17;
+  padding: 0.45rem 1.1rem;
+  border-radius: 2px;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
-  font-size: 13px;
+  transition: box-shadow 120ms ease;
+}
+.memory-search button[type="submit"]:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 14px var(--accent-glow);
 }
 
 .memory-search button[type="button"] {
-  background: var(--panel);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
 }
 
 .memory-search button:disabled {
@@ -1049,55 +1177,85 @@ kbd {
 
 .memory-options {
   display: flex;
-  gap: 16px;
+  gap: 1.25rem;
   align-items: center;
-  margin-bottom: 16px;
-  font-size: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--muted);
 }
 
 .memory-options input[type="number"] {
-  background: var(--panel);
+  background: var(--bg-inset);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  padding: 0.15rem 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .memory-hits {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .memory-hit {
-  background: var(--panel);
+  /* Telemetry-row Optik: linker accent-edge, sharp corners, score + path
+     als monospace-Header, preview als dimmer code-block. */
+  background: var(--bg-elev-1);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  margin-bottom: 12px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 2px;
+  padding: 0.7rem 0.85rem 0.75rem;
+  transition:
+    border-left-color 100ms ease,
+    background-color 100ms ease;
+}
+.memory-hit:hover {
+  border-left-color: var(--accent);
+  background: var(--bg-elev-2);
 }
 
 .memory-hit__head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-  font-size: 12px;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
 }
 
 .memory-hit__score {
-  background: var(--accent, #6d8bff);
-  color: white;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: monospace;
-  font-size: 11px;
+  /* Score = primary signal — phosphor-cyan badge mit tabular-num */
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .memory-hit__path {
   color: var(--text);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1105,23 +1263,33 @@ kbd {
 }
 
 .memory-hit__class {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-2);
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
 }
 
 .memory-hit__terms {
-  color: var(--muted);
-  font-size: 11px;
-  margin-bottom: 6px;
+  color: var(--muted-2);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  margin-bottom: 0.4rem;
 }
 
 .memory-hit__preview {
-  background: var(--bg);
+  background: var(--bg-inset);
   color: var(--text);
-  padding: 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
   white-space: pre-wrap;
   margin: 0;
   max-height: 180px;
