@@ -49,6 +49,7 @@ Dokumentiert die fundamentalen Architektur-Entscheidungen für die Evolution von
 | [0041](0041-msp-health-aggregate-dashboard.md) | MSP-Health Aggregat-Dashboard (Phase 7-E) | shipped | 2026-05-29 |
 | [0042](0042-sophos-read-bridge.md) | Sophos XG/XGS Read-Bridge (Phase 7-D) | shipped | 2026-05-30 |
 | [0043](0043-securepoint-read-bridge.md) | Securepoint USC Read-Bridge (Phase 7-D.2) | shipped | 2026-05-30 |
+| [0044](0044-msp-health-dashboard-polish.md) | MSP-Health Dashboard-Polish (Phase 7-E.1) | shipped | 2026-05-30 |
 
 ## Format
 

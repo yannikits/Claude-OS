@@ -12,7 +12,7 @@
  *
  * @module gui/pages/msp-health
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   type AggregateSnapshot,
   type BridgeCellResult,
@@ -22,10 +22,12 @@ import {
   mspHealthConfig,
   mspHealthRefresh,
   mspHealthRows,
+  type SecurepointCellData,
   type SophosCellData,
   type TanssCellData,
   type VeeamCellData,
 } from '../lib/rpc';
+import { useAutoRefresh } from '../lib/use-msp-auto-refresh';
 
 const BRIDGE_LABEL: Record<BridgeKind, string> = {
   tanss: 'TANSS',
@@ -79,6 +81,33 @@ function TanssCell({ cell }: { cell: BridgeCellResult<TanssCellData> | undefined
       {d.newestUpdateAt !== null && (
         <span className="cell-msg"> · last {fmtDate(d.newestUpdateAt)}</span>
       )}
+    </span>
+  );
+}
+
+function SecurepointCell({ cell }: { cell: BridgeCellResult<SecurepointCellData> | undefined }) {
+  if (cell === undefined) return <span className="cell-dim">—</span>;
+  if (cell.kind !== 'ok') {
+    return (
+      <span className="cell-status">
+        <strong>{cell.kind}</strong>
+        {'message' in cell && cell.message !== undefined && (
+          <span className="cell-msg"> · {cell.message}</span>
+        )}
+      </span>
+    );
+  }
+  const d = cell.data;
+  const licClass =
+    d.licenseStatus === 'valid' ? '' : d.licenseStatus === 'expiring-soon' ? ' cell-msg-warn' : '';
+  return (
+    <span className="cell-status">
+      <strong>{d.online ? 'ONLINE' : 'OFFLINE'}</strong>
+      <span className={`cell-msg${licClass}`}>
+        {' '}
+        · license {d.licenseStatus}
+        {d.licenseDaysRemaining !== null ? ` (${d.licenseDaysRemaining}d)` : ''}
+      </span>
     </span>
   );
 }
@@ -149,7 +178,7 @@ function fmtDate(iso: string): string {
 function RowDetails({ row }: { row: CustomerHealthRow }) {
   return (
     <div className="msp-health-details">
-      {(['tanss', 'veeam', 'sophos'] as const).map((k) => {
+      {(['tanss', 'veeam', 'sophos', 'securepoint'] as const).map((k) => {
         const cell = row.cells[k] as BridgeCellResult<unknown> | undefined;
         if (cell === undefined) return null;
         return (
@@ -163,12 +192,24 @@ function RowDetails({ row }: { row: CustomerHealthRow }) {
   );
 }
 
+const AUTO_REFRESH_OPTIONS: { readonly label: string; readonly seconds: number | null }[] = [
+  { label: 'off', seconds: null },
+  { label: '1m', seconds: 60 },
+  { label: '5m', seconds: 300 },
+  { label: '15m', seconds: 900 },
+];
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+
 export function MspHealthPage() {
   const [snap, setSnap] = useState<AggregateSnapshot | null>(null);
   const [cfg, setCfg] = useState<MspHealthConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [autoRefreshSec, setAutoRefreshSec] = useState<number | null>(null);
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [page, setPage] = useState<number>(0);
 
   const load = useCallback(async (force: boolean): Promise<void> => {
     setLoading(true);
@@ -188,9 +229,21 @@ export function MspHealthPage() {
     void load(false);
   }, [load]);
 
+  // Auto-refresh: silent reload (no force), driven by user-selected interval.
+  useAutoRefresh(() => void load(false), autoRefreshSec);
+
   const visibleBridges: BridgeKind[] = snap?.registeredBridges.length
     ? [...snap.registeredBridges]
     : [];
+
+  // Pagination math.
+  const rows = snap?.rows ?? [];
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = useMemo(
+    () => rows.slice(safePage * pageSize, safePage * pageSize + pageSize),
+    [rows, safePage, pageSize],
+  );
 
   return (
     <div className="msp-health-page">
@@ -208,6 +261,19 @@ export function MspHealthPage() {
           )}
         </div>
         <div className="msp-health-actions">
+          <div className="msp-health-control">
+            <span className="msp-health-control-label">auto:</span>
+            {AUTO_REFRESH_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                type="button"
+                className={`msp-health-segment${autoRefreshSec === opt.seconds ? ' active' : ''}`}
+                onClick={() => setAutoRefreshSec(opt.seconds)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <button type="button" onClick={() => void load(true)} disabled={loading}>
             {loading ? '…' : '↻ Refresh'}
           </button>
@@ -232,27 +298,63 @@ export function MspHealthPage() {
       )}
 
       {snap !== null && snap.rows.length > 0 && (
-        <table className="data-table msp-health-table">
-          <thead>
-            <tr>
-              <th>CUSTOMER</th>
-              {visibleBridges.map((b) => (
-                <th key={b}>{BRIDGE_LABEL[b]}</th>
+        <>
+          <table className="data-table msp-health-table">
+            <thead>
+              <tr>
+                <th>CUSTOMER</th>
+                {visibleBridges.map((b) => (
+                  <th key={b}>{BRIDGE_LABEL[b]}</th>
+                ))}
+                <th className="msp-health-th-audit">AUDIT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((row) => (
+                <RowGroup
+                  key={row.slug}
+                  row={row}
+                  bridges={visibleBridges}
+                  expanded={expanded === row.slug}
+                  onToggle={() => setExpanded((cur) => (cur === row.slug ? null : row.slug))}
+                />
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {snap.rows.map((row) => (
-              <RowGroup
-                key={row.slug}
-                row={row}
-                bridges={visibleBridges}
-                expanded={expanded === row.slug}
-                onToggle={() => setExpanded((cur) => (cur === row.slug ? null : row.slug))}
-              />
+            </tbody>
+          </table>
+          <div className="msp-health-pagination">
+            <span className="msp-health-control-label">rows:</span>
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`msp-health-segment${pageSize === n ? ' active' : ''}`}
+                onClick={() => {
+                  setPageSize(n);
+                  setPage(0);
+                }}
+              >
+                {n}
+              </button>
             ))}
-          </tbody>
-        </table>
+            <span className="msp-health-pagination-info">
+              page {safePage + 1} / {totalPages} ({rows.length} total)
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+            >
+              ‹ prev
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={safePage >= totalPages - 1}
+            >
+              next ›
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
@@ -266,6 +368,7 @@ interface RowGroupProps {
 }
 
 function RowGroup({ row, bridges, expanded, onToggle }: RowGroupProps) {
+  const auditUrl = `/audit?tenant=${encodeURIComponent(row.slug)}&kinds=bridge.read`;
   return (
     <>
       <tr className="msp-health-row" onClick={onToggle}>
@@ -289,13 +392,21 @@ function RowGroup({ row, bridges, expanded, onToggle }: RowGroupProps) {
               {b === 'sophos' && (
                 <SophosCell cell={cell as BridgeCellResult<SophosCellData> | undefined} />
               )}
+              {b === 'securepoint' && (
+                <SecurepointCell cell={cell as BridgeCellResult<SecurepointCellData> | undefined} />
+              )}
             </td>
           );
         })}
+        <td className="msp-health-cell-audit">
+          <a className="msp-health-drill-link" href={auditUrl} onClick={(e) => e.stopPropagation()}>
+            audit
+          </a>
+        </td>
       </tr>
       {expanded && (
         <tr className="msp-health-row-expanded">
-          <td colSpan={1 + bridges.length}>
+          <td colSpan={2 + bridges.length}>
             <RowDetails row={row} />
           </td>
         </tr>

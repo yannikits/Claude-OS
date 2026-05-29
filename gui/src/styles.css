@@ -2649,3 +2649,91 @@ button.danger:disabled {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Phase 7-E.1 Dashboard-Polish: auto-refresh + pagination + audit drill-down */
+.msp-health-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.msp-health-control-label {
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.msp-health-segment {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 9px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.msp-health-segment.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(90, 246, 205, 0.08);
+}
+.msp-health-segment:hover:not(.active) {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.msp-health-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.msp-health-pagination button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 3px 12px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.msp-health-pagination button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.msp-health-pagination button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.msp-health-pagination-info {
+  margin: 0 auto 0 12px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.msp-health-th-audit,
+.msp-health-cell-audit {
+  text-align: right;
+  padding-right: 12px !important;
+  width: 60px;
+}
+.msp-health-drill-link {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
+}
+.msp-health-drill-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}

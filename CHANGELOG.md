@@ -4,6 +4,54 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.9.3] — 2026-05-30
+
+### Added
+
+- **MSP-Health Dashboard-Polish (Phase 7-E.1, ADR-0044):** Drei user-sichtbare Verbesserungen am Dashboard. Frontend-only — keine Backend-Änderungen, kein Schema-Change.
+  - **Auto-Refresh-Polling:** Header-Segment-Control `off|1m|5m|15m` (default `off`). Wenn aktiv: silent reload via cache-aware `mspHealthRows()` (kein force-bust). Implementation als wiederverwendbare React-Hook `useAutoRefresh()` mit closure-stale-fix via `loaderRef` und sauberer cleanup-on-unmount/intervalSec-change.
+  - **Pagination:** Footer-Bar mit page-size-segment `25|50|100` (default 50) + prev/next + page-info „page N / M (X total)". Client-side slice — kein zusätzlicher Backend-Roundtrip pro Seitenwechsel.
+  - **Audit-Drill-Down:** Neue `AUDIT`-Spalte rechts. Pro Zeile `<a href="/audit?tenant=<slug>&kinds=bridge.read">audit</a>`. onClick stoppt Propagation damit Row-Expand nicht mit-getriggert wird. Öffnet das Audit-Trail-Dashboard (ADR-0037) mit vorbefüllten Filtern → 1-Click-Antwort auf „warum ist diese Zelle rot, wann ging's kaputt".
+
+### Fixed
+
+- **Securepoint-Spalte im MSP-Health Dashboard restored.** Beim v1.9.2-Frontend-Edit ging die `SecurepointCell`-Komponente sowie die Securepoint-Spalte im RowGroup-Rendering verloren (CHANGELOG-Eintrag für 1.9.2 ist auch nie ins Repo gekommen — Release-Notes auf GitHub sind die Wahrheit dazu). Beides wieder eingefügt — die SECUREP.-Spalte rendert jetzt korrekt im Dashboard.
+
+### Tests
+
+- **7 neue Tests** für `useAutoRefresh` (null-no-op, fire-at-interval, latest-loader-via-ref, reset-on-interval-change, cleanup-on-unmount/null-switch, double-fire prevention)
+- Backend-Suite unverändert: **1984 passed / 8 skipped** — keine Regression
+
+### Docs
+
+- **ADR-0044** — MSP-Health Dashboard-Polish (Auto-Refresh, Pagination, Drill-Down)
+
+## [1.9.2] — 2026-05-30
+
+> CHANGELOG-Eintrag wurde beim Release versehentlich nicht ins Repo committed. Volle Release-Notes auf GitHub: https://github.com/yannikits/Claude-OS/releases/tag/v1.9.2
+
+### Added
+
+- **Securepoint USC Read-Bridge (Phase 7-D.2, ADR-0043):** Vierte konkrete Read-Bridge. Single Cloud-API + shared Metrics-Cache, eigener Prometheus-Text-Parser, forgiving device-label-matching.
+
+  Architektur-Variant gegen TANSS/Veeam/Sophos: EINE Cloud-API liefert in einem Request alle UTMs aller Mandanten. Bridge cached die parsed Map mit 60s TTL → 100 Customer auf einem Dashboard-Refresh = EIN upstream HTTP-Call.
+
+  - **Endpoint:** `GET portal.securepoint.cloud/sms-mgt-api/api/2.0/metrics?version=2.2` mit Bearer-API-Key
+  - **`SecurepointStatus`:** `online`, `licenseDaysRemaining`, `licenseStatus` (valid/expiring-soon/expired/unknown, ≤30d = expiring-soon), `additionalMetrics` (clip 20)
+  - **Eigener Prom-Parser** (~80 LOC): labeled/unlabeled, escaped strings, Floats+Sci, Comments, NaN-reject, malformed-skip
+  - **Forgiving label-matching:** akzeptiert utm/device/name/serial als device-key. `isDeviceMissing()` → misconfigured mit Typo-Hint
+  - **Stampede-Protection** für shared cache: 10 concurrente Probes → 1 upstream fetch
+  - **CLI:** `claude-os msp probe securepoint <slug>` mit --base-url/--api-version/--timeout-ms
+  - **Doctor:** `securepoint-config`-Check (single MSP-wide apiKey)
+  - **Bootstrap:** registriert iff irgendein Customer `bridges.securepoint` hat
+  - **Dashboard:** SECUREP.-Spalte mit `ONLINE|OFFLINE · license <status>`
+
+### Tests
+
+- 62 neue Tests (14 prom-parser + 12 mapper + 11 classify-error + 11 cache + 14 bridge + 5 doctor)
+- runner.test.ts updated (12 → 13; 10 → 11)
+- Gesamt-Suite: **1984 passed / 8 skipped** — keine Regression
+
 ## [1.9.1] — 2026-05-30
 
 ### Added
