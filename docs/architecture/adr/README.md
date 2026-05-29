@@ -44,6 +44,7 @@ Dokumentiert die fundamentalen Architektur-Entscheidungen für die Evolution von
 | [0036](0036-multi-user-stage-2-email-password.md) | Server Multi-User Stage 2 (Email/Passwort + Session-Cookies) | Akzeptiert | 2026-05-28 |
 | [0037](0037-audit-trail-dashboard.md) | Audit-Trail-Dashboard (Read-only Web-UI über JSONL-Audit) | shipped | 2026-05-29 |
 | [0038](0038-msp-health-foundation.md) | MSP-Health-Foundation (Customer-Repo + Bridge-Interface) | shipped | 2026-05-29 |
+| [0039](0039-tanss-read-bridge.md) | TANSS Read-Bridge (Phase 7-B) | shipped | 2026-05-29 |
 
 ## Format
 

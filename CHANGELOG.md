@@ -4,6 +4,30 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.8.2] — 2026-05-29
+
+### Added
+
+- **TANSS Read-Bridge (Phase 7-B, ADR-0039):** Erste konkrete Read-Bridge, baut auf der Phase-7-A-Foundation (ADR-0038) auf.
+  - **Per-Customer-Probe:** Ein `probe(customer)` macht **einen** Call: `GET {CLAUDE_OS_TANSS_SERVER_URL}/api/v1/tickets/company/{customer.bridges.tanss.customerId}`. Header `apiToken: <key>` (case-sensitive — PSTANSS-validiert, **nicht** `Authorization: Bearer`).
+  - **`TanssStatus` (kompakt):** `openCount` + `totalCount` + `newestUpdateAt` + `sample` (id/subject/status des neuesten Tickets). `sample.subject` bleibt im Probe-Return-Value und geht **nicht** ins Audit (per SECURITY.md §4).
+  - **Defensive Mapper:** Closed-Detection akzeptiert `closed === true` ODER `/closed|done|erledigt|geschlossen|completed|finished/i` in `status`/`statusName`. updateDate akzeptiert ISO-Strings + Epoch-Sekunden (< 1e12) + Epoch-Millis. Response-Unwrap funktioniert sowohl mit `{content:[...]}` als auch mit bare-Array.
+  - **Hard-Contract per ADR-0038:** `probe()` wirft nie. `customer.bridges?.tanss` ist die Konfig-Probe (fehlt → `misconfigured`, kein HTTP-Call). `getApiToken()` wird pro Call frisch aus dem Secrets-Backend geholt (Token-Rotation klappt). `durationMs` wird real reportet.
+  - **Error-Mapping vollständig:** 401/403 → `auth-failed`, 429 (+ Retry-After) → `rate-limited`, 404 → `misconfigured` (customerId falsch), 5xx → `unreachable`, AbortError/TypeError/ECONN* → `unreachable`, alles andere → `error`.
+
+- **CLI: `claude-os msp probe tanss <slug>`** — User-facing Smoke-Test. Liest `CLAUDE_OS_TANSS_SERVER_URL` + apiToken aus dem Secrets-Backend, lädt den Customer aus dem Vault, probt und printet das Resultat. `--json` mirrors `BridgeProbe`. Exit 0 nur bei `result.kind === 'ok'`.
+
+- **Doctor-Check: `tanss-config`** — `ok` wenn beide (URL + apiToken) gesetzt oder beide unset (TANSS optional); `warn` wenn nur eins von beiden — mit Hint auf den fehlenden Schritt. Läuft auch aus `docker/entrypoint.sh`-Pre-Flight.
+
+### Docs
+
+- **ADR-0039** — TANSS Read-Bridge (Endpoint-Wahl, Auth-Header, Status-Shape, Error-Mapping, Trade-offs)
+- **`docs/tanss-bridge-guide.md`** — User-Setup in drei Schritten (env + `secrets set` + `customer.yaml`), Verification per Doctor + Smoke-Test, Troubleshooting-Tabelle, Audit-Trail-Beispiel.
+
+### Tests
+
+- 30 neue Unit-Tests (16 mapper + 13 classify-error + 14 bridge inkl. Audit-Integration) + 7 neue Doctor-Check-Tests. Gesamt-Suite: **1740 passed / 8 skipped** — keine Regression.
+
 ## [1.8.1] — 2026-05-29
 
 ### Added
