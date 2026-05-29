@@ -45,6 +45,29 @@ export CLAUDE_OS_DATA_DIR="${DATA_DIR}"
 export CLAUDE_OS_VAULT_PATH="${VAULT_DIR}"
 export ANTHROPIC_CONFIG_DIR="${ANTHROPIC_DIR}"
 
+# ── claude-CLI credentials persistence ──────────────────────────────
+#
+# The `claude` CLI hardcodes `~/.claude/.credentials.json` and ignores
+# $ANTHROPIC_CONFIG_DIR for the credentials file itself. Symlink the
+# expected path to the persistent volume so:
+#   1. `claude auth login` writes through to the volume (survives restart)
+#   2. The Settings page (which reads $ANTHROPIC_CONFIG_DIR/.credentials.json)
+#      sees the credentials immediately after login
+#
+# Migrate step: if a previous container wrote .credentials.json into
+# /root/.claude/ (non-symlinked), move it to the volume on first boot.
+mkdir -p /root/.claude
+if [ -f /root/.claude/.credentials.json ] && [ ! -L /root/.claude/.credentials.json ]; then
+  if [ ! -e "${ANTHROPIC_DIR}/.credentials.json" ]; then
+    echo "==> migrating existing /root/.claude/.credentials.json → ${ANTHROPIC_DIR}/"
+    mv /root/.claude/.credentials.json "${ANTHROPIC_DIR}/.credentials.json"
+  else
+    # Volume already has credentials — root-side stale copy loses.
+    rm /root/.claude/.credentials.json
+  fi
+fi
+ln -sf "${ANTHROPIC_DIR}/.credentials.json" /root/.claude/.credentials.json
+
 # Optional: log to stdout so docker logs captures everything
 export CLAUDE_OS_LOG_LEVEL="${CLAUDE_OS_LOG_LEVEL:-info}"
 

@@ -4,6 +4,12 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.7.6] — 2026-05-29
+
+### Fixed
+
+- **`claude auth login` credentials werden jetzt im Volume persistiert.** Die `claude`-CLI hardcoded `~/.claude/.credentials.json` und ignoriert `$ANTHROPIC_CONFIG_DIR` für die Credentials-Datei. Resultat: nach `claude auth login` im Container landeten die Credentials im RootFS (verschwinden bei Container-Restart) und die Settings-Page zeigt "nicht vorhanden" obwohl Login durch war. Fix in `docker/entrypoint.sh`: symlinkt `/root/.claude/.credentials.json` zum Volume-Pfad `${ANTHROPIC_CONFIG_DIR}/.credentials.json` beim Container-Start. Idempotent + migrate-fähig (bestehende RootFS-Datei wird beim ersten Boot ins Volume verschoben).
+
 ## [1.7.5] — 2026-05-29
 
 ### Fixed
