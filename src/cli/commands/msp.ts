@@ -15,8 +15,10 @@ import { join } from 'node:path';
 import type { Command } from 'commander';
 import { resolveRoot } from '../../core/environment/index.js';
 import { TanssBridge } from '../../domains/msp-bridges/tanss/index.js';
+import { VeeamBridge } from '../../domains/msp-bridges/veeam/index.js';
+import type { VeeamCredentials } from '../../domains/msp-bridges/veeam/types.js';
 import { CustomerRepository } from '../../domains/msp-customers/index.js';
-import { createSecretStore } from '../../domains/secrets/index.js';
+import { createSecretStore, type SecretStore } from '../../domains/secrets/index.js';
 import { type GlobalOpts, printErr, printJson, printLine } from '../output.js';
 
 const TANSS_API_TOKEN_KEY = 'tanss/apiToken';
@@ -24,6 +26,24 @@ const TANSS_API_TOKEN_KEY = 'tanss/apiToken';
 interface ProbeOpts {
   readonly serverUrl?: string;
   readonly timeoutMs?: string;
+}
+
+interface ProbeVeeamOpts {
+  readonly apiVersion?: string;
+  readonly insecureTls?: boolean;
+  readonly timeoutMs?: string;
+}
+
+async function getVeeamCredsFromStore(
+  store: SecretStore,
+  host: string,
+): Promise<VeeamCredentials | null> {
+  const [username, password] = await Promise.all([
+    store.get(`veeam/${host}/username`),
+    store.get(`veeam/${host}/password`),
+  ]);
+  if (username === null || password === null) return null;
+  return { username, password };
 }
 
 function resolveVaultRoot(globals: GlobalOpts): string {
@@ -102,6 +122,81 @@ async function actProbeTanss(slug: string, opts: ProbeOpts, command: Command): P
   process.exit(probe.result.kind === 'ok' ? 0 : 1);
 }
 
+async function actProbeVeeam(slug: string, opts: ProbeVeeamOpts, command: Command): Promise<void> {
+  const globals = command.optsWithGlobals<GlobalOpts>();
+  const json = globals.json === true;
+
+  let timeoutMs: number | undefined;
+  try {
+    timeoutMs = parseTimeout(opts.timeoutMs);
+  } catch (err) {
+    printErr(`msp probe veeam: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+
+  const vaultRoot = resolveVaultRoot(globals);
+  const repo = new CustomerRepository({ vaultRoot, autoCreate: false });
+  const customer = await repo.get(slug);
+  if (customer === null) {
+    printErr(
+      `msp probe veeam: customer "${slug}" not found at vault/workspaces/msp-customers/${slug}/`,
+    );
+    process.exit(1);
+  }
+  if (!customer.bridges?.veeam) {
+    printErr(`msp probe veeam: customer "${slug}" has no bridges.veeam in customer.yaml`);
+    process.exit(1);
+  }
+
+  const insecureTls = opts.insecureTls === true || process.env.CLAUDE_OS_VEEAM_INSECURE_TLS === '1';
+  if (insecureTls) {
+    // Globally relax TLS verification for this CLI invocation only —
+    // process exits right after the probe, so no spillover to other
+    // long-running components. Matches the Veeam-default self-signed
+    // cert use-case (per-customer VBR on-prem).
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  }
+
+  const store = createSecretStore();
+  const apiVersion = opts.apiVersion ?? process.env.CLAUDE_OS_VEEAM_API_VERSION;
+
+  const bridge = new VeeamBridge({
+    getCredentialsForHost: (host) => getVeeamCredsFromStore(store, host),
+    ...(apiVersion !== undefined ? { apiVersion } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    insecureTls,
+  });
+
+  const probe = await bridge.probe(customer);
+
+  if (json) {
+    printJson(probe);
+    process.exit(probe.result.kind === 'ok' ? 0 : 1);
+  }
+
+  printLine(`[${probe.result.kind === 'ok' ? 'OK' : 'FAIL'}] veeam.probe ${slug}`);
+  printLine(`  bridgeKind=${probe.bridgeKind}  durationMs=${probe.durationMs}`);
+  printLine(`  result.kind=${probe.result.kind}`);
+  if (probe.result.kind === 'ok') {
+    const d = probe.result.data;
+    printLine(
+      `  knownJobs=${d.knownJobs}  ok=${d.okCount}  warn=${d.warningCount}  failed=${d.failedCount}  running=${d.runningCount}`,
+    );
+    printLine(`  newestSuccessAt=${d.newestSuccessAt ?? '(none)'}`);
+    printLine(`  oldestUnsuccessfulAt=${d.oldestUnsuccessfulAt ?? '(none)'}`);
+    if (d.missingJobs.length > 0) {
+      printLine(`  missingJobs=${d.missingJobs.join(', ')}  (renamed in Veeam UI?)`);
+    }
+    for (const r of d.latestRuns.slice(0, 5)) {
+      printLine(`    [${r.state}] ${r.jobName}  endTimeUtc=${r.endTimeUtc ?? '(none)'}`);
+    }
+  } else if ('message' in probe.result && probe.result.message !== undefined) {
+    printLine(`  message=${probe.result.message}`);
+  }
+
+  process.exit(probe.result.kind === 'ok' ? 0 : 1);
+}
+
 export function registerMspCommand(program: Command): void {
   const msp = program
     .command('msp')
@@ -119,6 +214,24 @@ export function registerMspCommand(program: Command): void {
         await actProbeTanss(slug, opts, command);
       } catch (err) {
         printErr(`msp probe tanss: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  probe
+    .command('veeam <slug>')
+    .description('Probe the Veeam Read-Bridge for the customer with given slug')
+    .option('--api-version <ver>', 'Override $CLAUDE_OS_VEEAM_API_VERSION (default 1.1-rev1)')
+    .option(
+      '--insecure-tls',
+      'Accept self-signed VBR cert (else also via $CLAUDE_OS_VEEAM_INSECURE_TLS=1)',
+    )
+    .option('--timeout-ms <ms>', 'Override request timeout (default 15000)')
+    .action(async (slug: string, opts: ProbeVeeamOpts, command: Command) => {
+      try {
+        await actProbeVeeam(slug, opts, command);
+      } catch (err) {
+        printErr(`msp probe veeam: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
     });

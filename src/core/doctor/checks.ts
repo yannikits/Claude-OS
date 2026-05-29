@@ -315,6 +315,148 @@ export async function checkTanssConfig(
 }
 
 /**
+ * Veeam-Bridges config pre-flight (ADR-0040, Phase 7-C).
+ *
+ * Per-customer-VBR architecture means there's no single env var to check.
+ * Instead we:
+ *   1. Enumerate all customer-workspaces under the vault
+ *   2. Collect distinct serverHostnames from bridges.veeam.serverHostname
+ *   3. For each host: probe secrets-backend for `veeam/<host>/username` AND `veeam/<host>/password`
+ *
+ * Three states:
+ *   - no customer has bridges.veeam               → ok (Veeam optional, none configured)
+ *   - all hosts have both creds                   → ok (count of hosts in message)
+ *   - some hosts missing creds                    → warn (lists which)
+ *
+ * Never `fail` — Veeam is optional. Vault-resolution failure → warn (can't
+ * check). Secrets-probe failure → warn.
+ *
+ * @param vaultRoot - optional explicit override; default uses resolveRoot
+ * @param secretsProbe - injectable for tests; defaults to createSecretStore().get()
+ * @param listSlugsFn - injectable for tests
+ * @param getCustomerFn - injectable for tests
+ */
+export async function checkVeeamConfig(
+  opts: {
+    readonly vaultRoot?: string;
+    readonly secretsProbe?: (key: string) => Promise<string | null>;
+    readonly listSlugsFn?: (vaultRoot: string) => readonly string[];
+    readonly getCustomerFn?: (
+      vaultRoot: string,
+      slug: string,
+    ) => Promise<{
+      readonly bridges?: { readonly veeam?: { readonly serverHostname: string } };
+    } | null>;
+  } = {},
+): Promise<CheckResult> {
+  return timed('veeam-config', async () => {
+    let vaultRoot = opts.vaultRoot;
+    if (vaultRoot === undefined) {
+      try {
+        const { resolveRoot } = await import('../environment/index.js');
+        const root = resolveRoot();
+        vaultRoot = join(root.path, 'vault');
+      } catch (err) {
+        return {
+          name: 'veeam-config',
+          severity: 'ok' as const,
+          message: 'vault unreachable — Veeam check skipped',
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+
+    let slugs: readonly string[];
+    try {
+      if (opts.listSlugsFn !== undefined) {
+        slugs = opts.listSlugsFn(vaultRoot);
+      } else {
+        const { listCustomerSlugs } = await import('../../domains/msp-customers/paths.js');
+        slugs = listCustomerSlugs(vaultRoot);
+      }
+    } catch (err) {
+      return {
+        name: 'veeam-config',
+        severity: 'warn',
+        message: 'failed to enumerate customer-workspaces',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    const hosts = new Set<string>();
+    for (const slug of slugs) {
+      let record: { bridges?: { veeam?: { serverHostname: string } } } | null = null;
+      try {
+        if (opts.getCustomerFn !== undefined) {
+          record = await opts.getCustomerFn(vaultRoot, slug);
+        } else {
+          const { CustomerRepository } = await import('../../domains/msp-customers/index.js');
+          const repo = new CustomerRepository({ vaultRoot, autoCreate: false });
+          record = await repo.get(slug);
+        }
+      } catch {
+        // Tolerate individual broken customer.yaml — they'll surface via other tooling
+        continue;
+      }
+      const host = record?.bridges?.veeam?.serverHostname;
+      if (typeof host === 'string' && host.length > 0) hosts.add(host);
+    }
+
+    if (hosts.size === 0) {
+      return {
+        name: 'veeam-config',
+        severity: 'ok',
+        message: 'no customer-workspaces reference bridges.veeam (skipped)',
+      };
+    }
+
+    const probe =
+      opts.secretsProbe ??
+      (async (k: string) => {
+        const { createSecretStore } = await import('../../domains/secrets/index.js');
+        return createSecretStore().get(k);
+      });
+
+    const missing: string[] = [];
+    for (const host of hosts) {
+      let u: string | null;
+      let p: string | null;
+      try {
+        [u, p] = await Promise.all([
+          probe(`veeam/${host}/username`),
+          probe(`veeam/${host}/password`),
+        ]);
+      } catch (err) {
+        return {
+          name: 'veeam-config',
+          severity: 'warn',
+          message: 'secrets-store probe failed during veeam-config check',
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
+      if (u === null || u.length === 0 || p === null || p.length === 0) {
+        missing.push(host);
+      }
+    }
+
+    if (missing.length === 0) {
+      return {
+        name: 'veeam-config',
+        severity: 'ok',
+        message: `Veeam configured for ${hosts.size} host(s)`,
+      };
+    }
+    return {
+      name: 'veeam-config',
+      severity: 'warn',
+      message: `Veeam credentials missing for ${missing.length} of ${hosts.size} host(s)`,
+      detail: missing.join(', '),
+      hint: 'Run: claude-os secrets set veeam/<host>/username <user> AND veeam/<host>/password <pwd> for each',
+    };
+  });
+}
+
+/**
  * Server-mode signing-keypair pre-flight (ADR-0035).
  *
  * Returns `warn` if no keypair is initialized — that's the lazy

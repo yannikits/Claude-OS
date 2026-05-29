@@ -14,6 +14,7 @@ import {
   checkSigningKeypair,
   checkTanssConfig,
   checkUserStore,
+  checkVeeamConfig,
   checkWindowsLongPaths,
   checkWritePermission,
 } from './checks.js';
@@ -60,6 +61,7 @@ export async function runDoctor(
       checkSigningKeypair(),
       checkUserStore(),
       checkTanssConfig(),
+      checkVeeamConfig(),
     ]);
     return summarize(checks, Date.now() - startedAt);
   }
@@ -81,6 +83,7 @@ export async function runDoctor(
     checkSigningKeypair(),
     checkUserStore(),
     checkTanssConfig(),
+    checkVeeamConfig(),
   ]);
   return summarize([rootResolutionFail, ...independent], Date.now() - startedAt);
 }
