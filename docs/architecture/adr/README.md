@@ -47,6 +47,7 @@ Dokumentiert die fundamentalen Architektur-Entscheidungen für die Evolution von
 | [0039](0039-tanss-read-bridge.md) | TANSS Read-Bridge (Phase 7-B) | shipped | 2026-05-29 |
 | [0040](0040-veeam-read-bridge.md) | Veeam Read-Bridge (per-customer VBR, Phase 7-C) | shipped | 2026-05-29 |
 | [0041](0041-msp-health-aggregate-dashboard.md) | MSP-Health Aggregat-Dashboard (Phase 7-E) | shipped | 2026-05-29 |
+| [0042](0042-sophos-read-bridge.md) | Sophos XG/XGS Read-Bridge (Phase 7-D) | shipped | 2026-05-30 |
 
 ## Format
 

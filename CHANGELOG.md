@@ -4,6 +4,48 @@ Alle relevanten Aenderungen an `claude-os` werden hier dokumentiert. Format orie
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-05-30
+
+### Added
+
+- **Sophos XG/XGS Read-Bridge (Phase 7-D, ADR-0042):** Dritte konkrete Read-Bridge. Per-customer on-prem Firewall, XML-API auf Port 4444.
+  - **Endpoint:** `POST {host}:{port}/webconsole/APIController` mit `Content-Type: application/x-www-form-urlencoded` Body `reqxml=<XML>`. Eine Probe = ein HTTP-Call mit ZWEI eingebetteten `<Get>`-Blöcken (Firmware + LicenseInformation).
+  - **Auth:** XML-eingebettete Credentials in jedem Request (`<Login><Username/><Password/></Login>`). Kein Token, keine Session. Per-Call frisch aus `sophos/<host>/{username,password}` im Secrets-Backend (ADR-0038-Hard-Rule).
+  - **`SophosStatus`:** `firmwareVersion` + `firmwareType` + `licenseSummary` (`active`/`expiring-soon`/`expired`/`mixed`/`unknown`) + `daysToEarliestExpiry` + `subscriptions[]` (jeweils name/status/expiresAt/daysRemaining). `licenseSummary`-Heuristik: alle aktiv mit MIN(days)≤30 → `expiring-soon`; alle abgelaufen → `expired`; gemischt → `mixed`. „Subscribed" mit negativem daysRemaining wird als expired gewertet (Sophos sync-lag).
+  - **Sophos `<Status code>`-Handling:** 534 (IP nicht in API ACL) → `auth-failed` mit klarer Message; 532 (API nicht aktiviert) → `misconfigured` mit Enable-Hint. Ohne Status: `<Login>` „Authentication Failure" → `auth-failed`.
+  - **TLS:** `CLAUDE_OS_SOPHOS_INSECURE_TLS=1` (oder `--insecure-tls`) für XG/XGS-Default-Self-Signed-Cert. Sonst hartes `unreachable` mit `INSECURE_TLS`-Hint.
+  - **XML-Parsing:** Neue Dep `fast-xml-parser` (~10M weekly downloads, MIT, 0 transitive deps). Gated in `sophos/xml-parser.ts` — der Rest des Codebases bleibt XML-agnostisch.
+
+- **Schema-Update für `bridges.sophos` (BREAKING gegen v1.9.0):**
+  - `firewallHostname: string` jetzt **Pflicht** (war optional)
+  - `firewallPort?: number` neu, default 4444
+  - `centralCustomerId?: string` bleibt reserved-for-future (Sophos Central-Bridge)
+  
+  Niemand produktiv → keine Migration nötig (analog zu Veeam v1.8.3).
+
+- **CLI: `claude-os msp probe sophos <slug>`** — Smoke-Test. Liest customer.yaml, holt Creds aus Secrets-Backend, probt, pretty-print + `--json`. Optionen: `--insecure-tls`, `--timeout-ms`.
+
+- **Doctor-Check: `sophos-config`** — analog `veeam-config`: enumeriert Customer-Workspaces, sammelt distinct `firewallHostname`-Werte, prüft pro Host ob `sophos/<host>/{username,password}` im Secrets-Backend liegen. **ok** bei kein-Sophos ODER alle-Hosts-Creds-da. **warn** bei N von M Hosts ohne Creds — listet welche. Never fail.
+
+- **Bootstrap-Wiring in `serve.ts`:** SophosBridge wird registriert iff irgendein Customer `bridges.sophos` hat. Wrapped via `withAuditTrail` — alle Probes landen im Audit-Log.
+
+- **MSP-Health Dashboard:** Neue SOPHOS-Spalte mit Per-Cell-Rendering `firmware · license-summary [· N days]`. Color-coded: `active` grün, `expiring-soon`/`mixed` gelb, `expired`/`unknown` rot.
+
+### Privacy
+
+Audit-Wrapper schreibt nur `customerSlug` / `bridgeKind` / `resultKind` / `durationMs`. Keine Subscription-Namen, keine Firmware-Versionen, keine Credentials. Test prüft das explizit.
+
+### Docs
+
+- **ADR-0042** — XML-API-Wahl, Sophos `<Status>`-Code-Mapping, License-Heuristik, TLS-Trade-off
+- **`docs/sophos-bridge-guide.md`** — User-Setup, API-Access-List-Hint, Troubleshooting-Tabelle mit 12 Symptomen
+
+### Tests
+
+- **74 neue Tests** (4 xml-builder + 11 xml-parser + 18 mapper + 13 classify-error + 16 bridge + 8 doctor-check + 4 schema)
+- runner.test.ts updated (11 → 12 checks; 9 → 10 when root unresolvable)
+- Gesamt-Suite: **1922 passed / 8 skipped** — keine Regression
+
 ## [1.9.0] — 2026-05-29
 
 ### Added
