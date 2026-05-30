@@ -13,13 +13,14 @@ Diese Anleitung beschreibt das selbst-gehostete Deployment von Claude-OS als Hea
 - Persistenter Vault + Anthropic-CLI-Login in einem Docker-Volume → überlebt Container-Restarts und Updates
 - TLS via Let's Encrypt **oder** Cloudflare-Origin-Cert **oder** Cloudflare-Tunnel (du wählst)
 - Backup-Pfad via Proxmox-Snapshot + zusätzlicher Volume-Sync
+- **MSP-Health-Cockpit** über deine Kundensysteme (TANSS, Veeam, Sophos, Securepoint, NinjaOne) — siehe §"MSP-Health-Bridges konfigurieren"
 
 ## Was du nicht bekommst (bewusst out-of-scope für Phase Web)
 
 - Native Drag-and-Drop im Browser (Tauri-only)
 - Live Chat-PTY-Streaming im Browser (kommt in Phase Web-3)
 - ~~Multi-User-Login mit Registrierung~~ — **shipped seit Phase Web-7 (ADR-0036)** — siehe §"Multi-User mit Email-Login (Stage 2)" weiter unten
-- MSP-Bridges (TANSS/Ninja/Veeam) — leben im privaten `claude-os-msp`-Repo
+- Schreibende MSP-Aktionen (Ticket-Bearbeitung, Firewall-Regeln, Script-Ausführung) — die Read-Bridges + Read-only-Dashboard sind shipped; Write-/Automation-Actions folgen (siehe `tasks/phase-msp-cockpit.md`)
 
 ---
 
@@ -223,6 +224,54 @@ Per Cron (`crontab -e`):
 | `/data/anthropic/` | Anthropic-CLI-Credentials (`.credentials.json`) |
 
 **Wichtig:** `CLAUDE_OS_AUTH_TOKEN` + `CLAUDE_OS_SECRETS_PASSPHRASE` aus `.env` sind **nicht** im Volume — sind in Container-Env. Wenn du beides verlierst, ist der `EncryptedFileStore` unentschlüsselbar. Backup beider Werte in deinem Passwortmanager ist Pflicht.
+
+---
+
+## MSP-Health-Bridges konfigurieren
+
+Das MSP-Cockpit pollt Kundensysteme read-only und zeigt sie admin-gated im Dashboard (`/msp-health`). Eine Bridge wird registriert, sobald **(a)** mindestens ein Kunde sie in `customer.yaml` referenziert **und** **(b)** die zugehörigen Secrets/ENV gesetzt sind. Voraussetzung: Admin-Email-Allowlist (siehe §"Admin-Email-Allowlist setzen").
+
+### Pro-Bridge: ENV + Secrets
+
+| Bridge | ENV (in `.env`) | Secrets (`claude-os secrets set …`) | customer.yaml `bridges.<kind>` |
+|---|---|---|---|
+| **NinjaOne** | `CLAUDE_OS_NINJA_BASE_URL` (Default `https://eu.ninjarmm.com`; sonst `app`/`oc`) | `ninja/clientId`, `ninja/clientSecret` (OAuth-Client-App, Scope **Monitoring**) | `ninja: { organizationId: <int> }` |
+| **TANSS** | `CLAUDE_OS_TANSS_SERVER_URL`, optional `CLAUDE_OS_TANSS_API_BASE` (Default `/api/v1`; manche Installs `/backend/api/v1`) | `tanss/apiToken` | `tanss: { customerId: <int> }` |
+| **Veeam** | optional `CLAUDE_OS_VEEAM_INSECURE_TLS=1` (self-signed VBR) | `veeam/<host>/username`, `veeam/<host>/password` | `veeam: { serverHostname, serverPort?, jobNames? }` |
+| **Sophos** | optional `CLAUDE_OS_SOPHOS_INSECURE_TLS=1` | `sophos/<host>/username`, `sophos/<host>/password` | `sophos: { firewallHostname, firewallPort? }` |
+| **Securepoint** | optional `CLAUDE_OS_SECUREPOINT_BASE_URL` | `securepoint/apiKey` | `securepoint: { deviceId }` |
+
+Secrets im laufenden Container setzen (EncryptedFileStore braucht `CLAUDE_OS_SECRETS_PASSPHRASE` aus `.env`):
+
+```bash
+docker exec -it claude-os claude-os secrets set ninja/clientId <client-id>
+docker exec -it claude-os claude-os secrets set ninja/clientSecret <client-secret>
+```
+
+### NinjaOne — Schritt für Schritt
+
+1. **OAuth-Client-App** in NinjaOne anlegen: Administration → Apps → API → Client app IDs → Add. Grant **Client Credentials**, Scope **Monitoring** (read-only). client_id + client_secret notieren.
+2. ENV in `.env`: `CLAUDE_OS_NINJA_BASE_URL=https://eu.ninjarmm.com` (Region anpassen).
+3. Secrets setzen (siehe oben).
+4. **Organization-ID** je Kunde ermitteln und in dessen `customer.yaml` eintragen:
+   ```yaml
+   bridges:
+     ninja:
+       organizationId: 3   # aus GET /v2/organizations
+   ```
+5. Container neu erstellen (ENV-Änderungen brauchen Recreate): `docker compose up -d --force-recreate`.
+6. **Probe** als Connectivity-Check:
+   ```bash
+   docker exec claude-os claude-os msp probe ninja <customer-slug> --json
+   # erwartet: result.kind=ok, data.deviceCount / offlineCount / alertCount / actionableAlertCount
+   ```
+   `claude-os doctor` zeigt zudem die Zeile `ninja-config` (ok/warn).
+
+> Hinweis: `alertCount` zählt alle aktiven Conditions; `actionableAlertCount` nur die mit `severity != NONE` (NinjaOne emittiert viele NONE-Conditions wie Patch-Reminder — das wäre sonst Rauschen).
+
+### Automations-Regeln (optional)
+
+Die deterministische Engine lädt YAML-Regeln aus `<vault>/Claude-OS/automation/rules/*.yaml` und feuert bei Status-Wechseln Aktionen (v1: `dashboard-alert`/`notify`/`audit-log` — kein autonomer Write). Ansicht: `/automation` (admin-gated). Details: `tasks/phase-msp-cockpit.md`.
 
 ---
 
