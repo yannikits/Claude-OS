@@ -1,14 +1,17 @@
-# Claude Develop Environment OS
+# Claude OS
 
-OS-unabhängige Entwicklungs-Umgebung rund um Anthropic Claude. Tauri-GUI + Node-CLI + cloud-mount Vault-Sync.
+Selbst-gehostete, persistente Claude-Umgebung **mit MSP-Operations-Cockpit**: Vault-basierter Memory-Layer, Web-UI + Tauri-GUI + Node-CLI — plus ein Dashboard über Kundensysteme (NinjaOne / Firewalls / Backups / Tickets) und eine deterministische Wenn-Dann-Automations-Engine.
 
-> **Status:** v1.5.3 (siehe [`package.json`](package.json) für die kanonische Version, [`CHANGELOG.md`](CHANGELOG.md) für die Release-Historie). Alle 8 Phasen (0–7) shipped. CI grün auf ubuntu/win/macos × cli/rust-shell/gui-typecheck. Bundle pipeline grün — MSI (Windows), DMG (macOS x86_64 + aarch64 universal), AppImage (Linux) als Release-Assets. UI-Smoke confirmed (Windows): Dashboard rendert mit live RPC-Daten, alle 7 Views functional, Drag-Drop end-to-end (drag → inbox.import → chokidar → Tauri-Event-Banner) — siehe [`docs/migration-from-portable.md`](docs/migration-from-portable.md) für Setup, [`gui/README.md`](gui/README.md) für GUI-Build. 815/818 Tests grün (3 long-running gated hinter `RUN_SLOW_TESTS=1`). Tracker: [`tasks/todo.md`](tasks/todo.md).
+> **Status:** v1.9.4 (kanonische Version: [`package.json`](package.json), Release-Historie: [`CHANGELOG.md`](CHANGELOG.md)). **Primär-Distribution:** Headless-HTTP-Server + Web-UI auf Docker/Linux — siehe [`docs/server-deployment.md`](docs/server-deployment.md); Tauri-Desktop (Win/macOS/Linux) als Sekundär-Variante. 2000+ Vitest-Cases grün. Aktueller Schwerpunkt: das MSP-Operations-Cockpit (Plan + Phasen: [`tasks/phase-msp-cockpit.md`](tasks/phase-msp-cockpit.md)).
 >
 > Vorgänger: `claude-portable` (USB-only Variante). Die alten Launch-Scripts liegen in `legacy/` und sind nicht mehr aktiv.
 
 ## Was es ist
 
-Eine cross-Machine konsistente Claude-Umgebung mit einer einzigen Quelle: dem Cloud-Mount.
+Zwei Schichten in einem Repo:
+
+1. **Claude-Umgebung** — eine cross-Machine konsistente Claude-Umgebung mit einer einzigen Quelle: dem Cloud-Mount (Vault, Configs, Skills).
+2. **MSP-Operations-Cockpit** — admin-gated Dashboard über Kundensysteme via Read-Bridges (TANSS-Tickets, Veeam-Backups, Sophos-/Securepoint-Firewalls, NinjaOne-Geräte+Alerts) plus eine deterministische Automations-Engine (YAML-Regeln, Snapshot-Diff → Aktion; LLM nie autonom schreibend). Setup: [`docs/server-deployment.md`](docs/server-deployment.md) §MSP-Bridges.
 
 - **Vault, Configs, Skills, Plugin-Manifeste, inbox/outbox-Drops** leben im Cloud-Mount (OneDrive/Dropbox/Drive/rclone). Plain-Text + JSON-Lines. Sicher gegen File-by-File-Sync.
 - **Git-Metadaten, SQLite-Indizes, Logs, Secrets** leben **pro Maschine** ausserhalb des Mounts (`%APPDATA%/claude-os/` bzw. `~/.config/claude-os/` + OS-Keychain). Sicher gegen Repo-Korruption und Locking-Probleme.
