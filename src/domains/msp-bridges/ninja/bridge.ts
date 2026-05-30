@@ -105,6 +105,10 @@ export class NinjaBridge implements ReadBridge<NinjaStatus> {
     );
     if (!devicesResp.ok) {
       clearTimeout(timer);
+      // A 401/403 means the (possibly cached) token is dead — drop it so the
+      // next probe re-logins instead of re-presenting a revoked token for the
+      // rest of its lifetime.
+      if (devicesResp.error.kind === 'auth-failed') this.cache.invalidate();
       return done(customer, probedAt, start, devicesResp.error);
     }
     const devices = extractArray<NinjaDeviceRaw>(devicesResp.data);
@@ -128,9 +132,14 @@ export class NinjaBridge implements ReadBridge<NinjaStatus> {
     let alertCount: number | null = null;
     let actionableAlertCount: number | null = null;
     if (alertsResp.ok) {
-      const alerts = extractArray<NinjaAlertRaw>(alertsResp.data) ?? [];
-      alertCount = alerts.length;
-      actionableAlertCount = countActionableAlerts(alerts);
+      // Only count when the shape is recognised; an HTTP-200 with an unexpected
+      // body stays null ("unavailable") rather than masquerading as zero alerts
+      // — consistent with the alertCount contract and the devices path.
+      const alerts = extractArray<NinjaAlertRaw>(alertsResp.data);
+      if (alerts !== null) {
+        alertCount = alerts.length;
+        actionableAlertCount = countActionableAlerts(alerts);
+      }
     }
 
     return done<NinjaStatus>(customer, probedAt, start, {

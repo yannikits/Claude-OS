@@ -51,6 +51,13 @@ describe('evaluateRules', () => {
     expect(evaluateRules([disabled], [change()])).toEqual([]);
   });
 
+  it('does NOT gate on `armed` (forward-declaration no-op for the future write-action gate)', () => {
+    // `armed` is reserved for Phase MC-E (auto-execute gate for write actions);
+    // it must NOT suppress firing today. Lock that behaviour so the no-op is explicit.
+    const notArmed: Rule = { ...sophosOffline, armed: false };
+    expect(evaluateRules([notArmed], [change()])).toHaveLength(1);
+  });
+
   it('fires every action of every matching rule', () => {
     const multiAction: Rule = {
       ...sophosOffline,

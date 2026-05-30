@@ -278,6 +278,36 @@ describe('TanssBridge — apiBase override + secret-store resilience', () => {
     expect(probe.result.kind).toBe('auth-failed');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('tolerates null / non-object elements in the ticket array (never throws — ADR-0038)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ content: [{ id: 1, status: 'OPEN' }, null, 'x', 5] }));
+    const b = new TanssBridge({
+      serverUrl: SERVER,
+      getApiToken: async () => TOKEN,
+      fetch: fetchMock as unknown as typeof globalThis.fetch,
+    });
+    const probe = await b.probe(customerWithTanss());
+    expect(probe.result.kind).toBe('ok');
+    if (probe.result.kind === 'ok') {
+      expect(probe.result.data.totalCount).toBe(1); // only the valid object counts
+      expect(probe.result.data.openCount).toBe(1);
+    }
+  });
+
+  it('whitespace-only apiBase falls back to the /api/v1 default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(tanssWrapped([])));
+    const b = new TanssBridge({
+      serverUrl: SERVER,
+      apiBase: '   ',
+      getApiToken: async () => TOKEN,
+      fetch: fetchMock as unknown as typeof globalThis.fetch,
+    });
+    await b.probe(customerWithTanss(9));
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(`${SERVER}/api/v1/tickets/company/9`);
+  });
 });
 
 describe('TanssBridge + withAuditTrail integration', () => {
