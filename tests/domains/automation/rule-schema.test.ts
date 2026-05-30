@@ -31,6 +31,24 @@ describe('RuleSchema — valid inputs', () => {
     };
     expect(formatErrors(RuleSchema, fullRule)).toEqual([]);
   });
+
+  it('accepts the full BridgeCellResult status domain incl. rate-limited and error', () => {
+    const rule = {
+      ...minimalRule,
+      condition: {
+        statusIn: [
+          'ok',
+          'misconfigured',
+          'auth-failed',
+          'unreachable',
+          'rate-limited',
+          'timeout',
+          'error',
+        ],
+      },
+    };
+    expect(formatErrors(RuleSchema, rule)).toEqual([]);
+  });
 });
 
 describe('RuleSchema — invalid inputs', () => {

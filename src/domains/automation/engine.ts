@@ -55,6 +55,9 @@ export function startAutomationEngine(opts: AutomationEngineOpts): { stop: () =>
     if (stopped) return;
     try {
       const snapshot = await opts.getSnapshot();
+      // stop() may have fired while getSnapshot was in flight — honour the
+      // "no emit after stop()" contract instead of resuming with stale intent.
+      if (stopped) return;
       const changes = diffSnapshots(prev, snapshot);
       prev = snapshot;
       if (changes.length > 0) {

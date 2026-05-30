@@ -144,4 +144,37 @@ describe('startAutomationEngine', () => {
     await h.tickOnce(); // should be a no-op
     expect(h.emitted).toEqual([]);
   });
+
+  it('does not emit when stop() fires while a tick is mid-getSnapshot', async () => {
+    const ok = snap({ acme: { sophos: 'ok' } });
+    const down = snap({ acme: { sophos: 'unreachable' } });
+    let resolveSecond: (s: AggregateSnapshot) => void = () => {};
+    let call = 0;
+    let pending: (() => void | Promise<void>) | null = null;
+    const emitted: FiredAction[] = [];
+    const handle = startAutomationEngine({
+      loadRules: () => [sophosOffline],
+      getSnapshot: () => {
+        call += 1;
+        if (call === 1) return Promise.resolve(ok);
+        return new Promise<AggregateSnapshot>((r) => {
+          resolveSecond = r;
+        });
+      },
+      emit: (f) => emitted.push(f),
+      setTimeoutFn: (cb) => {
+        pending = cb;
+        return 1;
+      },
+      clearTimeoutFn: () => {
+        pending = null;
+      },
+    });
+    await pending?.(); // tick 1 — baseline (ok)
+    const t2 = pending?.(); // tick 2 — starts, blocks on the pending getSnapshot
+    handle.stop(); // stop() while tick 2 is mid-await
+    resolveSecond(down); // ok -> unreachable would normally fire
+    await t2;
+    expect(emitted).toEqual([]); // re-check after await suppresses the emit
+  });
 });

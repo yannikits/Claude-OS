@@ -48,7 +48,8 @@ Phasen sind sequenziell. Phase überspringen nur via ADR in `tasks/adr/`. Defini
 - Phase 8 GUI Polish (Tray, Auto-Update via Tauri-Updater, ADR-0028/0018) — **deprioritisiert 2026-05-27** zugunsten Web/Linux-Server-Distribution (siehe §"Distribution-Pivot 2026-05-27")
 - Phase 9 Side-Skills (House-Watch, separates Private-Repo per ADR-0030)
 - Phase-5-completion: Sandbox-Process-Isolation, Yannik-Signatur-Flow, Audit-Log-Format-Finalisierung
-- MSP-Bridge-Impls (separates `claude-os-msp` per ADR-0030)
+
+> **Drift-Korrektur 2026-05-31:** Der ADR-0030-Plan eines separaten privaten Repos `claude-os-msp` wurde **nicht ausgeführt**. Alle MSP-Bridges (TANSS/Veeam/Sophos/Securepoint/NinjaOne) sind **im Monorepo** unter `src/domains/msp-bridges/` shipped. Die Tabellen-/Zeilenverweise unten auf `claude-os-msp` sind insoweit historisch (ADR-0030-Amendment offen). Siehe `ARCHITECTURE.md` §2.
 
 **Phase Web vollständig shipped (2026-05-27):** Headless-HTTP-Variante mit Web-UI ist Primary-Distribution. Siehe `tasks/phase-server-web.md`. Tauri-Desktop bleibt funktional als Sekundär-Distribution.
 

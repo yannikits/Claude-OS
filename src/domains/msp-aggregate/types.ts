@@ -11,6 +11,8 @@
  */
 
 import type { NinjaStatus } from '../msp-bridges/ninja/types.js';
+import type { SecurepointStatus } from '../msp-bridges/securepoint/types.js';
+import type { SophosStatus } from '../msp-bridges/sophos/types.js';
 import type { TanssStatus } from '../msp-bridges/tanss/types.js';
 import type { BridgeKind } from '../msp-bridges/types.js';
 import type { VeeamStatus } from '../msp-bridges/veeam/types.js';
@@ -39,8 +41,9 @@ export interface CustomerHealthCells {
   readonly tanss?: BridgeCellResult<TanssStatus>;
   readonly veeam?: BridgeCellResult<VeeamStatus>;
   readonly ninja?: BridgeCellResult<NinjaStatus>;
-  // sophos / securepoint / m365 cells are written dynamically by the prober
-  // (keyed by bridge kind); their static typing is pending a follow-up.
+  readonly sophos?: BridgeCellResult<SophosStatus>;
+  readonly securepoint?: BridgeCellResult<SecurepointStatus>;
+  // m365 has no bridge yet; its cell is written dynamically by the prober if/when added.
 }
 
 export interface CustomerHealthRow {

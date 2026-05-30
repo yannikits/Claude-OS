@@ -181,4 +181,40 @@ describe('NinjaBridge.probe', () => {
     expect(probe.result.kind).toBe('auth-failed');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('invalidates the cached token on a 401 so the next probe re-logins', async () => {
+    let deviceCalls = 0;
+    let tokenCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/ws/oauth/token')) {
+        tokenCalls += 1;
+        return tokenResponse();
+      }
+      if (url.includes('/v2/devices')) {
+        deviceCalls += 1;
+        return deviceCalls === 2 ? new Response('', { status: 401 }) : jsonResponse(DEVICES);
+      }
+      if (url.includes('/v2/alerts')) return jsonResponse(ALERTS);
+      throw new Error(`unexpected url: ${url}`);
+    });
+    const bridge = makeBridge(fetchMock);
+    await bridge.probe(customerWithNinja()); // login #1, devices ok
+    const p2 = await bridge.probe(customerWithNinja()); // cached token, devices 401 -> invalidate
+    expect(p2.result.kind).toBe('auth-failed');
+    await bridge.probe(customerWithNinja()); // cache empty -> re-login
+    expect(tokenCalls).toBe(2);
+  });
+
+  it('alerts HTTP-200 with unexpected shape → alertCount null (not 0)', async () => {
+    const fetchMock = routedFetch({
+      devices: () => jsonResponse(DEVICES),
+      alerts: () => jsonResponse({ nope: true }),
+    });
+    const probe = await makeBridge(fetchMock).probe(customerWithNinja());
+    expect(probe.result.kind).toBe('ok');
+    if (probe.result.kind === 'ok') {
+      expect(probe.result.data.alertCount).toBeNull();
+      expect(probe.result.data.actionableAlertCount).toBeNull();
+    }
+  });
 });

@@ -86,18 +86,27 @@ export class TanssBridge implements ReadBridge<TanssStatus> {
 
 /** Default `/api/v1`; ensure a leading slash and strip a trailing one. */
 function normaliseApiBase(base: string | undefined): string {
-  const raw = (base ?? '/api/v1').trim();
+  // `|| '/api/v1'` also catches whitespace-only env values that trim to empty —
+  // `??` alone would forward "   " and collapse it to "" (dropping the default).
+  const raw = (base ?? '').trim() || '/api/v1';
   const withLead = raw.startsWith('/') ? raw : `/${raw}`;
   return withLead.endsWith('/') ? withLead.slice(0, -1) : withLead;
 }
 
-/** TANSS wraps most lists as `{ content: [...] }` but bare arrays occur too. */
+/**
+ * TANSS wraps most lists as `{ content: [...] }` but bare arrays occur too.
+ * Non-object elements (null, strings, numbers in a sparse/partial response) are
+ * filtered out so the defensive mapper never dereferences a non-object
+ * (ADR-0038: probe must never throw).
+ */
 function extractTickets(raw: unknown): TanssTicketRaw[] | null {
-  if (Array.isArray(raw)) return raw as TanssTicketRaw[];
-  if (raw && typeof raw === 'object' && Array.isArray((raw as { content?: unknown }).content)) {
-    return (raw as { content: TanssTicketRaw[] }).content;
-  }
-  return null;
+  const arr: unknown[] | null = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === 'object' && Array.isArray((raw as { content?: unknown }).content)
+      ? (raw as { content: unknown[] }).content
+      : null;
+  if (arr === null) return null;
+  return arr.filter((t): t is TanssTicketRaw => t !== null && typeof t === 'object');
 }
 
 function done<T>(
