@@ -31,6 +31,7 @@ import {
   VaultPage,
 } from './pages';
 import { AuditPage } from './pages/audit';
+import { AutomationPage } from './pages/automation';
 import { LoginPage } from './pages/login';
 import { MemoryPage } from './pages/memory';
 import { MspHealthPage } from './pages/msp-health';
@@ -68,6 +69,7 @@ const NAV: readonly NavEntry[] = [
   { to: '/secrets', label: 'Secrets', section: 'system', led: 'idle' },
   { to: '/audit', label: 'Audit-Log', section: 'system', led: 'idle', adminOnly: true },
   { to: '/msp-health', label: 'MSP Health', section: 'overview', led: 'idle', adminOnly: true },
+  { to: '/automation', label: 'Automation', section: 'system', led: 'idle', adminOnly: true },
   { to: '/settings', label: 'Settings', section: 'system', led: 'idle' },
 ];
 
@@ -481,6 +483,7 @@ function AuthenticatedApp({ authMode, onLogout, isAdmin }: AuthenticatedAppProps
               <Route path="secrets" element={<SecretsPage />} />
               {isAdmin && <Route path="audit" element={<AuditPage />} />}
               {isAdmin && <Route path="msp-health" element={<MspHealthPage />} />}
+              {isAdmin && <Route path="automation" element={<AutomationPage />} />}
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Routes>

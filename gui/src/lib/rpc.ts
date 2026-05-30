@@ -1282,3 +1282,59 @@ export async function mspHealthRefresh(): Promise<AggregateSnapshot> {
   }
   return (await res.json()) as AggregateSnapshot;
 }
+
+// --- Automation (Phase MC-B, read-only) -----------------------------------
+
+export interface AutomationAction {
+  readonly type: string;
+  readonly message: string;
+}
+
+export interface AutomationRule {
+  readonly id: string;
+  readonly description?: string;
+  readonly enabled?: boolean;
+  readonly armed?: boolean;
+  readonly trigger: { readonly bridge: string; readonly customers: 'all' | readonly string[] };
+  readonly condition: { readonly statusIn: readonly string[] };
+  readonly actions: readonly AutomationAction[];
+}
+
+export interface AutomationRuleIssue {
+  readonly file: string;
+  readonly message: string;
+}
+
+export interface AutomationRulesResponse {
+  readonly rules: readonly AutomationRule[];
+  readonly errors: readonly AutomationRuleIssue[];
+}
+
+export interface AutomationFiring {
+  readonly ruleId: string;
+  readonly slug: string;
+  readonly bridge: string;
+  readonly action: AutomationAction;
+  readonly firedAt: string;
+}
+
+export interface AutomationFiringsResponse {
+  readonly firings: readonly AutomationFiring[];
+}
+
+async function automationGet<T>(path: string): Promise<T> {
+  const res = await fetch(`/api/automation/${path}`, { credentials: 'same-origin' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`automation ${path} ${res.status}: ${text}`);
+  }
+  return (await res.json()) as T;
+}
+
+export function automationRules(): Promise<AutomationRulesResponse> {
+  return automationGet<AutomationRulesResponse>('rules');
+}
+
+export function automationFirings(): Promise<AutomationFiringsResponse> {
+  return automationGet<AutomationFiringsResponse>('firings');
+}

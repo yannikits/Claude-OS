@@ -91,6 +91,8 @@ house-watch/                          # Private repo (separat)
 └── src/                              # Immobilien-Crawler
 ```
 
+> **Stand 2026-05-30 — Drift-Hinweis:** Der oben skizzierte Public/Private-Split (separates Repo `claude-os-msp`, ADR-0030) wurde für die MSP-Bridges **nicht ausgeführt**. Tatsächlich liegen alle implementierten Bridges (TANSS/Veeam/Sophos/Securepoint) im **Monorepo** `yannikits/Claude-OS` unter `src/domains/msp-bridges/` (Phase 7-C/D). Neuer MSP-Code (Automations-Engine, Write-Actions, NinjaOne) kommt ebenfalls dorthin. Eine formale ADR-0030-Amendment steht aus. `house-watch` bleibt als separates Repo geplant.
+
 MSP-Bridges und House-Watch konsumieren `Claude-portable` als npm-Dependency oder Git-Submodule. Niemals umgekehrt.
 
 ## 3. Domain Boundaries (DDD)

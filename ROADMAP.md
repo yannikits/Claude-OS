@@ -62,6 +62,14 @@ Yannik priorisiert die **Web-Anwendung mit Linux-Server-OS** als Primary-Distrib
 - `docs/macos-gatekeeper.md` und `docs/windows-smartscreen.md` (geplant) bleiben als User-Workarounds dokumentiert; werden nicht aktiv obsoleted.
 - Linux-Build-Pfad (ADR-0018 AppImage-zsync) bleibt aktiv, weil er die Desktop-Variante für Linux-Self-Hoster abdeckt.
 
+## MSP-Cockpit-Pivot 2026-05-30
+
+Yannik weitet das MSP-Health-Dashboard (read-only) zum **MSP-Operations-Cockpit** aus:
+Automations-Engine (deterministisch, Claude nur Read/Suggest), TANSS-Write (Kommentar → Status),
+NinjaOne-Bridge + Script-Trigger, RBAC (Viewer/Operator/Admin). Plan + DoD je Sub-Phase:
+`tasks/phase-msp-cockpit.md` (Sub-Phasen MC-A..MC-I). Logische Fortsetzung von Phase 7 (MSP-Write).
+Claude OS bleibt Kern, das Cockpit wird Flaggschiff-Modul (kein Identitätswechsel).
+
 ## Phasen
 
 | Phase | Inhalt | Status | DoD |

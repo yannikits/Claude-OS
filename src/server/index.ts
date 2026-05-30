@@ -11,6 +11,7 @@
  * @module @server
  */
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import fastifyCors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
@@ -18,8 +19,18 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 import { resolveRoot } from '../core/environment/index.js';
 import { resolveMachinePaths } from '../core/paths/index.js';
+import {
+  type ActionSink,
+  createFiredActionLog,
+  dispatchFiredAction,
+  type FiredActionLog,
+  loadRules,
+  startAutomationEngine,
+} from '../domains/automation/index.js';
 import { McpTrustStore, mcpTrustPathFor, startMcpWatcher } from '../domains/mcp-clients/index.js';
+import type { MspHealthAggregator } from '../domains/msp-aggregate/index.js';
 import { startScheduler } from '../domains/scheduler/index.js';
+import { resolveVaultRoot } from '../domains/workspace/index.js';
 import { ChatSessions } from '../sidecar/chat-sessions.js';
 import { createSidecarLogger } from '../sidecar/logger.js';
 import { registerMethods } from '../sidecar/methods.js';
@@ -33,6 +44,7 @@ import { createNotificationBus, registerSseRoute } from './events-sse.js';
 import { registerAdminRoutes } from './routes-admin.js';
 import { registerAuditRoutes } from './routes-audit.js';
 import { registerAuthRoutes } from './routes-auth.js';
+import { registerAutomationRoutes } from './routes-automation.js';
 import { registerMspHealthRoutes } from './routes-msp-health.js';
 import { registerInboxUpload, registerRpcRoutes } from './rpc-http.js';
 import { registerStaticRoutes } from './static.js';
@@ -52,11 +64,20 @@ interface BackgroundServices {
   readonly mcpWatcher: ReturnType<typeof startMcpWatcher> | null;
   readonly schedulerStop: () => Promise<void>;
   readonly mcpWatcherStop: () => Promise<void>;
+  readonly automationStop: () => void;
+}
+
+/** Wiring for the automation engine; null disables it (no aggregator / no vault). */
+interface AutomationWiring {
+  readonly aggregator: MspHealthAggregator;
+  readonly rulesDir: string;
+  readonly firedLog: FiredActionLog;
 }
 
 async function startBackgroundServices(
   emit: (method: string, params: unknown) => void,
   logger: ReturnType<typeof createSidecarLogger> extends Promise<infer L> ? L : never,
+  automation: AutomationWiring | null,
 ): Promise<BackgroundServices> {
   const chatSessions = new ChatSessions(emit);
   logger.logger.info('server: chat-sessions ready');
@@ -88,6 +109,44 @@ async function startBackgroundServices(
     emit: (event) => emit('schedule://event', event),
   });
   logger.logger.info('server: scheduler runner started');
+
+  // Automation engine (Phase MC-B): poll the cached aggregate snapshot, diff
+  // against the prior tick, evaluate rules, dispatch fired actions. Only runs
+  // when MSP-health is configured (aggregator present) and the vault resolves.
+  let automationStop: () => void = () => {
+    /* no-op when automation disabled */
+  };
+  if (automation !== null) {
+    const sink: ActionSink = {
+      alert: (fired) => emit('automation://alert', fired),
+      audit: (fired) =>
+        logger.logger.info({ automation: fired }, 'automation: rule fired (audit-log action)'),
+    };
+    const engine = startAutomationEngine({
+      loadRules: () => {
+        const { rules, errors } = loadRules(automation.rulesDir);
+        for (const issue of errors) {
+          logger.logger.warn(
+            { file: issue.file, reason: issue.message },
+            'automation: skipping invalid rule file',
+          );
+        }
+        return rules;
+      },
+      getSnapshot: () => automation.aggregator.getSnapshot(),
+      emit: (fired) => {
+        automation.firedLog.record(fired);
+        dispatchFiredAction(fired, sink);
+      },
+      onError: (err) =>
+        logger.logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'automation: tick failed (snapshot unavailable) — retrying next tick',
+        ),
+    });
+    automationStop = engine.stop;
+    logger.logger.info({ rulesDir: automation.rulesDir }, 'server: automation engine started');
+  }
 
   const probeTimeoutFromEnv = Number.parseInt(process.env.CLAUDE_OS_MCP_PROBE_TIMEOUT_MS ?? '', 10);
   const probeTimeoutMs =
@@ -128,6 +187,7 @@ async function startBackgroundServices(
     mcpWatcher,
     schedulerStop: () => schedulerHandle.stop(),
     mcpWatcherStop,
+    automationStop,
   };
 }
 
@@ -167,7 +227,28 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
   const dispatcher = new RpcDispatcher();
   dispatcher.register('ping', () => ({ pong: true, ts: Date.now() }));
 
-  const services = await startBackgroundServices(emit, sidecarLog);
+  // Automation wiring: only when MSP-health is configured (aggregator owns the
+  // probe cache) AND the vault resolves (rules live there). Either missing →
+  // engine stays off. Vault resolution is best-effort: a headless server
+  // without CLAUDE_OS_VAULT_PATH simply runs without automation.
+  let automation: AutomationWiring | null = null;
+  if (config.mspHealth !== undefined) {
+    try {
+      const vaultRoot = resolveVaultRoot();
+      automation = {
+        aggregator: config.mspHealth,
+        rulesDir: join(vaultRoot, 'Claude-OS', 'automation', 'rules'),
+        firedLog: createFiredActionLog(),
+      };
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'server: automation engine disabled (vault not configured)',
+      );
+    }
+  }
+
+  const services = await startBackgroundServices(emit, sidecarLog, automation);
 
   registerMethods(dispatcher, {
     chatSessions: services.chatSessions,
@@ -237,6 +318,13 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
           aggregator: config.mspHealth,
         });
       }
+      if (automation !== null) {
+        registerAutomationRoutes(fastify, {
+          adminEmails: config.multiUser.adminEmails,
+          rulesDir: automation.rulesDir,
+          firedLog: automation.firedLog,
+        });
+      }
       log.info(
         {
           adminCount: config.multiUser.adminEmails.length,
@@ -298,6 +386,7 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
       await fastify.close();
       await services.chatSessions.shutdownAll();
       await services.ptyChatSessions?.shutdownAll();
+      services.automationStop();
       await services.schedulerStop();
       await services.mcpWatcherStop();
       await services.watchers?.close();
