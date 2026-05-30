@@ -163,9 +163,11 @@ async function maybeMspHealthAggregator(
   // TANSS — env-driven server URL + single apiToken
   const tanssUrl = process.env.CLAUDE_OS_TANSS_SERVER_URL;
   if (tanssUrl !== undefined && tanssUrl.length > 0) {
+    const tanssApiBase = process.env.CLAUDE_OS_TANSS_API_BASE;
     const tanss = new TanssBridge({
       serverUrl: tanssUrl,
       getApiToken: () => secrets.get('tanss/apiToken'),
+      ...(tanssApiBase !== undefined && tanssApiBase.length > 0 ? { apiBase: tanssApiBase } : {}),
     });
     registry.register(withAuditTrail(tanss, audit));
     bridgeCount += 1;

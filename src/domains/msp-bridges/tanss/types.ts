@@ -49,6 +49,13 @@ export interface TanssTicketRaw {
 export interface TanssBridgeConfig {
   /** Origin only — paths are appended. Trailing slash is normalised away. */
   readonly serverUrl: string;
+  /**
+   * API base path prepended to `/tickets/company/{id}`. Default `/api/v1`.
+   * Some TANSS installs serve the REST API under `/backend/api/v1` — set this
+   * (or `$CLAUDE_OS_TANSS_API_BASE`) to match. Leading slash added + trailing
+   * slash normalised away.
+   */
+  readonly apiBase?: string;
   /** Called on every probe. Returns null when secrets-backend has no token. */
   readonly getApiToken: () => Promise<string | null>;
   /** Injectable for tests. Defaults to `globalThis.fetch`. */

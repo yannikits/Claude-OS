@@ -28,9 +28,11 @@ import type { TanssBridgeConfig, TanssStatus, TanssTicketRaw } from './types.js'
 export class TanssBridge implements ReadBridge<TanssStatus> {
   readonly kind: BridgeKind = 'tanss';
   private readonly http: TanssHttpClient;
+  private readonly apiBase: string;
 
   constructor(private readonly config: TanssBridgeConfig) {
     this.http = createTanssHttpClient(config);
+    this.apiBase = normaliseApiBase(config.apiBase);
   }
 
   async probe(customer: CustomerRecord): Promise<BridgeProbe<TanssStatus>> {
@@ -44,7 +46,18 @@ export class TanssBridge implements ReadBridge<TanssStatus> {
       });
     }
 
-    const apiToken = await this.config.getApiToken();
+    let apiToken: string | null;
+    try {
+      apiToken = await this.config.getApiToken();
+    } catch (err) {
+      // ADR-0038: never throw. A locked/misconfigured secrets-backend
+      // (e.g. EncryptedFileStore without $CLAUDE_OS_SECRETS_KEY) must surface
+      // as a clean auth-failed, not a thrown exception.
+      return done(customer, probedAt, start, {
+        kind: 'auth-failed',
+        message: `secrets-backend error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
     if (apiToken === null || apiToken.length === 0) {
       return done(customer, probedAt, start, {
         kind: 'auth-failed',
@@ -52,7 +65,7 @@ export class TanssBridge implements ReadBridge<TanssStatus> {
       });
     }
 
-    const path = `/api/v1/tickets/company/${ids.customerId}`;
+    const path = `${this.apiBase}/tickets/company/${ids.customerId}`;
     const response = await this.http.getJson<unknown>(path, apiToken);
     if (!response.ok) {
       return done(customer, probedAt, start, response.error);
@@ -69,6 +82,13 @@ export class TanssBridge implements ReadBridge<TanssStatus> {
     const status = mapTanssTickets(tickets);
     return done<TanssStatus>(customer, probedAt, start, { kind: 'ok', data: status });
   }
+}
+
+/** Default `/api/v1`; ensure a leading slash and strip a trailing one. */
+function normaliseApiBase(base: string | undefined): string {
+  const raw = (base ?? '/api/v1').trim();
+  const withLead = raw.startsWith('/') ? raw : `/${raw}`;
+  return withLead.endsWith('/') ? withLead.slice(0, -1) : withLead;
 }
 
 /** TANSS wraps most lists as `{ content: [...] }` but bare arrays occur too. */

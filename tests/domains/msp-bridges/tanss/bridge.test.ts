@@ -226,6 +226,60 @@ describe('TanssBridge.probe', () => {
   });
 });
 
+describe('TanssBridge — apiBase override + secret-store resilience', () => {
+  it('uses a configured apiBase instead of the default /api/v1', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(tanssWrapped([])));
+    const b = new TanssBridge({
+      serverUrl: SERVER,
+      apiBase: '/backend/api/v1',
+      getApiToken: async () => TOKEN,
+      fetch: fetchMock as unknown as typeof globalThis.fetch,
+    });
+    await b.probe(customerWithTanss(42));
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(`${SERVER}/backend/api/v1/tickets/company/42`);
+  });
+
+  it('normalises a trailing slash on apiBase', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(tanssWrapped([])));
+    const b = new TanssBridge({
+      serverUrl: SERVER,
+      apiBase: '/backend/api/v1/',
+      getApiToken: async () => TOKEN,
+      fetch: fetchMock as unknown as typeof globalThis.fetch,
+    });
+    await b.probe(customerWithTanss(7));
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(`${SERVER}/backend/api/v1/tickets/company/7`);
+  });
+
+  it('defaults to /api/v1 when apiBase is omitted', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(tanssWrapped([])));
+    const b = new TanssBridge({
+      serverUrl: SERVER,
+      getApiToken: async () => TOKEN,
+      fetch: fetchMock as unknown as typeof globalThis.fetch,
+    });
+    await b.probe(customerWithTanss(5));
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(`${SERVER}/api/v1/tickets/company/5`);
+  });
+
+  it('returns auth-failed (never throws) when getApiToken() rejects — ADR-0038', async () => {
+    const fetchMock = vi.fn();
+    const b = new TanssBridge({
+      serverUrl: SERVER,
+      getApiToken: async () => {
+        throw new Error('Encrypted-file backend is locked: no master key');
+      },
+      fetch: fetchMock as unknown as typeof globalThis.fetch,
+    });
+    const probe = await b.probe(customerWithTanss());
+    expect(probe.result.kind).toBe('auth-failed');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('TanssBridge + withAuditTrail integration', () => {
   let dir: string;
   beforeEach(() => {

@@ -117,9 +117,11 @@ async function actProbeTanss(slug: string, opts: ProbeOpts, command: Command): P
   }
 
   const store = createSecretStore();
+  const apiBase = process.env.CLAUDE_OS_TANSS_API_BASE;
   const bridge = new TanssBridge({
     serverUrl,
     getApiToken: () => store.get(TANSS_API_TOKEN_KEY),
+    ...(apiBase !== undefined && apiBase.length > 0 ? { apiBase } : {}),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
 
