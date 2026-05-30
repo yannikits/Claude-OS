@@ -9,6 +9,7 @@ import {
   checkClaudeBinary,
   checkGitAvailable,
   checkMountReachable,
+  checkNinjaConfig,
   checkNodeVersion,
   checkSecurepointConfig,
   checkServerEnv,
@@ -66,6 +67,7 @@ export async function runDoctor(
       checkVeeamConfig(),
       checkSophosConfig(),
       checkSecurepointConfig(),
+      checkNinjaConfig(),
     ]);
     return summarize(checks, Date.now() - startedAt);
   }
@@ -90,6 +92,7 @@ export async function runDoctor(
     checkVeeamConfig(),
     checkSophosConfig(),
     checkSecurepointConfig(),
+    checkNinjaConfig(),
   ]);
   return summarize([rootResolutionFail, ...independent], Date.now() - startedAt);
 }

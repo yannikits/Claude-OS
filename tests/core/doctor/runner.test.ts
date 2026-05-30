@@ -16,15 +16,16 @@ describe('runDoctor', () => {
     if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('runs all 13 checks when root resolves', async () => {
+  it('runs all 14 checks when root resolves', async () => {
     const report = await runDoctor({ explicitRoot: tmpRoot });
-    expect(report.checks).toHaveLength(13);
+    expect(report.checks).toHaveLength(14);
     const names = report.checks.map((c) => c.name).sort();
     expect(names).toEqual(
       [
         'claude-binary',
         'git-available',
         'mount-reachable',
+        'ninja-config',
         'node-version',
         'securepoint-config',
         'server-env',
@@ -58,8 +59,8 @@ describe('runDoctor', () => {
     const bogus = join(tmpRoot, 'does-not-exist');
     const report = await runDoctor({ explicitRoot: bogus });
     // root-resolution + node + git + windows + server-env + signing + user-store +
-    // tanss + veeam + sophos + securepoint = 11
-    expect(report.checks).toHaveLength(11);
+    // tanss + veeam + sophos + securepoint + ninja = 12
+    expect(report.checks).toHaveLength(12);
   });
 
   it('summary counts match check severities', async () => {

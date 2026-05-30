@@ -23,6 +23,7 @@ import {
   mspHealthConfig,
   mspHealthRefresh,
   mspHealthRows,
+  type NinjaCellData,
   type SecurepointCellData,
   type SophosCellData,
   type TanssCellData,
@@ -36,6 +37,7 @@ const BRIDGE_LABEL: Record<BridgeKind, string> = {
   sophos: 'SOPHOS',
   securepoint: 'SECUREPOINT',
   m365: 'M365',
+  ninja: 'NINJA',
 };
 
 function formatAge(ageMs: number | null): string {
@@ -108,6 +110,30 @@ function SecurepointCell({ cell }: { cell: BridgeCellResult<SecurepointCellData>
         {' '}
         · license {d.licenseStatus}
         {d.licenseDaysRemaining !== null ? ` (${d.licenseDaysRemaining}d)` : ''}
+      </span>
+    </span>
+  );
+}
+
+function NinjaCell({ cell }: { cell: BridgeCellResult<NinjaCellData> | undefined }) {
+  if (cell === undefined) return <span className="cell-dim">—</span>;
+  if (cell.kind !== 'ok') {
+    return (
+      <span className="cell-status">
+        <strong>{cell.kind}</strong>
+        {'message' in cell && cell.message !== undefined && (
+          <span className="cell-msg"> · {cell.message}</span>
+        )}
+      </span>
+    );
+  }
+  const d = cell.data;
+  return (
+    <span className="cell-status">
+      <strong>{d.deviceCount}</strong> dev
+      <span className={`cell-msg${d.offlineCount > 0 ? ' cell-msg-warn' : ''}`}>
+        {' '}
+        · {d.offlineCount} off · {d.alertCount ?? 'n/a'} alerts
       </span>
     </span>
   );
@@ -425,6 +451,9 @@ function RowGroup({ row, bridges, expanded, onToggle }: RowGroupProps) {
               )}
               {b === 'securepoint' && (
                 <SecurepointCell cell={cell as BridgeCellResult<SecurepointCellData> | undefined} />
+              )}
+              {b === 'ninja' && (
+                <NinjaCell cell={cell as BridgeCellResult<NinjaCellData> | undefined} />
               )}
             </td>
           );

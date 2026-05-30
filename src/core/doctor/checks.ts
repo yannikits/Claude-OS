@@ -315,6 +315,69 @@ export async function checkTanssConfig(
 }
 
 /**
+ * NinjaOne-Bridge config pre-flight (Phase MC-F).
+ *
+ * Base URL has a default (eu.ninjarmm.com) so it is not required; the gate is
+ * the two OAuth-client secrets. Three states:
+ *   - neither secret set → ok (bridge not configured)
+ *   - both secrets set   → ok (configured)
+ *   - one of two         → warn (half-finished setup)
+ */
+export async function checkNinjaConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  secretsProbe?: (key: string) => Promise<string | null>,
+): Promise<CheckResult> {
+  return timed('ninja-config', async () => {
+    const baseUrl = (env.CLAUDE_OS_NINJA_BASE_URL ?? 'https://eu.ninjarmm.com').trim();
+    const probe =
+      secretsProbe ??
+      (async (k: string) => {
+        const { createSecretStore } = await import('../../domains/secrets/index.js');
+        return createSecretStore({ env }).get(k);
+      });
+    let clientId: string | null = null;
+    let clientSecret: string | null = null;
+    try {
+      [clientId, clientSecret] = await Promise.all([
+        probe('ninja/clientId'),
+        probe('ninja/clientSecret'),
+      ]);
+    } catch (err) {
+      return {
+        name: 'ninja-config',
+        severity: 'warn',
+        message: 'secrets-store probe failed — cannot verify ninja credentials',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    const hasId = clientId !== null && clientId.length > 0;
+    const hasSecret = clientSecret !== null && clientSecret.length > 0;
+
+    if (!hasId && !hasSecret) {
+      return {
+        name: 'ninja-config',
+        severity: 'ok',
+        message: 'NinjaOne bridge not configured (skipped — no client credentials)',
+      };
+    }
+    if (hasId && hasSecret) {
+      return {
+        name: 'ninja-config',
+        severity: 'ok',
+        message: `NinjaOne bridge configured (base=${baseUrl})`,
+      };
+    }
+    return {
+      name: 'ninja-config',
+      severity: 'warn',
+      message: 'NinjaOne credentials incomplete — set BOTH ninja/clientId and ninja/clientSecret',
+      hint: 'claude-os secrets set ninja/clientId <id>  +  claude-os secrets set ninja/clientSecret <secret>',
+    };
+  });
+}
+
+/**
  * Veeam-Bridges config pre-flight (ADR-0040, Phase 7-C).
  *
  * Per-customer-VBR architecture means there's no single env var to check.

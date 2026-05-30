@@ -18,6 +18,7 @@ import { resolveRoot } from '../../core/environment/index.js';
 import { resolveMachinePaths } from '../../core/paths/index.js';
 import { AggregateCache, MspHealthAggregator } from '../../domains/msp-aggregate/index.js';
 import { BridgeRegistry, withAuditTrail } from '../../domains/msp-bridges/index.js';
+import { NinjaBridge } from '../../domains/msp-bridges/ninja/index.js';
 import { SecurepointBridge } from '../../domains/msp-bridges/securepoint/index.js';
 import { SophosBridge } from '../../domains/msp-bridges/sophos/index.js';
 import { TanssBridge } from '../../domains/msp-bridges/tanss/index.js';
@@ -236,6 +237,24 @@ async function maybeMspHealthAggregator(
       insecureTls: process.env.CLAUDE_OS_VEEAM_INSECURE_TLS === '1',
     });
     registry.register(withAuditTrail(veeam, audit));
+    bridgeCount += 1;
+  }
+
+  // NinjaOne — register iff any customer has bridges.ninja. One OAuth client
+  // app for the whole MSP; base URL via env (default EU).
+  if (customers.some((c) => c.bridges?.ninja !== undefined)) {
+    const ninjaBaseUrl = process.env.CLAUDE_OS_NINJA_BASE_URL ?? 'https://eu.ninjarmm.com';
+    const ninja = new NinjaBridge({
+      baseUrl: ninjaBaseUrl,
+      getCredentials: async () => {
+        const [id, secret] = await Promise.all([
+          secrets.get('ninja/clientId'),
+          secrets.get('ninja/clientSecret'),
+        ]);
+        return id !== null && secret !== null ? { clientId: id, clientSecret: secret } : null;
+      },
+    });
+    registry.register(withAuditTrail(ninja, audit));
     bridgeCount += 1;
   }
 

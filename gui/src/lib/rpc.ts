@@ -1158,7 +1158,7 @@ export function auditExport(
 // MSP-Health (Phase 7-E, ADR-0041) — admin-gated GET /api/msp-health/*
 // ---------------------------------------------------------------------------
 
-export type BridgeKind = 'tanss' | 'veeam' | 'sophos' | 'securepoint' | 'm365';
+export type BridgeKind = 'tanss' | 'veeam' | 'sophos' | 'securepoint' | 'm365' | 'ninja';
 
 export type BridgeCellResult<T> =
   | {
@@ -1228,11 +1228,18 @@ export interface SecurepointCellData {
   readonly additionalMetrics: readonly { readonly name: string; readonly value: number }[];
 }
 
+export interface NinjaCellData {
+  readonly deviceCount: number;
+  readonly offlineCount: number;
+  readonly alertCount: number | null;
+}
+
 export interface CustomerHealthCells {
   readonly tanss?: BridgeCellResult<TanssCellData>;
   readonly veeam?: BridgeCellResult<VeeamCellData>;
   readonly sophos?: BridgeCellResult<SophosCellData>;
   readonly securepoint?: BridgeCellResult<SecurepointCellData>;
+  readonly ninja?: BridgeCellResult<NinjaCellData>;
 }
 
 export interface CustomerHealthRow {

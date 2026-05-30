@@ -15,6 +15,7 @@ import {
   type CustomerRecord,
   CustomerSchemaError,
   type M365BridgeIds,
+  type NinjaBridgeIds,
   type SecurepointBridgeIds,
   type SophosBridgeIds,
   type TanssBridgeIds,
@@ -30,7 +31,7 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   'notes',
 ]);
 
-const KNOWN_BRIDGE_KINDS = new Set(['tanss', 'veeam', 'sophos', 'securepoint', 'm365']);
+const KNOWN_BRIDGE_KINDS = new Set(['tanss', 'veeam', 'sophos', 'securepoint', 'm365', 'ninja']);
 
 export interface ValidateOpts {
   /** Override slug from filesystem (yaml's `slug:` field must then match this). */
@@ -150,7 +151,25 @@ function readBridges(raw: unknown, slug: string): NonNullable<CustomerRecord['br
     ...(b.sophos !== undefined ? { sophos: readSophos(b.sophos, slug) } : {}),
     ...(b.securepoint !== undefined ? { securepoint: readSecurepoint(b.securepoint, slug) } : {}),
     ...(b.m365 !== undefined ? { m365: readM365(b.m365, slug) } : {}),
+    ...(b.ninja !== undefined ? { ninja: readNinja(b.ninja, slug) } : {}),
   };
+}
+
+function readNinja(raw: unknown, slug: string): NinjaBridgeIds {
+  const b = asObject(raw, slug, 'bridges.ninja');
+  const organizationId = b.organizationId;
+  if (
+    typeof organizationId !== 'number' ||
+    !Number.isInteger(organizationId) ||
+    organizationId <= 0
+  ) {
+    throw new CustomerSchemaError(
+      slug,
+      'bridges.ninja.organizationId',
+      'bridges.ninja.organizationId must be a positive integer',
+    );
+  }
+  return { organizationId };
 }
 
 function readTanss(raw: unknown, slug: string): TanssBridgeIds {

@@ -14,7 +14,7 @@
  */
 import type { CustomerRecord } from '../msp-customers/index.js';
 
-export type BridgeKind = 'tanss' | 'veeam' | 'sophos' | 'securepoint' | 'm365';
+export type BridgeKind = 'tanss' | 'veeam' | 'sophos' | 'securepoint' | 'm365' | 'ninja';
 
 /**
  * Discriminated result. Operator-facing — `kind` drives the UI tinting

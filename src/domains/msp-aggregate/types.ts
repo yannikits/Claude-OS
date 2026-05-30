@@ -10,6 +10,7 @@
  * @module @domains/msp-aggregate/types
  */
 
+import type { NinjaStatus } from '../msp-bridges/ninja/types.js';
 import type { TanssStatus } from '../msp-bridges/tanss/types.js';
 import type { BridgeKind } from '../msp-bridges/types.js';
 import type { VeeamStatus } from '../msp-bridges/veeam/types.js';
@@ -37,7 +38,9 @@ export type BridgeCellResult<T> =
 export interface CustomerHealthCells {
   readonly tanss?: BridgeCellResult<TanssStatus>;
   readonly veeam?: BridgeCellResult<VeeamStatus>;
-  // 7-D will add: sophos, securepoint, m365
+  readonly ninja?: BridgeCellResult<NinjaStatus>;
+  // sophos / securepoint / m365 cells are written dynamically by the prober
+  // (keyed by bridge kind); their static typing is pending a follow-up.
 }
 
 export interface CustomerHealthRow {

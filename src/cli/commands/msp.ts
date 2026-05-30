@@ -14,6 +14,8 @@
 import { join } from 'node:path';
 import type { Command } from 'commander';
 import { resolveRoot } from '../../core/environment/index.js';
+import { NinjaBridge } from '../../domains/msp-bridges/ninja/index.js';
+import type { NinjaCredentials } from '../../domains/msp-bridges/ninja/types.js';
 import { SecurepointBridge } from '../../domains/msp-bridges/securepoint/index.js';
 import { SophosBridge } from '../../domains/msp-bridges/sophos/index.js';
 import type { SophosBridgeConfig } from '../../domains/msp-bridges/sophos/types.js';
@@ -46,6 +48,22 @@ interface ProbeVeeamOpts {
   readonly apiVersion?: string;
   readonly insecureTls?: boolean;
   readonly timeoutMs?: string;
+}
+
+interface ProbeNinjaOpts {
+  readonly baseUrl?: string;
+  readonly timeoutMs?: string;
+}
+
+const NINJA_DEFAULT_BASE_URL = 'https://eu.ninjarmm.com';
+
+async function getNinjaCredsFromStore(store: SecretStore): Promise<NinjaCredentials | null> {
+  const [clientId, clientSecret] = await Promise.all([
+    store.get('ninja/clientId'),
+    store.get('ninja/clientSecret'),
+  ]);
+  if (clientId === null || clientSecret === null) return null;
+  return { clientId, clientSecret };
 }
 
 async function getVeeamCredsFromStore(
@@ -376,10 +394,67 @@ async function actProbeSecurepoint(
   process.exit(probe.result.kind === 'ok' ? 0 : 1);
 }
 
+async function actProbeNinja(slug: string, opts: ProbeNinjaOpts, command: Command): Promise<void> {
+  const globals = command.optsWithGlobals<GlobalOpts>();
+  const json = globals.json === true;
+
+  let timeoutMs: number | undefined;
+  try {
+    timeoutMs = parseTimeout(opts.timeoutMs);
+  } catch (err) {
+    printErr(`msp probe ninja: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+
+  const vaultRoot = resolveVaultRoot(globals);
+  const repo = new CustomerRepository({ vaultRoot, autoCreate: false });
+  const customer = await repo.get(slug);
+  if (customer === null) {
+    printErr(
+      `msp probe ninja: customer "${slug}" not found at vault/workspaces/msp-customers/${slug}/`,
+    );
+    process.exit(1);
+  }
+  if (!customer.bridges?.ninja) {
+    printErr(`msp probe ninja: customer "${slug}" has no bridges.ninja in customer.yaml`);
+    process.exit(1);
+  }
+
+  const store = createSecretStore();
+  const baseUrl = opts.baseUrl ?? process.env.CLAUDE_OS_NINJA_BASE_URL ?? NINJA_DEFAULT_BASE_URL;
+
+  const bridge = new NinjaBridge({
+    baseUrl,
+    getCredentials: () => getNinjaCredsFromStore(store),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  });
+
+  const probe = await bridge.probe(customer);
+
+  if (json) {
+    printJson(probe);
+    process.exit(probe.result.kind === 'ok' ? 0 : 1);
+  }
+
+  printLine(`[${probe.result.kind === 'ok' ? 'OK' : 'FAIL'}] ninja.probe ${slug}`);
+  printLine(`  bridgeKind=${probe.bridgeKind}  durationMs=${probe.durationMs}  base=${baseUrl}`);
+  printLine(`  result.kind=${probe.result.kind}`);
+  if (probe.result.kind === 'ok') {
+    const d = probe.result.data;
+    printLine(
+      `  devices=${d.deviceCount}  offline=${d.offlineCount}  alerts=${d.alertCount ?? 'n/a'}`,
+    );
+  } else if ('message' in probe.result && probe.result.message !== undefined) {
+    printLine(`  message=${probe.result.message}`);
+  }
+
+  process.exit(probe.result.kind === 'ok' ? 0 : 1);
+}
+
 export function registerMspCommand(program: Command): void {
   const msp = program
     .command('msp')
-    .description('MSP-Health Read-Bridges (TANSS, Veeam, Sophos, Securepoint, M365)');
+    .description('MSP-Health Read-Bridges (TANSS, Veeam, Sophos, Securepoint, NinjaOne, M365)');
 
   const probe = msp.command('probe').description('Probe a bridge for one customer (read-only)');
 
@@ -446,6 +521,23 @@ export function registerMspCommand(program: Command): void {
         await actProbeVeeam(slug, opts, command);
       } catch (err) {
         printErr(`msp probe veeam: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
+  probe
+    .command('ninja <slug>')
+    .description('Probe the NinjaOne Read-Bridge for the customer with given slug')
+    .option(
+      '--base-url <url>',
+      'Override $CLAUDE_OS_NINJA_BASE_URL (default https://eu.ninjarmm.com)',
+    )
+    .option('--timeout-ms <ms>', 'Override request timeout (default 15000)')
+    .action(async (slug: string, opts: ProbeNinjaOpts, command: Command) => {
+      try {
+        await actProbeNinja(slug, opts, command);
+      } catch (err) {
+        printErr(`msp probe ninja: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
     });
