@@ -73,12 +73,14 @@ Kann parallel zu MC-A starten (keine Write-Abhängigkeit). Das architektonische 
 
 - [x] `src/domains/automation/` Domain angelegt: Schema + Loader + State-Diff + Evaluator (Commits 448aa70, e3f0cc0, + dieser)
 - [x] YAML-Rules-Schema (TypeBox): `trigger` (bridge+customers), `condition` (statusIn), `actions` (v1 non-write), `armed` — TDD, 8 Tests grün (2026-05-30)
-- [~] Rules-Loader liest `rules/*.yaml`, parst + validiert, resilient (Issues sammeln statt werfen) — `loadRules(dir)` + 6 Tests grün. Offen: dünner Workspace→rules-dir-Resolver (Vault-Wiring).
-- [~] Poll-Diff-Detektor: `diffSnapshots(prev, current)` (reine Funktion, baseline-safe, dynamische Bridge-Iteration) + 5 Tests grün. Offen: Scheduler-Tick-Wiring + Snapshot-State-Holding zwischen Ticks.
-- [~] Regel-Evaluator: `evaluateRules(rules, changes)` (reine Funktion: Trigger/Customer/Status-Match → FiredAction[]) + 6 Tests grün. Offen: Action-Dispatch-Wiring (Emit/SSE) — separater Integrationsschritt.
+- [x] Rules-Loader liest `rules/*.yaml`, parst + validiert, resilient (Issues sammeln statt werfen) — `loadRules(dir)` + 6 Tests grün. rulesDir server-seitig `<vault>/Claude-OS/automation/rules`.
+- [x] Poll-Diff-Detektor: `diffSnapshots(prev, current)` (reine Funktion, baseline-safe, dynamische Bridge-Iteration) + 5 Tests grün.
+- [x] Regel-Evaluator: `evaluateRules(rules, changes)` (reine Funktion: Trigger/Customer/Status-Match → FiredAction[]) + 6 Tests grün.
+- [x] Engine-Runner `startAutomationEngine` (Tick-Loop, hält prev-Snapshot, reused Aggregator-Cache via `getSnapshot`, resilient) + 5 Tests; `dispatchFiredAction` routet nach Action-Typ + 3 Tests.
 - [x] Nur ungefährliche Aktionen: Schema erlaubt v1 ausschließlich `dashboard-alert`, `notify`, `audit-log` (kein Write nach außen)
-- [ ] UI: "Aktive Regeln" + "Letzte Auslösungen"-Ansicht (read-only)
-- [ ] Verdrahtung: Scheduler-Tick → Aggregator-Snapshot → diffSnapshots → evaluateRules → Action-Dispatch (schließt MC-B ab)
+- [x] Verdrahtung: Server bootet Engine in `startBackgroundServices` (nur wenn Aggregator + Vault da); Sink: `automation://alert`-SSE bzw. Audit-Log. tsc/biome/Suite grün (2017 passed).
+- [ ] UI: "Aktive Regeln" + "Letzte Auslösungen"-Ansicht (read-only) — einziger offener MC-B-Punkt
+- [ ] Sidecar/Desktop-Boot der Engine (heute nur Server-Variante) — später
 
 **DoD:** Eine YAML-Regel "Sophos offline → dashboard-alert" feuert real bei Zustandswechsel,
 sichtbar im UI, im Audit-Log. Tests decken Trigger/Condition/Dispatch + Failure-Modi ab.
