@@ -70,6 +70,11 @@ export interface M365BridgeIds {
   readonly tenantId: string;
 }
 
+export interface NinjaBridgeIds {
+  /** Numeric NinjaOne organization-id (maps the customer to a Ninja org). */
+  readonly organizationId: number;
+}
+
 /** Optional contact + address-Stammdaten for the customer record. */
 export interface CustomerContact {
   readonly primaryEmail?: string;
@@ -94,6 +99,7 @@ export interface CustomerRecord {
     readonly sophos?: SophosBridgeIds;
     readonly securepoint?: SecurepointBridgeIds;
     readonly m365?: M365BridgeIds;
+    readonly ninja?: NinjaBridgeIds;
   };
   readonly tags?: readonly string[];
   readonly notes?: string;
