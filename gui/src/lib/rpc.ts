@@ -1232,6 +1232,7 @@ export interface NinjaCellData {
   readonly deviceCount: number;
   readonly offlineCount: number;
   readonly alertCount: number | null;
+  readonly actionableAlertCount: number | null;
 }
 
 export interface CustomerHealthCells {

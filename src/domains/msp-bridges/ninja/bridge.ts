@@ -18,7 +18,7 @@ import type { CustomerRecord } from '../../msp-customers/index.js';
 import type { BridgeKind, BridgeProbe, BridgeResult, ReadBridge } from '../types.js';
 import { clientCredentialsLogin, NinjaTokenCache } from './auth.js';
 import { ninjaGet } from './http-client.js';
-import { extractArray, mapNinjaDevices } from './mapper.js';
+import { countActionableAlerts, extractArray, mapNinjaDevices } from './mapper.js';
 import type {
   NinjaAlertRaw,
   NinjaBridgeConfig,
@@ -125,13 +125,17 @@ export class NinjaBridge implements ReadBridge<NinjaStatus> {
       ctrl.signal,
     );
     clearTimeout(timer);
-    const alertCount = alertsResp.ok
-      ? (extractArray<NinjaAlertRaw>(alertsResp.data)?.length ?? null)
-      : null;
+    let alertCount: number | null = null;
+    let actionableAlertCount: number | null = null;
+    if (alertsResp.ok) {
+      const alerts = extractArray<NinjaAlertRaw>(alertsResp.data) ?? [];
+      alertCount = alerts.length;
+      actionableAlertCount = countActionableAlerts(alerts);
+    }
 
     return done<NinjaStatus>(customer, probedAt, start, {
       kind: 'ok',
-      data: { deviceCount, offlineCount, alertCount },
+      data: { deviceCount, offlineCount, alertCount, actionableAlertCount },
     });
   }
 }

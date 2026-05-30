@@ -15,6 +15,12 @@ export interface NinjaStatus {
   readonly offlineCount: number;
   /** Active-alert count, or null when the alerts endpoint was unavailable. */
   readonly alertCount: number | null;
+  /**
+   * Alerts whose severity is not NONE/empty — the actionable subset. NinjaOne
+   * emits many severity=NONE conditions (e.g. patch reminders); this separates
+   * signal from noise. Null when the alerts endpoint was unavailable.
+   */
+  readonly actionableAlertCount: number | null;
 }
 
 /** Subset of a NinjaOne device we consume (defensive — all optional). */

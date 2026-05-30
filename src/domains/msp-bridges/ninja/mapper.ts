@@ -3,7 +3,7 @@
  *
  * @module @domains/msp-bridges/ninja/mapper
  */
-import type { NinjaDeviceRaw } from './types.js';
+import type { NinjaAlertRaw, NinjaDeviceRaw } from './types.js';
 
 export function mapNinjaDevices(devices: readonly NinjaDeviceRaw[]): {
   deviceCount: number;
@@ -14,6 +14,16 @@ export function mapNinjaDevices(devices: readonly NinjaDeviceRaw[]): {
     if (device.offline === true) offlineCount += 1;
   }
   return { deviceCount: devices.length, offlineCount };
+}
+
+/** Alerts whose severity is set and not NONE — the actionable subset. */
+export function countActionableAlerts(alerts: readonly NinjaAlertRaw[]): number {
+  let n = 0;
+  for (const alert of alerts) {
+    const sev = (alert.severity ?? '').trim().toUpperCase();
+    if (sev !== '' && sev !== 'NONE') n += 1;
+  }
+  return n;
 }
 
 /**

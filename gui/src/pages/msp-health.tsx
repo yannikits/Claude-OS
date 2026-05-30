@@ -128,12 +128,17 @@ function NinjaCell({ cell }: { cell: BridgeCellResult<NinjaCellData> | undefined
     );
   }
   const d = cell.data;
+  const actionable = d.actionableAlertCount ?? 0;
   return (
     <span className="cell-status">
       <strong>{d.deviceCount}</strong> dev
       <span className={`cell-msg${d.offlineCount > 0 ? ' cell-msg-warn' : ''}`}>
         {' '}
-        · {d.offlineCount} off · {d.alertCount ?? 'n/a'} alerts
+        · {d.offlineCount} off
+      </span>
+      <span className={`cell-msg${actionable > 0 ? ' cell-msg-warn' : ''}`}>
+        {' '}
+        · {d.alertCount ?? 'n/a'} alerts{actionable > 0 ? ` (${actionable} actionable)` : ''}
       </span>
     </span>
   );

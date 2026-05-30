@@ -68,9 +68,11 @@ const DEVICES: NinjaDeviceRaw[] = [
   { id: 2, systemName: 'pc-2', offline: true },
   { id: 3, systemName: 'srv-1', offline: false },
 ];
+// Mirrors real NinjaOne /v2/alerts: severity is a string, often 'NONE' for
+// low-signal conditions (e.g. patch reminders). Only non-NONE counts as actionable.
 const ALERTS: NinjaAlertRaw[] = [
   { uid: 'a1', severity: 'CRITICAL' },
-  { uid: 'a2', severity: 'MODERATE' },
+  { uid: 'a2', severity: 'NONE' },
 ];
 
 describe('NinjaBridge.probe', () => {
@@ -119,6 +121,7 @@ describe('NinjaBridge.probe', () => {
       expect(probe.result.data.deviceCount).toBe(3);
       expect(probe.result.data.offlineCount).toBe(1);
       expect(probe.result.data.alertCount).toBe(2);
+      expect(probe.result.data.actionableAlertCount).toBe(1);
     }
   });
 
@@ -164,6 +167,7 @@ describe('NinjaBridge.probe', () => {
     if (probe.result.kind === 'ok') {
       expect(probe.result.data.deviceCount).toBe(3);
       expect(probe.result.data.alertCount).toBeNull();
+      expect(probe.result.data.actionableAlertCount).toBeNull();
     }
   });
 
