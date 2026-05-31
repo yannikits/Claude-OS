@@ -19,43 +19,32 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { MspHealthAggregator } from '../domains/msp-aggregate/index.js';
+import { requireRole } from './rbac.js';
 
 export interface MspHealthRoutesDeps {
-  /** Lowercased + trimmed admin email allowlist. Empty → routes NOT registered. */
+  /** Lowercased + trimmed admin email allowlist (admin-override). Empty → routes NOT registered. */
   readonly adminEmails: readonly string[];
   /** Aggregator singleton owned by the serve()-bootstrap. */
   readonly aggregator: MspHealthAggregator;
 }
 
+/**
+ * RBAC (MC-A): reading the dashboard (`/rows`, `/config`) requires `viewer`;
+ * the cache-busting `/refresh` mutation requires `operator`.
+ */
 export function registerMspHealthRoutes(app: FastifyInstance, deps: MspHealthRoutesDeps): void {
   if (deps.adminEmails.length === 0) return;
   const allowlist = new Set(deps.adminEmails);
   const aggregator = deps.aggregator;
 
-  const requireAdmin = (
-    req: { user?: { email: string } },
-    reply: { code: (n: number) => { send: (b: unknown) => void } },
-  ): string | null => {
-    if (req.user === undefined) {
-      reply.code(401).send({ error: { code: 'unauthorized', message: 'cookie-auth required' } });
-      return null;
-    }
-    const email = req.user.email.toLowerCase();
-    if (!allowlist.has(email)) {
-      reply.code(403).send({ error: { code: 'forbidden', message: 'admin role required' } });
-      return null;
-    }
-    return req.user.email;
-  };
-
   app.get('/api/msp-health/rows', async (req, reply) => {
-    if (requireAdmin(req, reply) === null) return;
+    if (requireRole('viewer', allowlist, req, reply) === null) return;
     const snap = await aggregator.getSnapshot();
     reply.send(snap);
   });
 
   app.get('/api/msp-health/config', async (req, reply) => {
-    if (requireAdmin(req, reply) === null) return;
+    if (requireRole('viewer', allowlist, req, reply) === null) return;
     const peek = aggregator.peek();
     reply.send({
       registeredBridges: peek?.registeredBridges ?? [],
@@ -65,7 +54,7 @@ export function registerMspHealthRoutes(app: FastifyInstance, deps: MspHealthRou
   });
 
   app.post('/api/msp-health/refresh', async (req, reply) => {
-    if (requireAdmin(req, reply) === null) return;
+    if (requireRole('operator', allowlist, req, reply) === null) return;
     const snap = await aggregator.forceRefresh();
     reply.send(snap);
   });

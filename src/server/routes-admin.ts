@@ -37,6 +37,7 @@ import {
   type UserRepository,
   WeakPasswordError,
 } from '../domains/users/index.js';
+import { requireRole } from './rbac.js';
 
 export interface AdminRoutesDeps {
   readonly userRepo: UserRepository;
@@ -104,26 +105,13 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRoutesDeps)
   }
   const allowlist = new Set(deps.adminEmails);
 
-  // Inline guard — runs after the cookie-auth hook (which set req.user).
-  // We don't register a route-level preHandler because Fastify resolves
-  // those before the global hook; doing it inline keeps ordering obvious.
-  // Returns the verified admin email when allowed (lets callers skip the
-  // non-null assertion when building audit-payloads), null when denied.
+  // Admin gate — delegates to the shared RBAC guard (MC-A). Admin = an email in
+  // the allowlist OR a stored role of 'admin'. Returns the verified email when
+  // allowed (lets callers skip the non-null assertion for audit-payloads).
   const requireAdmin = (
-    req: { user?: { email: string } },
+    req: { user?: { email: string; role?: 'viewer' | 'operator' | 'admin' } },
     reply: { code: (n: number) => { send: (b: unknown) => void } },
-  ): string | null => {
-    if (req.user === undefined) {
-      reply.code(401).send({ error: { code: 'unauthorized', message: 'cookie-auth required' } });
-      return null;
-    }
-    const email = req.user.email.toLowerCase();
-    if (!allowlist.has(email)) {
-      reply.code(403).send({ error: { code: 'forbidden', message: 'admin role required' } });
-      return null;
-    }
-    return req.user.email;
-  };
+  ): string | null => requireRole('admin', allowlist, req, reply);
 
   app.get('/api/admin/users', async (req, reply) => {
     if (requireAdmin(req, reply) === null) return;
