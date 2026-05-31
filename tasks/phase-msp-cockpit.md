@@ -42,7 +42,7 @@ separates `claude-os-msp`. `ARCHITECTURE.md` §2 (Public/Private-Split, ADR-0030
 **veraltet**. Neuer Engine-/Write-Code kommt in dieses Repo unter `src/domains/`.
 
 - [x] **Doc-Fix vorab (ARCHITECTURE.md):** §2 mit Drift-Hinweis "monorepo, Split nicht ausgeführt" versehen (erledigt 2026-05-30).
-- [x] **ADR-0030-Amendment:** formaler Status-Block im ADR (2026-05-31) — dokumentiert Monorepo-Drift + **offener Security-Punkt**: Repo ist PUBLIC (entgegen ADR-0030-Treiber); nur Code committed, keine Customer-Daten/Secrets; Entscheidung Yannik: privat stellen vs. bewusst akzeptieren. Index-Status mitgezogen.
+- [x] **ADR-0030-Amendment + Entscheidung:** Repo ist PUBLIC (entgegen ADR-0030); nur Code committed, keine Customer-Daten/Secrets. **Owner-Entscheidung 2026-05-31: Variante (b) — Public bewusst akzeptieren.** ADR-0030 → "Abgelöst durch ADR-0046"; neue **ADR-0046** (Public-Monorepo, MSP-Code als OSS-Referenz, Schutz via Commit-Disziplin); SECURITY.md §6 angepasst; Index mitgezogen.
 
 ## Security-Leitplanken (gelten für ALLE Write-Phasen)
 

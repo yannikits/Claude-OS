@@ -1,36 +1,28 @@
 # ADR-0030 — Repo-Strategie: Hybrid Public-Core + Private MSP/House
 
-**Status:** Akzeptiert (2026-05-24) — **in der Umsetzung überholt, 1 offener Security-Punkt (2026-05-31)**
+**Status:** **Abgelöst durch [ADR-0046](0046-public-monorepo-msp-oss.md)** (2026-05-31)
 **Datum:** 2026-05-24
 **Bedingt durch:** Spec-Split (PR #123) — Repo-Ort war offen, MSP-Customer-Schutz erzwingt Trennung
 
-> ## Amendment 2026-05-31 — Realität weicht ab (Monorepo) + offener Visibility-Punkt
+> ## Abgelöst 2026-05-31 — Public-Monorepo bewusst akzeptiert (ADR-0046)
 >
 > Die hier beschlossene **3-Repo-Trennung wurde nie ausgeführt.** Faktischer Stand:
+> **Monorepo** `yannikits/MSP-Cockpit` (public), Core **und** alle MSP-Bridges (TANSS,
+> Veeam, Sophos, Securepoint, NinjaOne) gemeinsam in `src/domains/`.
 >
-> - **Monorepo** `yannikits/MSP-Cockpit` (umbenannt von `Claude-portable`/`Claude-OS`).
->   Core **und** alle MSP-Bridges (TANSS, Veeam, Sophos, Securepoint, NinjaOne) liegen
->   direkt in `src/domains/` desselben Repos. Kein separates `claude-os-msp`, kein
->   `house-watch`. `ARCHITECTURE.md` §2 trägt den Drift-Hinweis bereits seit 2026-05-30.
-> - Diese Konsolidierung ist **bewusst akzeptiert** — Solo-Dev, koordinierte Cross-Repo-PRs
->   und Drei-Klon-Setup wogen schwerer als der Trennungs-Nutzen (siehe "Negativ" unten,
->   die Punkte sind eingetreten).
+> Beim Schließen der Doku-Schuld fiel auf, dass das Monorepo **PUBLIC** ist — entgegen dem
+> Kern-Treiber dieser ADR (MSP-Code aus öffentlicher Git-History fernhalten). Schweregrad:
+> nur **Code** committed (Wettbewerbs-Wissen), **keine** Customer-Config (`customers/*.json|yaml`
+> nicht getrackt), `.env`-Secrets gitignored, keine Credentials in der History — also **kein
+> akuter Leak**.
 >
-> **Offener Punkt (nicht abgeschlossen, Entscheidung Yannik):** Das Monorepo ist aktuell
-> **PUBLIC**. Das widerspricht dem *Kern-Treiber* dieser ADR (MSP-Code aus der öffentlichen
-> Git-History fernhalten, SECURITY.md §6.3). Schweregrad-Kalibrierung (2026-05-31):
+> **Entscheidung des Owners (2026-05-31): Variante (b) — Public bewusst akzeptieren.** Der
+> MSP-Bridge-Code bleibt öffentlich als OSS-Referenz; der Schutz verlagert sich von
+> "Repo-Trennung" auf "Customer-Daten nie committen + Secrets via Keyring + CI-Security-Scan".
+> Details, Konsequenzen und das neue Schutzmodell stehen in **[ADR-0046](0046-public-monorepo-msp-oss.md)**;
+> SECURITY.md §6 ist entsprechend angepasst.
 >
-> - **Committed:** ausschließlich Code (Bridge-Clients, Mapper, Schemas, Reader-Logik) →
->   exponiert *Wettbewerbs-Wissen* (welche Vendors, wie integriert).
-> - **Nicht committed:** keine Customer-Config (kein `customers/*.json|yaml` getrackt),
->   `.env`-Secrets sind gitignored, keine Credentials in der History gefunden.
-> - Es ist also **kein akuter Customer-Daten-/Credential-Leak**, aber eine bewusste
->   ADR-Verletzung, die eine explizite Entscheidung braucht:
->   **(a)** Repo auf privat stellen (stellt den ADR-0030-Treiber wieder her), **oder**
->   **(b)** Public bewusst akzeptieren (MSP-Integration als OSS-Referenz) — dann diese ADR
->   formal auf "Abgelöst" setzen und SECURITY.md §6.3 entsprechend anpassen.
->
-> Bis zur Entscheidung bleibt der Rest dieser ADR als *historischer Kontext* stehen.
+> Der Rest dieser ADR bleibt als *historischer Kontext* stehen.
 
 ## Kontext
 
