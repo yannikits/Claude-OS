@@ -49,6 +49,14 @@ describe.skipIf(PTY_TESTS_DISABLED)('PtyChatSessions', () => {
   let tmp: string;
   let oldRoot: string | undefined;
 
+  // Track every PtyChatSessions that spawns real processes so afterEach can
+  // tear them down deterministically — see the afterEach comment.
+  const live: PtyChatSessions[] = [];
+  const track = (p: PtyChatSessions): PtyChatSessions => {
+    live.push(p);
+    return p;
+  };
+
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), 'claude-os-pty-'));
     const rootDir = join(tmp, 'root');
@@ -63,14 +71,21 @@ describe.skipIf(PTY_TESTS_DISABLED)('PtyChatSessions', () => {
     process.env.CLAUDE_OS_ROOT = rootDir;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Kill every spawned PTY before the worker exits. Lingering node-pty /
+    // ConPTY handles otherwise crash the vitest worker during teardown on
+    // windows CI ("Worker exited unexpectedly" while collecting coverage).
+    // The MAX_SESSIONS test in particular left 8 processes behind with only
+    // a fire-and-forget kill + fixed 500ms wait.
+    for (const p of live) await p.shutdownAll();
+    live.length = 0;
     if (oldRoot === undefined) delete process.env.CLAUDE_OS_ROOT;
     else process.env.CLAUDE_OS_ROOT = oldRoot;
   });
 
   it('spawn emits pty.data with the fake-claude banner', async () => {
     const events: EmittedEvent[] = [];
-    const pty = new PtyChatSessions((method, params) => events.push({ method, params }));
+    const pty = track(new PtyChatSessions((method, params) => events.push({ method, params })));
 
     const { sessionId } = pty.spawn(['hello', 'world'], { cols: 100, rows: 30 });
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
@@ -116,7 +131,7 @@ describe.skipIf(PTY_TESTS_DISABLED)('PtyChatSessions', () => {
 
   it('resize forwards new dimensions to the PTY', async () => {
     const events: EmittedEvent[] = [];
-    const pty = new PtyChatSessions((method, params) => events.push({ method, params }));
+    const pty = track(new PtyChatSessions((method, params) => events.push({ method, params })));
 
     const { sessionId } = pty.spawn([], { cols: 80, rows: 24 });
 
@@ -164,7 +179,7 @@ describe.skipIf(PTY_TESTS_DISABLED)('PtyChatSessions', () => {
 
   it('MAX_SESSIONS = 8 ring-guard refused den 9. spawn', async () => {
     const events: EmittedEvent[] = [];
-    const pty = new PtyChatSessions((method, params) => events.push({ method, params }));
+    const pty = track(new PtyChatSessions((method, params) => events.push({ method, params })));
 
     const sessionIds: string[] = [];
     for (let i = 0; i < 8; i++) {

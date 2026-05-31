@@ -33,11 +33,63 @@
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { SessionRepository } from '../domains/sessions/index.js';
-import type { UserRepository } from '../domains/users/index.js';
+import type { User, UserRepository, UserRole } from '../domains/users/index.js';
 import type { PtyChatSessions } from '../sidecar/pty-chat-sessions.js';
 import { verifyBearerToken } from './auth.js';
 import { SESSION_COOKIE_NAME } from './cookies.js';
 import type { NotificationBus } from './events-sse.js';
+import { effectiveRole, roleAtLeast } from './rbac.js';
+
+/**
+ * Minimum effective role allowed to spawn a tool-enabled ("code") PTY
+ * session. "chat" spawns (tools disabled via `--tools ""`) are open to
+ * every authenticated user. MC-C: maps to "wer hat Claude Code im Plan".
+ * Single constant so the later Team-Plan per-seat switch is one edit.
+ */
+const CODE_MIN_ROLE = 'operator' as const;
+
+/**
+ * Server-owned args for the two spawn modes. The server NEVER trusts
+ * client-supplied args for chat mode — it forces `--tools ""` so a
+ * crafted WS frame cannot re-enable tools for a viewer. Code mode passes
+ * client args through (operator+ is trusted).
+ */
+const CHAT_MODE_ARGS: readonly string[] = ['--tools', ''];
+
+export type SpawnMode = 'chat' | 'code';
+
+export type SpawnDecision =
+  | { readonly ok: true; readonly args: readonly string[] }
+  | { readonly ok: false; readonly code: 'forbidden'; readonly message: string };
+
+/**
+ * Pure MC-C spawn gate. Decides whether a `pty.spawn` frame is allowed and
+ * what args the PTY should actually receive:
+ *  - chat: always allowed, args forced to `--tools ""` (client args ignored
+ *    so a crafted frame can't re-enable tools for a viewer).
+ *  - code: requires effectiveRole >= CODE_MIN_ROLE when a cookie-user is
+ *    present. A bearer-token session (`authUser === null`) is the single
+ *    trusted owner (Stage 1) and passes. Client args flow through.
+ */
+export function resolveSpawnDecision(
+  mode: SpawnMode,
+  authUser: { readonly email: string; readonly role: UserRole } | null,
+  adminEmails: ReadonlySet<string>,
+  clientArgs: readonly string[],
+): SpawnDecision {
+  if (mode === 'chat') return { ok: true, args: [...CHAT_MODE_ARGS] };
+  if (authUser !== null) {
+    const role = effectiveRole({ email: authUser.email, role: authUser.role }, adminEmails);
+    if (!roleAtLeast(role, CODE_MIN_ROLE)) {
+      return {
+        ok: false,
+        code: 'forbidden',
+        message: `Claude Code requires role '${CODE_MIN_ROLE}' or higher (you have '${role}')`,
+      };
+    }
+  }
+  return { ok: true, args: [...clientArgs] };
+}
 
 interface PtyDataEvent {
   sessionId: string;
@@ -57,6 +109,8 @@ interface ClientFrame {
   rows?: unknown;
   data?: unknown;
   sessionId?: unknown;
+  /** 'chat' (tools disabled, any authed user) | 'code' (full tools, operator+). */
+  mode?: unknown;
 }
 
 interface RegisterPtyWsOptions {
@@ -70,6 +124,12 @@ interface RegisterPtyWsOptions {
    */
   readonly sessionRepo?: SessionRepository;
   readonly userRepo?: UserRepository;
+  /**
+   * Lowercased admin-email allowlist (mirror of `MultiUserConfig.adminEmails`).
+   * Used with `effectiveRole()` so an allowlisted email is treated as admin
+   * even when its stored DB role is lower. Empty/undefined → DB role only.
+   */
+  readonly adminEmails?: readonly string[];
 }
 
 function isPositiveInt(v: unknown): v is number {
@@ -87,37 +147,46 @@ function resolveQueryToken(req: FastifyRequest): string | null {
 /**
  * Try cookie-mode auth: read `claude_os_session` from the WS upgrade
  * request, resolve it against the session repo, and verify the user
- * still exists and is not disabled. Returns true when the session is
- * a valid, active user.
+ * still exists and is not disabled. Returns the active `User` (so the
+ * caller can role-gate spawn frames) or `null` when not a valid session.
  */
 function checkSessionCookie(
   req: FastifyRequest,
   sessionRepo: SessionRepository,
   userRepo: UserRepository,
-): boolean {
+): User | null {
   const cookies = (req as FastifyRequest & { cookies?: Record<string, string | undefined> })
     .cookies;
   const sessionId = cookies?.[SESSION_COOKIE_NAME];
-  if (sessionId === undefined || sessionId.length === 0) return false;
+  if (sessionId === undefined || sessionId.length === 0) return null;
   const session = sessionRepo.resolve(sessionId);
-  if (session === null) return false;
+  if (session === null) return null;
   const user = userRepo.findById(session.userId);
-  return user !== null && !user.disabled;
+  return user !== null && !user.disabled ? user : null;
 }
 
 export async function registerPtyWebSocket(
   app: FastifyInstance,
   opts: RegisterPtyWsOptions,
 ): Promise<void> {
+  const adminAllowlist = new Set((opts.adminEmails ?? []).map((e) => e.toLowerCase()));
+
   app.get('/api/pty/ws', { websocket: true }, (socket, req) => {
     // Auth — browsers can't attach Authorization to `new WebSocket(url)`,
     // so we try cookie-mode first (browser auto-attaches the session
     // cookie to the upgrade GET) and fall back to `?token=…` query
     // string for Stage-1 token-mode. The /api/* preHandler hook does
     // NOT run on websocket upgrades, so we re-check here.
+    //
+    // `authUser` is the cookie-resolved user (carries `role` for the
+    // code-spawn gate). It stays null in bearer-token mode — that token
+    // is the single-owner credential (Stage 1), so it is allowed to
+    // spawn code without a role lookup.
+    let authUser: User | null = null;
     let authed = false;
     if (opts.sessionRepo !== undefined && opts.userRepo !== undefined) {
-      authed = checkSessionCookie(req, opts.sessionRepo, opts.userRepo);
+      authUser = checkSessionCookie(req, opts.sessionRepo, opts.userRepo);
+      authed = authUser !== null;
     }
     if (!authed) {
       const presented = resolveQueryToken(req);
@@ -232,9 +301,25 @@ export async function registerPtyWebSocket(
             });
             return;
           }
-          const args = Array.isArray(frame.args)
+          const clientArgs = Array.isArray(frame.args)
             ? (frame.args as readonly unknown[]).filter((a): a is string => typeof a === 'string')
             : [];
+
+          // MC-C mode gate — see resolveSpawnDecision. Default 'chat' (most
+          // restrictive) when mode is absent/unknown.
+          const mode: SpawnMode = frame.mode === 'code' ? 'code' : 'chat';
+          const decision = resolveSpawnDecision(
+            mode,
+            authUser === null ? null : { email: authUser.email, role: authUser.role },
+            adminAllowlist,
+            clientArgs,
+          );
+          if (!decision.ok) {
+            send({ type: 'error', code: decision.code, message: decision.message });
+            return;
+          }
+          const args = decision.args;
+
           const spawnOpts: { cols?: number; rows?: number } = {};
           if (frame.cols !== undefined) {
             if (!isPositiveInt(frame.cols)) {

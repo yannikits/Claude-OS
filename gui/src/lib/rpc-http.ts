@@ -291,7 +291,12 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
           'rpc-http: a pty session is already active on this transport — kill it first',
         );
       }
-      const p = (params ?? {}) as { args?: readonly string[]; cols?: number; rows?: number };
+      const p = (params ?? {}) as {
+        args?: readonly string[];
+        cols?: number;
+        rows?: number;
+        mode?: 'chat' | 'code';
+      };
       const spawnPromise = new Promise<string>((resolve, reject) => {
         channel.pendingBind = { resolve, reject };
       });
@@ -300,6 +305,7 @@ export function createHttpTransport(initialToken?: string): AuthCapableTransport
         args: Array.isArray(p.args) ? p.args : [],
         ...(typeof p.cols === 'number' ? { cols: p.cols } : {}),
         ...(typeof p.rows === 'number' ? { rows: p.rows } : {}),
+        ...(p.mode === 'code' || p.mode === 'chat' ? { mode: p.mode } : {}),
       });
       const sessionId = await spawnPromise;
       return { sessionId } as T;

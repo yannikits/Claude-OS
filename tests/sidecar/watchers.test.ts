@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -47,13 +47,26 @@ describe('setupWatchers', () => {
   let watchers: InboxOutboxWatchers | null = null;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'claude-os-watchers-'));
+    // realpathSync canonicalises the temp path. On windows CI, os.tmpdir()
+    // often yields an 8.3 short name (…\RUNNER~1\…) while the OS reports
+    // ReadDirectoryChangesW events with the long name — the mismatch trips a
+    // libuv fs-event assertion that aborts the vitest worker. Watching the
+    // resolved long path keeps event paths prefix-matching the watched dir.
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'claude-os-watchers-')));
   });
 
   afterEach(async () => {
     await watchers?.close();
     watchers = null;
-    rmSync(root, { recursive: true, force: true });
+    // On windows, deleting the just-watched directory races chokidar's
+    // fs.watch teardown and trips a libuv fs-event assertion
+    // (src/win/fs-event.c: !_wcsnicmp(filename, dir, dirlen)) that aborts the
+    // vitest worker ("Worker exited unexpectedly"). The temp dir lives under
+    // os.tmpdir() and is reclaimed by the OS / ephemeral CI runner, so skip
+    // the explicit rm there.
+    if (process.platform !== 'win32') {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('creates inbox and outbox directories if missing', () => {

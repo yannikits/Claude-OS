@@ -59,6 +59,14 @@ jobs:
       - name: vitest
         run: npx vitest run --coverage
 
+      # The `typecheck` step runs `tsc --noEmit`, so no JS is emitted to
+      # dist/. The smoke steps below run with SKIP_BUILD=1 and expect a
+      # pre-built `dist/cli/index.js`, so build it explicitly here (ubuntu
+      # only — the smokes are ubuntu-only). Both smoke runs reuse this dist.
+      - name: build cli (for smoke)
+        if: matrix.os == 'ubuntu-22.04'
+        run: npm run build
+
       # Phase Web-7 end-to-end smoke — verifies users-create / serve /
       # cookie-login / CSRF / logout against a real spawned server.
       # Linux only because the script uses POSIX bash idioms

@@ -477,7 +477,14 @@ export function AgentRunsPage() {
   );
 }
 
-export function ChatPage() {
+/**
+ * Shared interactive `claude` PTY terminal (MC-C). Two modes:
+ *  - 'chat': spawns `claude --tools ""` — pure conversation, no tools/file
+ *    access. The args input is hidden. Server forces `--tools ""` in web
+ *    mode regardless of what the client sends (ws-pty.ts gate).
+ *  - 'code': full agent, args input shown. Route + nav are operator+-gated.
+ */
+function ClaudeTerminalView({ mode }: { mode: 'chat' | 'code' }) {
   const sidecarOk = useSidecarOk();
   const [argsText, setArgsText] = useState('--help');
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -600,7 +607,16 @@ export function ChatPage() {
     setStarting(true);
     setError(null);
 
-    const args = argsText.trim().length === 0 ? [] : argsText.trim().split(/\s+/);
+    // Chat mode is locked to `--tools ""` (no tools). In the Tauri path the
+    // server-side gate is bypassed (single trusted owner), so the frontend
+    // sends the locked args directly; in web mode the server overrides them
+    // anyway. Code mode passes the user's free-text args.
+    const args =
+      mode === 'chat'
+        ? ['--tools', '']
+        : argsText.trim().length === 0
+          ? []
+          : argsText.trim().split(/\s+/);
     const term = termRef.current;
     if (term === null) {
       startInFlightRef.current = false;
@@ -619,6 +635,7 @@ export function ChatPage() {
       const { sessionId: newId } = await ptySpawn(args, {
         cols: term.cols,
         rows: term.rows,
+        mode,
       });
       activeSessionIdRef.current = newId;
       setSessionId(newId);
@@ -637,7 +654,7 @@ export function ChatPage() {
       startInFlightRef.current = false;
       setStarting(false);
     }
-  }, [argsText, running]);
+  }, [argsText, running, mode]);
 
   const stop = useCallback(async () => {
     if (sessionId === null) return;
@@ -672,21 +689,24 @@ export function ChatPage() {
 
   return (
     <section className="page">
-      <h1>Chat</h1>
+      <h1>{mode === 'chat' ? 'Claude Chat' : 'Claude Code'}</h1>
       <p className="muted">
-        Vollwertiges TTY via node-pty + xterm.js. Interaktive Prompts (Login, Passwort, readline)
-        funktionieren echt. Window-Resize wird auto-an die PTY-Session propagiert.
+        {mode === 'chat'
+          ? 'Gespräch mit Claude — ohne Tools, ohne Datei-/Bash-Zugriff (`--tools ""`). Läuft über das Abo, keine API-Tokens.'
+          : 'Vollwertige claude-CLI mit allen Tools (Datei-Edits, Bash, Agent). Interaktive Prompts funktionieren echt; Window-Resize wird an die PTY-Session propagiert.'}
       </p>
       {error && <p className="banner banner-error">{error}</p>}
       <div className="chat-controls">
-        <input
-          type="text"
-          className="chat-args"
-          placeholder="claude args (z.B. --help oder /login)"
-          value={argsText}
-          onChange={(e) => setArgsText(e.target.value)}
-          disabled={running}
-        />
+        {mode === 'code' && (
+          <input
+            type="text"
+            className="chat-args"
+            placeholder="claude args (z.B. --help oder leer für interaktiv)"
+            value={argsText}
+            onChange={(e) => setArgsText(e.target.value)}
+            disabled={running}
+          />
+        )}
         {running ? (
           <button type="button" className="btn-danger" onClick={stop} disabled={!sidecarOk}>
             Stop
@@ -698,7 +718,7 @@ export function ChatPage() {
             onClick={start}
             disabled={!sidecarOk || starting}
           >
-            {starting ? 'Spawne …' : 'Spawn'}
+            {starting ? 'Starte …' : mode === 'chat' ? 'Start' : 'Spawn'}
           </button>
         )}
         <button
@@ -712,6 +732,16 @@ export function ChatPage() {
       <div className="terminal-host" ref={termHostRef} data-testid="terminal-host" />
     </section>
   );
+}
+
+/** Claude Chat — conversation only (`--tools ""`). Open to any authed user. */
+export function ChatPage() {
+  return <ClaudeTerminalView mode="chat" />;
+}
+
+/** Claude Code — full agent. Nav + route gated to operator+ (MC-C). */
+export function CodePage() {
+  return <ClaudeTerminalView mode="code" />;
 }
 
 function YesNo({ value }: { value: boolean }) {

@@ -110,7 +110,8 @@ function classifyCommand(cmd, hook) {
   if (!hasTimeout) {
     return {
       risk: 'high',
-      reason: 'Kein timeout gesetzt — Hook kann indefinit haengen bei FS-/Git-Locks (OneDrive-Falle)',
+      reason:
+        'Kein timeout gesetzt — Hook kann indefinit haengen bei FS-/Git-Locks (OneDrive-Falle)',
     };
   }
   if (isWindows && posixVar && !isCmdInvoke) {

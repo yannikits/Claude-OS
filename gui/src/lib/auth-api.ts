@@ -15,6 +15,13 @@
 export const CSRF_COOKIE_NAME = 'claude_os_csrf';
 export const COOKIE_AUTH_FLAG_KEY = 'claude-os-cookie-auth';
 
+/**
+ * RBAC role (MC-A). Mirrors `UserRole` in `src/domains/users/types.ts`.
+ * Ranked viewer < operator < admin. Drives nav-entry visibility — e.g.
+ * "Claude Code" requires operator+ (MC-C).
+ */
+export type UserRole = 'viewer' | 'operator' | 'admin';
+
 export interface AuthUser {
   readonly id: string;
   readonly email: string;
@@ -22,6 +29,8 @@ export interface AuthUser {
   /** True wenn die Email in `CLAUDE_OS_ADMIN_EMAILS` allowlist ist (Web-7-7).
    *  Steuert Sichtbarkeit von Admin-only Nav-Entries (Audit-Trail, etc.). */
   readonly isAdmin?: boolean;
+  /** Effektive RBAC-Rolle vom Server (`/api/auth/me`, MC-A). Default 'viewer'. */
+  readonly role?: UserRole;
 }
 
 export interface MeResponse {
