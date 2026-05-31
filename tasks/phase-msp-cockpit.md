@@ -126,15 +126,19 @@ Operator kann nicht armen; alles im Audit. Tests grün.
 
 ## Phase MC-F — NinjaOne-Bridge + Script-Action
 
-- [ ] Ninja-Read-Bridge nach Muster Veeam (`src/domains/msp-bridges/ninja/`), ADR-0038-Contract
-- [ ] Ins Dashboard + Aggregator integrieren (neue Spalte)
-- [ ] Engine-Datenquelle: Ninja-Alerts pollbar
+**Read-Teil geshippt + gemerged (Audit-Sync 2026-05-31).** Die Read-Bridge wurde
+außerhalb der MC-Reihenfolge vorgezogen (PRs #233/#234/#236). Der Write-Teil
+(`ninja-run-script`) bleibt geblockt auf die MC-C-Approval-Queue.
+
+- [x] Ninja-Read-Bridge nach Muster Veeam (`src/domains/msp-bridges/ninja/`), ADR-0038-Contract — PR #233 (`5056177`); Domain komplett (auth/bridge/http-client/mapper/types/classify-error) + Tests + doctor-Check
+- [x] Ins Dashboard + Aggregator integrieren (neue Spalte) — PR #233; `NinjaCellData` in `msp-aggregate/types.ts`, `actionableAlertCount` via PR #234 (`d19f24c`)
+- [x] Engine-Datenquelle: Ninja-Alerts pollbar — ninja ist gültige Trigger-Bridge in `automation/rule-schema.ts` (Engine pollt via Aggregator-Cache)
 - [ ] Ninja-Write-Action `ninja-run-script`: triggert ein in Ninja hinterlegtes, freigegebenes
-      Script via Ninja-API (claude-os shellt NICHT selbst)
-- [ ] Action default in Approval-Queue; armbar per MC-E
+      Script via Ninja-API (claude-os shellt NICHT selbst) — **geblockt: braucht Approval-Queue (MC-C)**
+- [ ] Action default in Approval-Queue; armbar per MC-E — **geblockt: Approval-Queue-Domain (MC-C) fehlt** (Hinweis: `src/core/approval/` + `approval-token/` sind die Ed25519-Signatur-*Foundation* aus PR #156, NICHT die pending→freigabe→execute-Queue)
 
 **DoD:** "Ninja Disk > 90% auf Tag `server` → run-script `cleanup-temp`" funktioniert end-to-end
-über die Ninja-API, mit Approval bzw. armed. Tests grün.
+über die Ninja-API, mit Approval bzw. armed. Tests grün. **Status: Read erfüllt; Write offen (MC-C-Gate).**
 
 ## Phase MC-G — TANSS-Write Stufe 2 (Status / Zuweisung)
 
