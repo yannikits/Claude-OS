@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -47,7 +47,12 @@ describe('setupWatchers', () => {
   let watchers: InboxOutboxWatchers | null = null;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'claude-os-watchers-'));
+    // realpathSync canonicalises the temp path. On windows CI, os.tmpdir()
+    // often yields an 8.3 short name (…\RUNNER~1\…) while the OS reports
+    // ReadDirectoryChangesW events with the long name — the mismatch trips a
+    // libuv fs-event assertion that aborts the vitest worker. Watching the
+    // resolved long path keeps event paths prefix-matching the watched dir.
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'claude-os-watchers-')));
   });
 
   afterEach(async () => {
