@@ -56,10 +56,10 @@ describe('routes-automation — auth', () => {
     await app.close();
   });
 
-  it('GET /api/automation/rules with non-admin → 403', async () => {
+  it('GET /api/automation/rules with a viewer (non-admin) → 200 (RBAC: read allowed)', async () => {
     const app = makeApp();
     const r = await app.inject({ method: 'GET', url: `/api/automation/rules?_u=${USER_EMAIL}` });
-    expect(r.statusCode).toBe(403);
+    expect(r.statusCode).toBe(200);
     await app.close();
   });
 

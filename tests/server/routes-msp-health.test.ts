@@ -39,9 +39,12 @@ function makeApp(
   const app = Fastify();
   // Stand-in for cookie-auth: inject req.user from query-string.
   app.addHook('preHandler', async (req) => {
-    const u = (req.query as { _u?: string })?._u;
-    if (u !== undefined && u.length > 0) {
-      (req as { user?: { email: string } }).user = { email: u };
+    const q = req.query as { _u?: string; _role?: string };
+    if (q?._u !== undefined && q._u.length > 0) {
+      (req as { user?: { email: string; role?: string } }).user = {
+        email: q._u,
+        ...(q._role !== undefined ? { role: q._role } : {}),
+      };
     }
   });
   registerMspHealthRoutes(app, {
@@ -78,9 +81,22 @@ describe('routes-msp-health — auth', () => {
     expect(r.statusCode).toBe(401);
   });
 
-  it('GET /api/msp-health/rows with non-admin user → 403', async () => {
+  it('GET /api/msp-health/rows with a viewer (non-admin) → 200 (RBAC: read allowed)', async () => {
     const r = await app.inject({ method: 'GET', url: `/api/msp-health/rows?_u=${USER_EMAIL}` });
-    expect(r.statusCode).toBe(403);
+    expect(r.statusCode).toBe(200);
+  });
+
+  it('POST /api/msp-health/refresh requires operator (viewer → 403, operator → 200)', async () => {
+    const viewer = await app.inject({
+      method: 'POST',
+      url: `/api/msp-health/refresh?_u=${USER_EMAIL}`,
+    });
+    expect(viewer.statusCode).toBe(403);
+    const operator = await app.inject({
+      method: 'POST',
+      url: `/api/msp-health/refresh?_u=${USER_EMAIL}&_role=operator`,
+    });
+    expect(operator.statusCode).toBe(200);
   });
 
   it('GET /api/msp-health/rows with admin user → 200', async () => {

@@ -24,6 +24,22 @@
  * (Web-7-3 §Klärungspunkt). When null, the default deterministic
  * `'user-' + sha256(id).slice(0,12)` is used.
  */
+/**
+ * RBAC role (MC-A). Ordered least → most privileged:
+ *   - viewer:   read-only dashboards (MSP-health, automation)
+ *   - operator: viewer + operational mutations + (future) write-approvals
+ *   - admin:    operator + arm rules, user-management, audit-log
+ * The effective role at request-time is `max(db-role, allowlist-admin)` —
+ * an email in `CLAUDE_OS_ADMIN_EMAILS` is always admin (anti-lockout override).
+ */
+export type UserRole = 'viewer' | 'operator' | 'admin';
+
+export const USER_ROLES: readonly UserRole[] = ['viewer', 'operator', 'admin'];
+
+export function isUserRole(value: unknown): value is UserRole {
+  return value === 'viewer' || value === 'operator' || value === 'admin';
+}
+
 export interface User {
   readonly id: string;
   readonly email: string;
@@ -32,13 +48,16 @@ export interface User {
   readonly lastLoginAt: number | null;
   readonly disabled: boolean;
   readonly tenantIdOverride: string | null;
+  /** RBAC role (MC-A). Defaults to 'viewer' for new + migrated users. */
+  readonly role: UserRole;
 }
 
 /**
- * Schema-version stamped in the `meta` table so we can drop+rebuild
- * when the schema evolves. Bump on schema-shape changes.
+ * Schema-version stamped in the `meta` table. Bump on schema-shape changes.
+ * v2 (MC-A): added `users.role` — migrated additively (ALTER TABLE), NOT a
+ * drop-rebuild, so existing accounts survive.
  */
-export const USERS_SCHEMA_VERSION = 1;
+export const USERS_SCHEMA_VERSION = 2;
 
 export class UserError extends Error {
   constructor(message: string) {
@@ -65,6 +84,25 @@ export class InvalidEmailError extends UserError {
   constructor(value: string) {
     super(`Invalid email format: "${value}"`);
     this.name = 'InvalidEmailError';
+  }
+}
+
+export class InvalidRoleError extends UserError {
+  constructor(value: string) {
+    super(`Invalid role: "${value}" (expected one of ${USER_ROLES.join(', ')})`);
+    this.name = 'InvalidRoleError';
+  }
+}
+
+/**
+ * Refused a role change that would remove the last admin-role user (would
+ * risk lockout). The `CLAUDE_OS_ADMIN_EMAILS` allowlist is the primary
+ * anti-lockout net; this guard prevents the obvious DB-only footgun.
+ */
+export class LastAdminError extends UserError {
+  constructor() {
+    super('Refusing to demote the last admin user (would risk lockout)');
+    this.name = 'LastAdminError';
   }
 }
 

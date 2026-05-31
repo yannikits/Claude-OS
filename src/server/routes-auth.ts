@@ -35,6 +35,7 @@ import {
 } from './cookies.js';
 import { newCsrfToken } from './csrf.js';
 import type { LoginRateLimiter } from './rate-limit.js';
+import { effectiveRole } from './rbac.js';
 
 export interface AuthRoutesDeps {
   readonly userRepo: UserRepository;
@@ -250,12 +251,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       reply.send({ user: null, allowRegistration: deps.allowRegistration === true });
       return;
     }
+    const role = effectiveRole({ email: req.user.email, role: req.user.role }, adminAllowlist);
     reply.send({
       user: {
         id: req.user.id,
         email: req.user.email,
         tenantId: userToTenantId(req.user),
-        isAdmin: adminAllowlist.has(req.user.email.toLowerCase()),
+        role,
+        isAdmin: role === 'admin', // back-compat convenience
       },
       allowRegistration: deps.allowRegistration === true,
     });

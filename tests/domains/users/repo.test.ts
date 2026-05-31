@@ -1,9 +1,13 @@
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import initSqlJs from 'sql.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DuplicateEmailError,
+  ensureUsersDir,
+  InvalidRoleError,
+  LastAdminError,
   resolveUsersDbPath,
   UserNotFoundError,
   UserRepository,
@@ -300,5 +304,71 @@ describe('persistence + permissions', () => {
     expect(() => repo.findById('x')).toThrow(/closed/);
     expect(() => repo.list()).toThrow(/closed/);
     await expect(repo.createUser('alice@example.com', STRONG)).rejects.toThrow(/closed/);
+  });
+});
+
+describe('RBAC roles (MC-A)', () => {
+  it('defaults a new user to viewer', async () => {
+    const repo = await UserRepository.open({ dataDir });
+    const u = await repo.createUser('alice@example.com', STRONG);
+    expect(u.role).toBe('viewer');
+    expect(repo.findById(u.id)?.role).toBe('viewer');
+    repo.close();
+  });
+
+  it('honours an explicit role at creation', async () => {
+    const repo = await UserRepository.open({ dataDir });
+    const u = await repo.createUser('op@example.com', STRONG, { role: 'operator' });
+    expect(u.role).toBe('operator');
+    repo.close();
+  });
+
+  it('setRole changes the role and persists', async () => {
+    const repo = await UserRepository.open({ dataDir });
+    const u = await repo.createUser('alice@example.com', STRONG);
+    expect(repo.setRole(u.id, 'operator').role).toBe('operator');
+    expect(repo.findByEmail('alice@example.com')?.role).toBe('operator');
+    repo.close();
+  });
+
+  it('rejects an invalid role', async () => {
+    const repo = await UserRepository.open({ dataDir });
+    const u = await repo.createUser('alice@example.com', STRONG);
+    expect(() => repo.setRole(u.id, 'superuser' as never)).toThrow(InvalidRoleError);
+    repo.close();
+  });
+
+  it('refuses to demote the last admin but allows it when another admin exists', async () => {
+    const repo = await UserRepository.open({ dataDir });
+    const a1 = await repo.createUser('admin1@example.com', STRONG, { role: 'admin' });
+    expect(() => repo.setRole(a1.id, 'viewer')).toThrow(LastAdminError);
+    await repo.createUser('admin2@example.com', STRONG, { role: 'admin' });
+    expect(repo.setRole(a1.id, 'viewer').role).toBe('viewer'); // now safe
+    expect(repo.countByRole('admin')).toBe(1);
+    repo.close();
+  });
+
+  it('migrates a v1 DB to v2 additively — adds role=viewer, keeps users', async () => {
+    ensureUsersDir(dataDir);
+    const SQL = await initSqlJs();
+    const db = new SQL.Database();
+    db.exec(`
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL, last_login_at INTEGER,
+        disabled INTEGER NOT NULL DEFAULT 0, tenant_id_override TEXT
+      );
+      INSERT INTO meta(key, value) VALUES('schema_version', '1');
+      INSERT INTO users(id, email, password_hash, created_at, last_login_at, disabled, tenant_id_override)
+        VALUES('u1', 'legacy@example.com', 'scrypt$placeholder', 1, NULL, 0, NULL);
+    `);
+    writeFileSync(resolveUsersDbPath(dataDir), Buffer.from(db.export()));
+    db.close();
+
+    const repo = await UserRepository.open({ dataDir }); // triggers migration
+    expect(repo.countAll()).toBe(1); // NOT dropped
+    expect(repo.findByEmail('legacy@example.com')?.role).toBe('viewer'); // migrated default
+    repo.close();
   });
 });

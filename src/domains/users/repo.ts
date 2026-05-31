@@ -37,10 +37,14 @@ import { ensureUsersDir, resolveUsersDbPath } from './paths.js';
 import {
   DuplicateEmailError,
   InvalidEmailError,
+  InvalidRoleError,
+  isUserRole,
+  LastAdminError,
   USERS_SCHEMA_VERSION,
   type User,
   UserError,
   UserNotFoundError,
+  type UserRole,
 } from './types.js';
 
 // Email validation is intentionally permissive — defensive against the
@@ -64,7 +68,8 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL,
   last_login_at INTEGER,
   disabled INTEGER NOT NULL DEFAULT 0,
-  tenant_id_override TEXT
+  tenant_id_override TEXT,
+  role TEXT NOT NULL DEFAULT 'viewer'
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -91,6 +96,8 @@ export interface OpenUsersOpts {
 
 export interface CreateUserOpts {
   readonly tenantIdOverride?: string;
+  /** RBAC role for the new user. Default 'viewer'. */
+  readonly role?: UserRole;
 }
 
 export interface ListUsersOpts {
@@ -120,11 +127,10 @@ export class UserRepository {
         db.close();
         throw new UserError(
           `Schema-version mismatch: on-disk=${onDisk}, expected=${USERS_SCHEMA_VERSION}. ` +
-            'Re-open with autoRebuildOnSchemaDrift=true to migrate (drops all users).',
+            'Re-open with autoRebuildOnSchemaDrift=true to migrate.',
         );
       }
-      db.exec('DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS meta;');
-      db.exec(SCHEMA_SQL);
+      migrateSchema(db, onDisk);
     }
     db.exec(STAMP_VERSION_SQL);
 
@@ -143,10 +149,11 @@ export class UserRepository {
     const id = randomUUID();
     const now = Date.now();
     const tenantOverride = opts.tenantIdOverride ?? null;
+    const role: UserRole = opts.role ?? 'viewer';
     this.db.run(
-      `INSERT INTO users(id, email, password_hash, created_at, last_login_at, disabled, tenant_id_override)
-       VALUES (?, ?, ?, ?, NULL, 0, ?)`,
-      [id, normalized, passwordHash, now, tenantOverride],
+      `INSERT INTO users(id, email, password_hash, created_at, last_login_at, disabled, tenant_id_override, role)
+       VALUES (?, ?, ?, ?, NULL, 0, ?, ?)`,
+      [id, normalized, passwordHash, now, tenantOverride, role],
     );
     this.save();
     return {
@@ -157,7 +164,40 @@ export class UserRepository {
       lastLoginAt: null,
       disabled: false,
       tenantIdOverride: tenantOverride,
+      role,
     };
+  }
+
+  /**
+   * Set a user's RBAC role. Refuses to demote the last enabled admin
+   * (LastAdminError) — the `CLAUDE_OS_ADMIN_EMAILS` allowlist is the primary
+   * anti-lockout net, this is the secondary guard against the DB-only footgun.
+   */
+  setRole(idOrEmail: string, role: UserRole): User {
+    this.assertOpen();
+    if (!isUserRole(role)) throw new InvalidRoleError(String(role));
+    const user = this.resolveUser(idOrEmail);
+    if (user === null) throw new UserNotFoundError(idOrEmail);
+    if (user.role === 'admin' && role !== 'admin' && this.countByRole('admin') <= 1) {
+      throw new LastAdminError();
+    }
+    this.db.run('UPDATE users SET role=? WHERE id=?', [role, user.id]);
+    this.save();
+    return { ...user, role };
+  }
+
+  /** Count enabled users with the given role (disabled users can't log in). */
+  countByRole(role: UserRole): number {
+    this.assertOpen();
+    const stmt = this.db.prepare('SELECT COUNT(*) AS n FROM users WHERE role=? AND disabled=0');
+    stmt.bind([role]);
+    try {
+      stmt.step();
+      const v = stmt.get()[0];
+      return typeof v === 'number' ? v : Number(v ?? 0);
+    } finally {
+      stmt.free();
+    }
   }
 
   findByEmail(email: string): User | null {
@@ -358,6 +398,35 @@ function readSchemaVersion(db: Database): number | null {
   }
 }
 
+function columnExists(db: Database, table: string, column: string): boolean {
+  const stmt = db.prepare(`PRAGMA table_info(${table})`);
+  try {
+    while (stmt.step()) {
+      if (stmt.getAsObject().name === column) return true;
+    }
+    return false;
+  } finally {
+    stmt.free();
+  }
+}
+
+/**
+ * Apply schema migrations preserving data where possible. v1→v2 adds the
+ * `role` column additively (existing users survive, default 'viewer').
+ * Unknown / downgrade drift falls back to a safe drop-rebuild.
+ */
+function migrateSchema(db: Database, fromVersion: number): void {
+  if (fromVersion === 1) {
+    if (!columnExists(db, 'users', 'role')) {
+      db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer';");
+    }
+    return;
+  }
+  // Unknown or downgrade: rebuild from scratch (last resort).
+  db.exec('DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS meta;');
+  db.exec(SCHEMA_SQL);
+}
+
 function normalizeEmail(email: unknown): string {
   if (typeof email !== 'string') throw new InvalidEmailError(String(email));
   const trimmed = email.trim().toLowerCase();
@@ -382,5 +451,6 @@ function rowToUser(row: SqlRow): User {
       row.tenant_id_override === null || row.tenant_id_override === undefined
         ? null
         : String(row.tenant_id_override),
+    role: isUserRole(row.role) ? row.role : 'viewer',
   };
 }
