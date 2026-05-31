@@ -1390,7 +1390,9 @@ Pro Sub-Phase: `npx tsc --noEmit` exit 0, `npx biome ci .` 0 errors, `npx vitest
 
 ---
 
-## Phase MC-C — Claude Chat / Claude Code Split (Plan-Datum 2026-05-31, Branch `feat/mc-a-rbac`)
+## Phase Chat-Split — Claude Chat / Claude Code (Plan-Datum 2026-05-31, Branch `feat/mc-a-rbac`)
+
+> **Label-Hinweis:** Diese Phase hieß initial "MC-C" (so auch in Commits `4c23c01`/`670660a` + Code-Kommentaren). Das **kollidiert** mit `phase-msp-cockpit.md` → "Phase MC-C — Erste Write-Action: TANSS-Kommentar". Der Chat/Code-Split gehört NICHT in die MC-x-Automations-Serie; kanonischer Anker ist **ADR-0045**. MC-C im Cockpit-Plan = TANSS-Write.
 
 **Ziel:** Den einen Nav-Punkt "Chat" (heute reiner PTY-Wrapper um die `claude`-CLI = faktisch Claude Code) aufteilen in zwei getrennte Punkte:
 

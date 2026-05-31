@@ -1,7 +1,12 @@
-# ADR-0045 — Claude Chat / Claude Code Split mit Rollen-Gate (MC-C)
+# ADR-0045 — Claude Chat / Claude Code Split mit Rollen-Gate
 
 **Status:** Akzeptiert (2026-05-31)
 **Bedingt durch:** ADR-0021 (PTY-Upgrade xterm/node-pty), ADR-0036 (Multi-User Stage 2), MC-A (RBAC-Rollen-Spalte)
+
+> **Label-Hinweis:** Diese Arbeit wurde initial "MC-C" genannt (Commits `4c23c01`/`670660a`,
+> Code-Kommentare in `ws-pty.ts`/`rpc.ts`). Das kollidiert mit `tasks/phase-msp-cockpit.md`
+> → "Phase MC-C — Erste Write-Action: TANSS-Kommentar". Der Chat/Code-Split ist **kein**
+> Teil der MC-x-Automations-Serie; kanonischer Anker ist diese ADR-0045.
 
 ## Kontext
 
