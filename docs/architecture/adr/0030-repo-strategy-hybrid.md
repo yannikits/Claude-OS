@@ -1,8 +1,28 @@
 # ADR-0030 — Repo-Strategie: Hybrid Public-Core + Private MSP/House
 
-**Status:** Akzeptiert
+**Status:** **Abgelöst durch [ADR-0046](0046-public-monorepo-msp-oss.md)** (2026-05-31)
 **Datum:** 2026-05-24
 **Bedingt durch:** Spec-Split (PR #123) — Repo-Ort war offen, MSP-Customer-Schutz erzwingt Trennung
+
+> ## Abgelöst 2026-05-31 — Public-Monorepo bewusst akzeptiert (ADR-0046)
+>
+> Die hier beschlossene **3-Repo-Trennung wurde nie ausgeführt.** Faktischer Stand:
+> **Monorepo** `yannikits/MSP-Cockpit` (public), Core **und** alle MSP-Bridges (TANSS,
+> Veeam, Sophos, Securepoint, NinjaOne) gemeinsam in `src/domains/`.
+>
+> Beim Schließen der Doku-Schuld fiel auf, dass das Monorepo **PUBLIC** ist — entgegen dem
+> Kern-Treiber dieser ADR (MSP-Code aus öffentlicher Git-History fernhalten). Schweregrad:
+> nur **Code** committed (Wettbewerbs-Wissen), **keine** Customer-Config (`customers/*.json|yaml`
+> nicht getrackt), `.env`-Secrets gitignored, keine Credentials in der History — also **kein
+> akuter Leak**.
+>
+> **Entscheidung des Owners (2026-05-31): Variante (b) — Public bewusst akzeptieren.** Der
+> MSP-Bridge-Code bleibt öffentlich als OSS-Referenz; der Schutz verlagert sich von
+> "Repo-Trennung" auf "Customer-Daten nie committen + Secrets via Keyring + CI-Security-Scan".
+> Details, Konsequenzen und das neue Schutzmodell stehen in **[ADR-0046](0046-public-monorepo-msp-oss.md)**;
+> SECURITY.md §6 ist entsprechend angepasst.
+>
+> Der Rest dieser ADR bleibt als *historischer Kontext* stehen.
 
 ## Kontext
 

@@ -123,7 +123,12 @@ draft → quarantined → reviewed → active → deprecated → disabled
 
 ## 6. MSP-Bridges (im Monorepo unter `src/domains/msp-bridges/`)
 
-> Der ADR-0030-Plan eines separaten privaten Repos `claude-os-msp` wurde nicht ausgeführt — alle Bridges leben im Monorepo (ADR-0030-Amendment offen).
+> **Repo-Modell (ADR-0046, löst ADR-0030 ab):** Public-Monorepo `yannikits/MSP-Cockpit` bewusst akzeptiert.
+> Der MSP-Bridge-**Code** ist öffentlich (OSS-Referenz). Der Schutz liegt **nicht** in Repo-Trennung,
+> sondern in der Commit-Disziplin: **Customer-Daten werden nie committed** (Customer-Config lebt im Vault
+> unter `workspaces/msp-customers/<id>/`, `.env*` ist gitignored), Secrets nur via Keyring/EncryptedFileStore
+> (ADR-0004), CI-`security scan` + `npm audit` fangen versehentliche Secret-/PII-Commits ab. Öffentlich sein
+> darf Integrations-Code/Schema; niemals konkrete Customer-Identitäten, Hosts, Tokens oder Ticket-Inhalte.
 
 ### 6.1 Read-Only-Phase (Phase 6)
 - Pro Bridge: dedizierter Read-Only-Service-Account

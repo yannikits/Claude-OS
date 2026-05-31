@@ -35,7 +35,7 @@ Dokumentiert die fundamentalen Architektur-Entscheidungen für die Evolution von
 | [0027](0027-msp-bridge-permission-model.md) | MSP-Bridge Permission-Modell (Read-Only Phase 6, Write Phase 7 mit Approval-Gate) | Akzeptiert | 2026-05-24 |
 | [0028](0028-tauri-updater-windows-macos.md) | Tauri-Updater für Windows + macOS Self-Update (ergänzt ADR-0018 Linux) | Akzeptiert (Konzept) | 2026-05-24 |
 | [0029](0029-license-mit-public-core.md) | Lizenz: MIT für Public-Core, proprietär für Private-Repos | Akzeptiert | 2026-05-24 |
-| [0030](0030-repo-strategy-hybrid.md) | Repo-Strategie: Hybrid Public-Core + Private MSP/House | Akzeptiert | 2026-05-24 |
+| [0030](0030-repo-strategy-hybrid.md) | Repo-Strategie: Hybrid Public-Core + Private MSP/House | Abgelöst durch ADR-0046 | 2026-05-24 |
 | [0031](0031-vault-multi-workspace.md) | Vault-Strategie: Multi-Workspace mit `personal/` als Default | Akzeptiert | 2026-05-24 |
 | [0032](0032-server-deployment-headless-http.md) | Server-Deployment: Headless HTTP-Variante | Akzeptiert | 2026-05-26 |
 | [0033](0033-server-multi-user-token-list.md) | Server Multi-User Stage 1 (Token-Liste) | Akzeptiert | 2026-05-26 |
@@ -51,6 +51,7 @@ Dokumentiert die fundamentalen Architektur-Entscheidungen für die Evolution von
 | [0043](0043-securepoint-read-bridge.md) | Securepoint USC Read-Bridge (Phase 7-D.2) | shipped | 2026-05-30 |
 | [0044](0044-msp-health-dashboard-polish.md) | MSP-Health Dashboard-Polish (Phase 7-E.1) | shipped | 2026-05-30 |
 | [0045](0045-claude-chat-code-split.md) | Claude Chat / Claude Code Split mit Rollen-Gate | Akzeptiert | 2026-05-31 |
+| [0046](0046-public-monorepo-msp-oss.md) | Public-Monorepo akzeptiert: MSP-Bridge-Code als OSS-Referenz (löst ADR-0030 ab) | Akzeptiert | 2026-05-31 |
 
 ## Format
 
