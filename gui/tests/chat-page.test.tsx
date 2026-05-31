@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>();
 
@@ -58,19 +58,8 @@ beforeEach(() => {
   termWriteSpy.mockReset();
   // biome-ignore lint/suspicious/noExplicitAny: test-stub for global polyfill
   (globalThis as any).ResizeObserver = FakeResizeObserver;
-  // Mark the runtime as Tauri so rpc.ts routes through the (mocked) Tauri
-  // transport — invoke() hits invokeMock and listen() hits the no-op event
-  // mock. Without this the HTTP transport's SSE subscribe throws "not
-  // authenticated" on mount. (isTauriRuntime() checks window.__TAURI_INTERNALS__.)
-  // biome-ignore lint/suspicious/noExplicitAny: test-stub for Tauri runtime flag
-  (window as any).__TAURI_INTERNALS__ = { metadata: {} };
-});
-
-afterEach(() => {
-  // Don't leak the Tauri runtime flag into sibling test files (happy-dom
-  // shares window across files in non-isolated runs).
-  // biome-ignore lint/suspicious/noExplicitAny: test-stub cleanup
-  (window as any).__TAURI_INTERNALS__ = undefined;
+  // window.__TAURI_INTERNALS__ (Tauri transport) is set globally in
+  // src/test/setup.ts.
 });
 
 // MC-C: "Claude Chat" — conversation only. No args input; spawns the locked
