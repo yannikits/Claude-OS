@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import fastifyCookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
+import { type AuditEntry, AuditLogger } from '../../src/core/audit/index.js';
 import { SessionRepository } from '../../src/domains/sessions/index.js';
 import { UserRepository } from '../../src/domains/users/index.js';
 import { makeCookieAuthHook } from '../../src/server/cookie-auth.js';
@@ -30,7 +31,10 @@ interface Harness {
   dataDir: string;
 }
 
-async function buildHarness(adminEmails: readonly string[] = [ADMIN_EMAIL]): Promise<Harness> {
+async function buildHarness(
+  adminEmails: readonly string[] = [ADMIN_EMAIL],
+  audit?: AuditLogger,
+): Promise<Harness> {
   const dataDir = mkdtempSync(join(tmpdir(), 'routes-admin-'));
   const userRepo = await UserRepository.open({ dataDir });
   await userRepo.createUser(ADMIN_EMAIL, STRONG);
@@ -52,9 +56,22 @@ async function buildHarness(adminEmails: readonly string[] = [ADMIN_EMAIL]): Pro
     insecureCookies: true,
     sessionMaxAgeSec: 60 * 60,
   });
-  registerAdminRoutes(app, { userRepo, sessionRepo, adminEmails });
+  registerAdminRoutes(app, { userRepo, sessionRepo, adminEmails, ...(audit ? { audit } : {}) });
 
   return { app, userRepo, sessionRepo, dataDir };
+}
+
+/** Build an AuditLogger that captures entries in-memory (no FS). */
+function capturingAudit(): { logger: AuditLogger; entries: AuditEntry[] } {
+  const entries: AuditEntry[] = [];
+  const logger = new AuditLogger({ sink: () => {}, auditDir: '/tmp/unused' });
+  const original = logger.append.bind(logger);
+  logger.append = (input) => {
+    const entry = original(input);
+    entries.push(entry);
+    return entry;
+  };
+  return { logger, entries };
 }
 
 function extractCookie(setCookie: string | string[] | undefined, name: string): string | null {
@@ -313,5 +330,109 @@ describe('POST /api/admin/users/:idOrEmail/reset-password', () => {
       payload: {},
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('GET /api/admin/users — role field', () => {
+  it('exposes the RBAC role (default viewer) in the safe shape', async () => {
+    h = await buildHarness();
+    const { cookie } = await loginAs(h.app, ADMIN_EMAIL);
+    const res = await h.app.inject({ method: 'GET', url: '/api/admin/users', headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { users: { email: string; role: string }[] };
+    for (const u of body.users) expect(u.role).toBe('viewer');
+  });
+});
+
+describe('POST /api/admin/users/:idOrEmail/role', () => {
+  it('assigns operator (200), returns new role, and audits before/after', async () => {
+    const { logger, entries } = capturingAudit();
+    h = await buildHarness([ADMIN_EMAIL], logger);
+    const { cookie, csrf } = await loginAs(h.app, ADMIN_EMAIL);
+    const res = await h.app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${REGULAR_EMAIL}/role`,
+      headers: { cookie, 'x-csrf-token': csrf },
+      payload: { role: 'operator' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.ok).toBe(true);
+    expect(body.user.role).toBe('operator');
+    expect(h.userRepo.findByEmail(REGULAR_EMAIL)?.role).toBe('operator');
+
+    const roleEvents = entries.filter((e) => e.kind === 'admin.user.role');
+    expect(roleEvents).toHaveLength(1);
+    expect(roleEvents[0]?.details).toMatchObject({
+      target: REGULAR_EMAIL,
+      oldRole: 'viewer',
+      newRole: 'operator',
+    });
+  });
+
+  it('returns 403 when caller is not admin', async () => {
+    h = await buildHarness();
+    const { cookie, csrf } = await loginAs(h.app, REGULAR_EMAIL);
+    const res = await h.app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${REGULAR_EMAIL}/role`,
+      headers: { cookie, 'x-csrf-token': csrf },
+      payload: { role: 'operator' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).error.code).toBe('forbidden');
+  });
+
+  it('returns 400 on an invalid role', async () => {
+    h = await buildHarness();
+    const { cookie, csrf } = await loginAs(h.app, ADMIN_EMAIL);
+    const res = await h.app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${REGULAR_EMAIL}/role`,
+      headers: { cookie, 'x-csrf-token': csrf },
+      payload: { role: 'superuser' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('invalid-role');
+  });
+
+  it('returns 400 when role is missing', async () => {
+    h = await buildHarness();
+    const { cookie, csrf } = await loginAs(h.app, ADMIN_EMAIL);
+    const res = await h.app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${REGULAR_EMAIL}/role`,
+      headers: { cookie, 'x-csrf-token': csrf },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('invalid-request');
+  });
+
+  it('returns 404 when the target does not exist', async () => {
+    h = await buildHarness();
+    const { cookie, csrf } = await loginAs(h.app, ADMIN_EMAIL);
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/admin/users/nonexistent@example.com/role',
+      headers: { cookie, 'x-csrf-token': csrf },
+      payload: { role: 'operator' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('refuses to demote the last db-admin (409 last-admin)', async () => {
+    h = await buildHarness();
+    const { cookie, csrf } = await loginAs(h.app, ADMIN_EMAIL);
+    // Make REGULAR the only stored-admin, then try to demote it via the route.
+    h.userRepo.setRole(REGULAR_EMAIL, 'admin');
+    const res = await h.app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${REGULAR_EMAIL}/role`,
+      headers: { cookie, 'x-csrf-token': csrf },
+      payload: { role: 'viewer' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('last-admin');
   });
 });

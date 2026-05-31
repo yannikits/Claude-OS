@@ -33,9 +33,13 @@ import { SessionRepository } from '../../domains/sessions/index.js';
 import {
   DuplicateEmailError,
   InvalidEmailError,
+  InvalidRoleError,
+  LastAdminError,
+  USER_ROLES,
   UserError,
   UserNotFoundError,
   UserRepository,
+  type UserRole,
   WeakPasswordError,
 } from '../../domains/users/index.js';
 import { type GlobalOpts, printErr, printJson, printLine } from '../output.js';
@@ -66,12 +70,13 @@ function formatUserRow(u: {
   createdAt: number;
   lastLoginAt: number | null;
   tenantIdOverride: string | null;
+  role: UserRole;
 }): string {
   const last = u.lastLoginAt === null ? 'never' : new Date(u.lastLoginAt).toISOString();
   const created = new Date(u.createdAt).toISOString();
   const flags = u.disabled ? '[disabled]' : '         ';
   const override = u.tenantIdOverride === null ? '' : ` tenant=${u.tenantIdOverride}`;
-  return `${flags} ${u.id}  ${u.email}  created=${created}  last-login=${last}${override}`;
+  return `${flags} ${u.id}  ${u.email}  role=${u.role}  created=${created}  last-login=${last}${override}`;
 }
 
 export function registerUsersCommand(program: Command): void {
@@ -139,6 +144,7 @@ export function registerUsersCommand(program: Command): void {
             users: items.map((u) => ({
               id: u.id,
               email: u.email,
+              role: u.role,
               disabled: u.disabled,
               createdAt: u.createdAt,
               lastLoginAt: u.lastLoginAt,
@@ -260,6 +266,52 @@ export function registerUsersCommand(program: Command): void {
           printJson({ ok: false, action: 'reset-password', code, message: msg });
         } else {
           printErr(`users reset-password: ${msg}`);
+        }
+        process.exit(1);
+      } finally {
+        repo?.close();
+      }
+    });
+
+  // ---- role ----
+  users
+    .command('role <id-or-email> <role>')
+    .description(`Set the RBAC role (one of: ${USER_ROLES.join(', ')})`)
+    .action(async (target: string, role: string, _opts: unknown, command: Command) => {
+      const globals = command.optsWithGlobals<GlobalOpts>();
+      let repo: UserRepository | null = null;
+      try {
+        repo = await UserRepository.open({ dataDir: dataDirFromEnv() });
+        const before = target.includes('@') ? repo.findByEmail(target) : repo.findById(target);
+        const oldRole = before?.role ?? null;
+        const updated = repo.setRole(target, role as UserRole);
+        if (globals.json === true) {
+          printJson({
+            ok: true,
+            action: 'role',
+            target,
+            oldRole,
+            newRole: updated.role,
+          });
+        } else {
+          printLine(`[OK] users.role ${updated.email} ${oldRole ?? '?'} -> ${updated.role}`);
+        }
+      } catch (err) {
+        const code =
+          err instanceof InvalidRoleError
+            ? 'invalid-role'
+            : err instanceof LastAdminError
+              ? 'last-admin'
+              : err instanceof UserNotFoundError
+                ? 'not-found'
+                : err instanceof UserError
+                  ? 'user-error'
+                  : 'unknown';
+        const msg = err instanceof Error ? err.message : String(err);
+        if (globals.json === true) {
+          printJson({ ok: false, action: 'role', code, message: msg });
+        } else {
+          printErr(`users role: ${msg}`);
         }
         process.exit(1);
       } finally {

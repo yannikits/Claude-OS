@@ -58,14 +58,20 @@ separates `claude-os-msp`. `ARCHITECTURE.md` §2 (Public/Private-Split, ADR-0030
 
 Vorbedingung für alles Write/Arm. Erweitert die bestehende Multi-User-Auth um Rollen.
 
-- [ ] Rollen-Modell `viewer | operator | admin` im User-Domain (`src/domains/users/`)
-- [ ] Migration: bestehende `CLAUDE_OS_ADMIN_EMAILS` → Rolle `admin` (kein Bruch)
-- [ ] Route-Guard-Middleware: `requireRole(role)` im Fastify-Layer
-- [ ] UI: Rolle im Session-State, gated Buttons (Viewer sieht keine Write-/Arm-Controls)
-- [ ] Audit: Rollenänderung wird geloggt
+- [x] Rollen-Modell `viewer | operator | admin` im User-Domain (`src/domains/users/types.ts`) — PR #242 (`d83859c`)
+- [x] Migration: bestehende `CLAUDE_OS_ADMIN_EMAILS` → Rolle `admin` (kein Bruch); additive Schema-v1→v2-Migration (`role`-Spalte) — PR #242
+- [x] Route-Guard-Middleware: `requireRole(role)` im Fastify-Layer (`src/server/rbac.ts`, `effectiveRole = max(db-role, allowlist-admin)`) — PR #242 (`9d1c1f8`, `f456a3c`)
+- [x] UI: Rolle im Session-State (`/auth/me` liefert `role`), gated Buttons — PR #242
+- [x] Audit: Rollenänderung wird geloggt — `admin.user.role` mit `oldRole`/`newRole` (dieser Branch)
+- [x] **Lücken-Fix (2026-05-31):** Rollen-*Vergabe* verdrahtet — `setRole()` war geshippt aber von keiner Route/CLI aufgerufen (operator-Rolle unerreichbar). Neu: `POST /api/admin/users/:idOrEmail/role` (admin-gated, before/after-Audit) + `claude-os users role <id|email> <role>` + Rolle in beiden Listen-Ausgaben (HTTP `safe()` + CLI). +8 Route-Tests, Suite 2079 grün.
 
 **DoD:** Viewer kann nur lesen, Operator kann Write-Actions auslösen (in Approval-Queue),
-nur Admin kann Regeln scharfschalten + Rollen vergeben. Tests grün, tsc+biome clean.
+nur Admin kann Regeln scharfschalten + Rollen vergeben. Tests grün, tsc+biome clean. **Status: erfüllt.**
+
+**Offen (separater Task, NICHT MC-A):** Es gibt heute *keine* GUI-Admin-User-Management-Seite —
+`create/disable/enable/reset-password/role` sind allesamt headless (HTTP + `claude-os users …` CLI).
+Eine GUI-Seite nur für Rollen zu bauen wäre inkonsistent; das gesamte User-Management gehört in
+eine eigene Admin-Seite (eigener Task, falls gewünscht).
 
 ## Phase MC-B — Engine-Core (read-only Aktionen)
 
