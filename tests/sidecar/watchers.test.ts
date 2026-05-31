@@ -53,7 +53,15 @@ describe('setupWatchers', () => {
   afterEach(async () => {
     await watchers?.close();
     watchers = null;
-    rmSync(root, { recursive: true, force: true });
+    // On windows, deleting the just-watched directory races chokidar's
+    // fs.watch teardown and trips a libuv fs-event assertion
+    // (src/win/fs-event.c: !_wcsnicmp(filename, dir, dirlen)) that aborts the
+    // vitest worker ("Worker exited unexpectedly"). The temp dir lives under
+    // os.tmpdir() and is reclaimed by the OS / ephemeral CI runner, so skip
+    // the explicit rm there.
+    if (process.platform !== 'win32') {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('creates inbox and outbox directories if missing', () => {
