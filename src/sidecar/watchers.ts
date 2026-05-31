@@ -32,6 +32,12 @@ export function setupWatchers(
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
       ignored: ['**/.*'],
+      // On windows, chokidar's native backend (ReadDirectoryChangesW via
+      // libuv fs-event) is a known source of flakiness — under load/teardown
+      // it can trip a libuv assertion (src/win/fs-event.c) that aborts the
+      // process. Polling sidesteps fs.watch entirely at the cost of a ~300ms
+      // latency floor, which is well within the inbox/outbox UX budget.
+      ...(process.platform === 'win32' ? { usePolling: true, interval: 300 } : {}),
     });
     for (const ev of ['add', 'change', 'unlink'] as const) {
       w.on(ev, (path) => emitter.emit(channel, { event: ev, path }));
