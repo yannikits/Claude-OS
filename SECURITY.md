@@ -121,7 +121,9 @@ draft → quarantined → reviewed → active → deprecated → disabled
   - kein Zugriff auf `customer-confidential`-Notes
   - Timeout 30s pro Tool-Call
 
-## 6. MSP-Bridges (Phase 6 + 7, separates Private-Repo)
+## 6. MSP-Bridges (im Monorepo unter `src/domains/msp-bridges/`)
+
+> Der ADR-0030-Plan eines separaten privaten Repos `claude-os-msp` wurde nicht ausgeführt — alle Bridges leben im Monorepo (ADR-0030-Amendment offen).
 
 ### 6.1 Read-Only-Phase (Phase 6)
 - Pro Bridge: dedizierter Read-Only-Service-Account
@@ -149,6 +151,14 @@ Vor jeder Write-Operation:
 - Recht auf Löschung: CLI-Command, der alle Notes mit `tenant: <customer-id>` löscht
 - Datenschutz-Folgenabschätzung (DSFA) als Doku-Pflicht vor Phase 6-Go-Live
 - Auftragsverarbeitungs-Vertrag (AVV) mit Anthropic prüfen (US-Provider, EU-DPF-Status)
+
+### 6.5 Bekannte Trust-Boundaries & offene Härtungspunkte (Audit 2026-05-31)
+
+**(a) `customer.yaml` ist ein operator-vertrautes Artefakt — SSRF-Grenze.**
+Die Bridges bauen ausgehende Requests aus `customer.yaml`-/ENV-Werten (Sophos `firewallHostname`, Veeam `serverHostname`, TANSS `serverUrl`, NinjaOne `baseUrl`). Das Schema validiert Port + non-empty, aber **nicht den Host** (keine Allowlist, kein Block von Link-Local/Metadata/RFC1918-IPs). Heute unkritisch: wer `customer.yaml` editieren darf, kontrolliert ohnehin den Host-Prozess — keine Trust-Grenze wird überschritten. **Sobald** `customer.yaml`-Authorship an weniger vertraute Tenants delegiert wird (Admin-/API-Surface), MUSS Host-Validierung in `msp-customers/schema.ts` (`readVeeam`/`readSophos`/…) ergänzt werden: IP-Literale in `169.254/16`, `127/8`, `::1`, `10/8`, `172.16-31`, `192.168/16` ablehnen, außer explizit allowlisted. Bis dahin gilt: **`customer.yaml` = trusted operator artifact.**
+
+**(b) Bearer-Token via Query-String für SSE/WS — Log-Leak-Fläche.**
+`/api/events` (SSE) und `/api/pty/ws` (WebSocket) akzeptieren das Bearer-Token via `?token=`, weil Browser-`EventSource`/`WebSocket` keine Auth-Header setzen können. Query-Strings landen in Reverse-Proxy-/Access-Logs, Browser-History und `Referer`. Mitigation: Token sind session-scoped + rotierbar (Env-Restart); `?token=` in nginx/Cloudflare aus Access-Logs scrubben. **Ziel-Härtung:** kurzlebiges Single-Use Connect-Ticket (per header-authentifiziertem POST gemintet) statt des echten Bearers im Query. **Funktionslücke (zu tracken):** der Cookie-Auth-Hook (Multi-User Stage 2) implementiert den Query-Token-Fallback NICHT — unter Cookie-Modus wird eine `?token=`-SSE/WS-Verbindung ohne gültige Session-Cookie abgewiesen; im Cookie-Modus muss die Session-Cookie getragen werden.
 
 ## 7. Workspace-Skills-Schutz
 
