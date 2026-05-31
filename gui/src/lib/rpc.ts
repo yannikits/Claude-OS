@@ -1077,7 +1077,8 @@ export type AuditEventKind =
   | 'admin.user.create'
   | 'admin.user.disable'
   | 'admin.user.enable'
-  | 'admin.user.reset-password';
+  | 'admin.user.reset-password'
+  | 'admin.user.role';
 
 export interface AuditEntry {
   readonly schema_version: number;

@@ -32,9 +32,12 @@ import { userToTenantId } from '../domains/tenant/index.js';
 import {
   DuplicateEmailError,
   InvalidEmailError,
+  InvalidRoleError,
+  LastAdminError,
   UserError,
   UserNotFoundError,
   type UserRepository,
+  type UserRole,
   WeakPasswordError,
 } from '../domains/users/index.js';
 import { requireRole } from './rbac.js';
@@ -67,6 +70,7 @@ interface SafeUser {
   readonly lastLoginAt: number | null;
   readonly disabled: boolean;
   readonly tenantIdOverride: string | null;
+  readonly role: UserRole;
 }
 
 function safe(u: {
@@ -76,6 +80,7 @@ function safe(u: {
   lastLoginAt: number | null;
   disabled: boolean;
   tenantIdOverride: string | null;
+  role: UserRole;
 }): SafeUser {
   return {
     id: u.id,
@@ -84,6 +89,7 @@ function safe(u: {
     lastLoginAt: u.lastLoginAt,
     disabled: u.disabled,
     tenantIdOverride: u.tenantIdOverride,
+    role: u.role,
   };
 }
 
@@ -95,6 +101,8 @@ function userErrorToCode(err: UserError): { code: string; status: number } {
   if (err instanceof DuplicateEmailError) return { code: 'duplicate-email', status: 409 };
   if (err instanceof InvalidEmailError) return { code: 'invalid-email', status: 400 };
   if (err instanceof WeakPasswordError) return { code: 'weak-password', status: 400 };
+  if (err instanceof InvalidRoleError) return { code: 'invalid-role', status: 400 };
+  if (err instanceof LastAdminError) return { code: 'last-admin', status: 409 };
   if (err instanceof UserNotFoundError) return { code: 'not-found', status: 404 };
   return { code: 'user-error', status: 400 };
 }
@@ -252,6 +260,59 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRoutesDeps)
           },
         });
         reply.send({ ok: true, sessionsRevoked: revoked });
+      } catch (err) {
+        if (err instanceof UserError) {
+          const { code, status } = userErrorToCode(err);
+          reply.code(status).send({ error: { code, message: err.message } });
+          return;
+        }
+        throw err;
+      }
+    },
+  );
+
+  // Assign an RBAC role (MC-A). The only path that can mint an `operator`
+  // (and thus the linchpin for every Write phase, MC-C+). Admin-only; the
+  // before/after roles are captured in the audit-log. `setRole` enforces the
+  // last-admin guard (LastAdminError → 409) and role validity (InvalidRoleError
+  // → 400); a vanished target maps to 404.
+  app.post<{ Params: { idOrEmail: string }; Body: { role?: unknown } }>(
+    '/api/admin/users/:idOrEmail/role',
+    async (req, reply) => {
+      const adminEmail = requireAdmin(req, reply);
+      if (adminEmail === null) return;
+      const target = req.params.idOrEmail;
+      const body = req.body ?? {};
+      const role = typeof body.role === 'string' ? body.role : '';
+      if (role.length === 0) {
+        reply.code(400).send({
+          error: { code: 'invalid-request', message: 'role required' },
+        });
+        return;
+      }
+      // Capture the previous role for the before/after audit trail.
+      const current = target.includes('@')
+        ? deps.userRepo.findByEmail(target)
+        : deps.userRepo.findById(target);
+      if (current === null) {
+        reply.code(404).send({ error: { code: 'not-found', message: target } });
+        return;
+      }
+      try {
+        const updated = deps.userRepo.setRole(target, role as UserRole);
+        deps.audit?.append({
+          kind: 'admin.user.role',
+          action: 'admin-set-role',
+          workspace: 'system',
+          outcome: 'ok',
+          details: {
+            adminEmailHash: hashedEmail(adminEmail),
+            target,
+            oldRole: current.role,
+            newRole: updated.role,
+          },
+        });
+        reply.send({ ok: true, user: safe(updated) });
       } catch (err) {
         if (err instanceof UserError) {
           const { code, status } = userErrorToCode(err);

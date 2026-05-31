@@ -40,7 +40,8 @@ export type AuditEventKind =
   | 'admin.user.create'
   | 'admin.user.disable'
   | 'admin.user.enable'
-  | 'admin.user.reset-password';
+  | 'admin.user.reset-password'
+  | 'admin.user.role';
 
 /**
  * Audit-log schema version. Bumped only when a backwards-incompatible
