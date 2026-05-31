@@ -1387,3 +1387,62 @@ Pro Sub-Phase: `npx tsc --noEmit` exit 0, `npx biome ci .` 0 errors, `npx vitest
 - **Out-of-Scope dieser Phase:** OAuth (Web-8), 2FA/TOTP/WebAuthn (v2), Password-Reset via Email/SMTP (Web-8), Per-User-Quotas (Web-8), RBAC (single role "user" reicht), Per-User-Vault-FS-Isolation (Web-9), Mobile-OAuth (v2).
 - **Risiko:** scrypt-Parameter `N=16384` ist OWASP-2023-Baseline; bei zu hoher Login-Latenz auf low-spec-Homelab evaluieren, ggf. parametrisierbar machen in Web-7-1-tail.
 - **Stop-on-Failure (CLAUDE.md §7):** Bei zwei gleichen Fehlern in Folge auf einer Sub-Phase → Plan-Mode-Reset, ggf. `three-brain`-Routing für Codex-Adversarial-Review.
+
+---
+
+## Phase MC-C — Claude Chat / Claude Code Split (Plan-Datum 2026-05-31, Branch `feat/mc-a-rbac`)
+
+**Ziel:** Den einen Nav-Punkt "Chat" (heute reiner PTY-Wrapper um die `claude`-CLI = faktisch Claude Code) aufteilen in zwei getrennte Punkte:
+
+- **"Claude Chat"** (`/chat`) — startet `claude --tools ""` (alle Tools aus, reines Gespräch, kein Datei-/Bash-Zugriff). Sichtbar/nutzbar für **jeden authentifizierten Cockpit-Nutzer** (viewer+).
+- **"Claude Code"** (`/code`) — startet die volle `claude`-CLI (alle Tools). Gated auf **operator+** (eine einzige Konstante `CODE_MIN_ROLE`, später auf Per-Seat-Flag umstellbar).
+
+**Abo-Modell (jetzt):** Beide laufen über das **zentrale Server-Abo** (CLI per `setup-token`/OAuth eingeloggt, keine API-Tokens). Forward-Path: Team-Plan mit mehreren Standard-Seats + 1 Premium-Seat → Mapping über genau einen Helper `canUseCode(user)`, damit der spätere Wechsel von RBAC-Rolle auf Per-User-Seat eine Ein-Funktions-Änderung ist.
+
+**Verifiziert (an installierter Binary):** `claude --tools ""` deaktiviert alle Tools; `--tools "default"` = alle Tools; Flag wirkt im interaktiven PTY (nicht `--print`-gebunden). `setup-token` = "requires Claude subscription".
+
+### Wichtige Ehrlichkeit: Nav-Gating ≠ Sicherheit
+
+Frontend-Nav/Route-Gating ist **kosmetisch** — ein Nutzer kann `pty.spawn` direkt per RPC mit vollen `claude`-Args aufrufen und das Gate umgehen (vgl. bekannter "PTY WebSocket Auth Gap", Obs 1690). Das echte Gate muss **server-seitig** an der `pty.spawn`-Grenze erzwungen werden. Deshalb zwei Slices: Slice 1 = UX-Split, Slice 2 = echte Durchsetzung. Ohne Slice 2 ist "Code nur für Plan-Inhaber" nur Optik.
+
+### Slice 1 — Frontend-Split (UX)
+
+- [x] `gui/src/lib/auth-api.ts`: `AuthUser` um `role?: UserRole` erweitert; Typ `UserRole = 'viewer' | 'operator' | 'admin'` definiert (Server liefert `role` bereits via `/api/auth/me`).
+- [x] `gui/src/App.tsx`: `useAuthGate` liest `me.user?.role ?? 'viewer'` (Tauri → 'admin', single trusted owner); `userRole` durch `AuthGateState` → `AuthenticatedApp` → `Layout` durchgereicht; Reset bei Logout.
+- [x] `gui/src/App.tsx`: `NavEntry.minRole?` + Rank-Helper `roleAtLeast` (Spiegel von `src/server/rbac.ts`).
+- [x] `gui/src/App.tsx`: NAV — Label `/chat` → "Claude Chat"; neuer Eintrag `/code` → "Claude Code", `section: 'runtime'`, `minRole: 'operator'`.
+- [x] `gui/src/App.tsx`: `Layout`-Filter respektiert `minRole`; Route `/code` role-gated (`roleAtLeast(userRole, 'operator')`).
+- [x] `gui/src/pages/index.tsx`: Terminal-Kern in `ClaudeTerminalView({ mode })` extrahiert. `ChatPage` = `'chat'` (spawnt `['--tools', '']`, kein Args-Feld, Überschrift "Claude Chat"). Neue `CodePage` = `'code'` (volle CLI, Args-Feld). Beide aus `pages`-Barrel exportiert.
+- [x] `gui/src/lib/rpc.ts` + `rpc-http.ts`: `PtySpawnOpts.mode` ergänzt; HTTP-Transport reicht `mode` ins WS-Spawn-Frame.
+
+### Slice 2 — Server-seitige Durchsetzung (Security — macht das Gate echt)
+
+- [x] **Research:** Web-Pfad bestätigt — `pty.spawn` läuft im Web-Build über die WS `/api/pty/ws` (`rpc-http.ts:287`), nicht `POST /api/rpc`. Chokepoint = `ws-pty.ts` Spawn-Frame-Handler.
+- [x] `ws-pty.ts`: `checkSessionCookie` gibt jetzt `User` (statt bool) zurück; `mode: 'chat' | 'code'` im Frame; pure `resolveSpawnDecision()` gated `code` auf `effectiveRole >= CODE_MIN_ROLE` (operator). Bearer-Token (kein User) = trusted owner → erlaubt. `adminEmails` via `index.ts` durchgereicht.
+- [x] Server besitzt die chat-Args: `chat` → fix `['--tools', '']`, Client-Args ignoriert (crafted frame kann Tools nicht reaktivieren).
+- [x] Tests: `tests/server/ws-pty.test.ts` — 8 Tests (viewer→code forbidden, operator/admin→code ok, allowlist-admin→ok, bearer→ok, chat ignoriert Client-Args).
+
+### Slice 3 — Verification + Doku
+
+- [x] Server `npx tsc --noEmit` exit 0; GUI `tsc` exit 0; GUI `vite build` exit 0.
+- [x] `npx biome ci .` auf geänderten Dateien clean (1 verbleibender Error = pre-existing `scripts/check-stop-hooks.mjs`, nicht im Diff).
+- [x] Server-Suite `npx vitest run` grün: 2072 passed / 8 skipped, 0 failures (inkl. neuer Gate-Tests).
+- [x] `gui/tests/chat-page.test.tsx` neu: ChatPage (chat) + CodePage (code) je isoliert grün (6/6). Tauri-Runtime-Flag im Test gesetzt + im `afterEach` aufgeräumt (kein Leak).
+- [ ] **Manueller Smoke (offen):** viewer-Login → nur "Claude Chat"; operator/admin → beide; Chat-Spawn ohne Tools (Datei-Edit → refused). Braucht laufenden Multi-User-Server.
+- [ ] **Kurz-ADR (offen):** Split + zentrales-Abo-Modell + Forward-Path Per-Seat dokumentieren.
+- [ ] `gitnexus_impact` (CLAUDE.md §4) — in dieser Session nicht ausgeführt (gitnexus-MCP nicht angebunden); Impact manuell via Explore-Agenten geklärt.
+
+### Review (2026-05-31)
+
+- **Kern fertig + verifiziert:** Chat/Code-Split mit echtem server-seitigem Rollen-Gate (operator+) für Code, Chat (`--tools ""`) für alle. Beide laufen über das zentrale Abo, keine API-Tokens.
+- **Security-Substanz:** Das Gate ist nicht kosmetisch — `resolveSpawnDecision` erzwingt am WS-Chokepoint, und der Server überschreibt chat-Args, sodass ein viewer per gefälschtem WS-Frame keine Tools reaktivieren kann.
+- **Forward-Path:** `CODE_MIN_ROLE` (1 Konstante) + `resolveSpawnDecision` (1 Funktion) = Andockpunkt für späteren Team-Plan-Per-Seat.
+- **Bekanntes pre-existing Problem (nicht Regress):** GUI-Full-Suite (`vitest run`) ist reihenfolge-/global-state-abhängig flaky — Baseline auf cleanem HEAD: 30 Fehler, mit dieser Änderung: 27. Einzeln laufen die betroffenen Dateien grün. GUI-Änderungen daher pro Datei isoliert prüfen, nicht am Full-Run.
+- **Offen vor "wirklich fertig":** Manueller Multi-User-Smoke + Kurz-ADR.
+
+### Entscheidungen (bestätigt 2026-05-31)
+
+- **CODE_MIN_ROLE = `operator`** (operator + admin nutzen Code, viewer nur Chat).
+- **Scope:** Slice 1 + 2 zusammen (echtes server-seitiges Gate).
+- **Labels:** "Claude Chat" / "Claude Code".
+- **Chat-UI-Tiefe:** MVP = xterm-Terminal mit `--tools ""`. Bubble-UI = optionale spätere Phase.

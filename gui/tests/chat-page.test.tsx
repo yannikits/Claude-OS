@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>();
 
@@ -47,7 +47,7 @@ vi.mock('../src/lib/sidecar-status', () => ({
 }));
 
 // happy-dom doesn't ship ResizeObserver — provide a no-op so the
-// ChatPage useEffect can install it without throwing.
+// terminal useEffect can install it without throwing.
 class FakeResizeObserver {
   observe(): void {}
   disconnect(): void {}
@@ -58,30 +58,45 @@ beforeEach(() => {
   termWriteSpy.mockReset();
   // biome-ignore lint/suspicious/noExplicitAny: test-stub for global polyfill
   (globalThis as any).ResizeObserver = FakeResizeObserver;
+  // Mark the runtime as Tauri so rpc.ts routes through the (mocked) Tauri
+  // transport — invoke() hits invokeMock and listen() hits the no-op event
+  // mock. Without this the HTTP transport's SSE subscribe throws "not
+  // authenticated" on mount. (isTauriRuntime() checks window.__TAURI_INTERNALS__.)
+  // biome-ignore lint/suspicious/noExplicitAny: test-stub for Tauri runtime flag
+  (window as any).__TAURI_INTERNALS__ = { metadata: {} };
 });
 
-describe('ChatPage', () => {
-  it('mounts terminal-host and shows Spawn button', async () => {
+afterEach(() => {
+  // Don't leak the Tauri runtime flag into sibling test files (happy-dom
+  // shares window across files in non-isolated runs).
+  // biome-ignore lint/suspicious/noExplicitAny: test-stub cleanup
+  (window as any).__TAURI_INTERNALS__ = undefined;
+});
+
+// MC-C: "Claude Chat" — conversation only. No args input; spawns the locked
+// `--tools ""` form and tags the call with mode:'chat'.
+describe('ChatPage (chat mode)', () => {
+  it('mounts terminal-host with Start button and NO args input', async () => {
     const { ChatPage } = await import('../src/pages');
     render(<ChatPage />);
 
     expect(await screen.findByTestId('terminal-host')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /spawn/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^start/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reset/i })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/claude args/i)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/claude args/i)).not.toBeInTheDocument();
   });
 
-  it('Spawn click invokes pty.spawn with the trimmed args and current size', async () => {
+  it('Start spawns claude with --tools "" and mode:chat', async () => {
     invokeMock.mockImplementation(async (cmd, args) => {
       if (cmd !== 'rpc_call') return null;
       const { method, params } = args as { method: string; params: unknown };
       if (method === 'pty.spawn') {
-        // sanity-check the payload shape — args[], cols, rows.
-        const p = params as { args: string[]; cols?: number; rows?: number };
-        expect(p.args).toEqual(['--help']);
+        const p = params as { args: string[]; cols?: number; rows?: number; mode?: string };
+        expect(p.args).toEqual(['--tools', '']);
+        expect(p.mode).toBe('chat');
         expect(p.cols).toBe(80);
         expect(p.rows).toBe(24);
-        return { sessionId: 'session-fake-uuid-0001' };
+        return { sessionId: 'session-chat-0001' };
       }
       throw new Error(`unmocked RPC: ${method}`);
     });
@@ -89,8 +104,62 @@ describe('ChatPage', () => {
     const { ChatPage } = await import('../src/pages');
     render(<ChatPage />);
 
-    const spawnBtn = await screen.findByRole('button', { name: /^spawn/i });
-    fireEvent.click(spawnBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /^start/i }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        'rpc_call',
+        expect.objectContaining({ method: 'pty.spawn' }),
+      );
+    });
+  });
+
+  it('surfaces RPC errors as banner-error', async () => {
+    invokeMock.mockImplementation(async () => {
+      throw new Error('sidecar offline');
+    });
+
+    const { ChatPage } = await import('../src/pages');
+    render(<ChatPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^start/i }));
+
+    expect(await screen.findByText(/sidecar offline/)).toBeInTheDocument();
+  });
+});
+
+// MC-C: "Claude Code" — full agent. Keeps the args input; spawns the
+// free-text args and tags the call with mode:'code'.
+describe('CodePage (code mode)', () => {
+  it('mounts terminal-host with Spawn button and args input', async () => {
+    const { CodePage } = await import('../src/pages');
+    render(<CodePage />);
+
+    expect(await screen.findByTestId('terminal-host')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^spawn/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reset/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/claude args/i)).toBeInTheDocument();
+  });
+
+  it('Spawn invokes pty.spawn with the trimmed args, size, and mode:code', async () => {
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd !== 'rpc_call') return null;
+      const { method, params } = args as { method: string; params: unknown };
+      if (method === 'pty.spawn') {
+        const p = params as { args: string[]; cols?: number; rows?: number; mode?: string };
+        expect(p.args).toEqual(['--help']);
+        expect(p.mode).toBe('code');
+        expect(p.cols).toBe(80);
+        expect(p.rows).toBe(24);
+        return { sessionId: 'session-code-0001' };
+      }
+      throw new Error(`unmocked RPC: ${method}`);
+    });
+
+    const { CodePage } = await import('../src/pages');
+    render(<CodePage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^spawn/i }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
@@ -109,25 +178,12 @@ describe('ChatPage', () => {
       throw new Error(`unmocked RPC: ${method}`);
     });
 
-    const { ChatPage } = await import('../src/pages');
-    render(<ChatPage />);
+    const { CodePage } = await import('../src/pages');
+    render(<CodePage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /^spawn/i }));
 
     expect(await screen.findByRole('button', { name: /stop/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^spawn$/i })).not.toBeInTheDocument();
-  });
-
-  it('surface RPC errors as banner-error', async () => {
-    invokeMock.mockImplementation(async () => {
-      throw new Error('sidecar offline');
-    });
-
-    const { ChatPage } = await import('../src/pages');
-    render(<ChatPage />);
-
-    fireEvent.click(await screen.findByRole('button', { name: /^spawn/i }));
-
-    expect(await screen.findByText(/sidecar offline/)).toBeInTheDocument();
   });
 });

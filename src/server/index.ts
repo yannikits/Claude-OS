@@ -367,6 +367,9 @@ export async function startServer(config: ServerConfig): Promise<ServerHandle> {
       ? {
           sessionRepo: config.multiUser.sessionRepo,
           userRepo: config.multiUser.userRepo,
+          ...(config.multiUser.adminEmails !== undefined
+            ? { adminEmails: config.multiUser.adminEmails }
+            : {}),
         }
       : {}),
   });

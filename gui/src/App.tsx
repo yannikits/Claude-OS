@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, Route, BrowserRouter as Router, Routes } from 'r
 import { ProfileDrawer } from './components/profile-drawer';
 import { QuickCaptureModal } from './components/quick-capture-modal';
 import { SidebarWorkspaceSwitcher } from './components/sidebar-workspace-switcher';
-import { type AuthUser, authMe, isCookieAuthed } from './lib/auth-api';
+import { type AuthUser, authMe, isCookieAuthed, type UserRole } from './lib/auth-api';
 import { setupBrowserDragDrop } from './lib/drag-drop';
 import {
   getAuthTransport,
@@ -23,6 +23,7 @@ import {
   AgentRunsPage,
   CatalogPage,
   ChatPage,
+  CodePage,
   Dashboard,
   McpClientsPage,
   SchedulePage,
@@ -52,6 +53,15 @@ interface NavEntry {
   readonly led: LedState;
   /** When true, only renders for admin users (CLAUDE_OS_ADMIN_EMAILS allowlist). */
   readonly adminOnly?: boolean;
+  /** Minimum effective role required to see this entry (MC-C). Mirrors the
+   *  server-side `roleAtLeast` gate; the route still enforces independently. */
+  readonly minRole?: UserRole;
+}
+
+const ROLE_RANK: Record<UserRole, number> = { viewer: 0, operator: 1, admin: 2 };
+/** Frontend mirror of `src/server/rbac.ts:roleAtLeast` for nav gating. */
+function roleAtLeast(role: UserRole, min: UserRole): boolean {
+  return ROLE_RANK[role] >= ROLE_RANK[min];
 }
 const NAV: readonly NavEntry[] = [
   { to: '/', label: 'Dashboard', section: 'overview', led: 'up' },
@@ -60,7 +70,8 @@ const NAV: readonly NavEntry[] = [
   { to: '/vault', label: 'Vault', section: 'content', led: 'idle' },
   { to: '/catalog', label: 'Catalog', section: 'content', led: 'idle' },
 
-  { to: '/chat', label: 'Chat', section: 'runtime', led: 'idle' },
+  { to: '/chat', label: 'Claude Chat', section: 'runtime', led: 'idle' },
+  { to: '/code', label: 'Claude Code', section: 'runtime', led: 'idle', minRole: 'operator' },
   { to: '/agent-runs', label: 'Agent Runs', section: 'runtime', led: 'idle' },
   { to: '/skill-review', label: 'Skill-Review', section: 'runtime', led: 'idle' },
   { to: '/schedule', label: 'Schedule', section: 'runtime', led: 'idle' },
@@ -90,16 +101,19 @@ interface LayoutProps {
   readonly authMode: AuthMode;
   readonly onLogout: () => void;
   readonly isAdmin: boolean;
+  readonly userRole: UserRole;
 }
 
-function Layout({ authMode, onLogout, isAdmin }: LayoutProps) {
+function Layout({ authMode, onLogout, isAdmin, userRole }: LayoutProps) {
   const showProfile = authMode === 'cookie' || authMode === 'token';
   // Group nav entries by section so we can render labeled rules between groups.
-  // Filter adminOnly entries when not admin.
+  // Filter adminOnly entries when not admin, and minRole entries below the
+  // user's effective role (MC-C).
   const grouped = (() => {
     const map = new Map<NavEntry['section'], NavEntry[]>();
     for (const n of NAV) {
       if (n.adminOnly === true && !isAdmin) continue;
+      if (n.minRole !== undefined && !roleAtLeast(userRole, n.minRole)) continue;
       const arr = map.get(n.section);
       if (arr === undefined) map.set(n.section, [n]);
       else arr.push(n);
@@ -185,6 +199,7 @@ interface AuthGateState {
   readonly mode: AuthMode;
   readonly allowRegistration: boolean;
   readonly isAdmin: boolean;
+  readonly userRole: UserRole;
   readonly ready: boolean;
   markAuthenticated(mode: 'cookie' | 'token', user?: AuthUser): void;
   markLoggedOut(): void;
@@ -199,10 +214,13 @@ function useAuthGate(): AuthGateState {
   });
   const [allowRegistration, setAllowRegistration] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userRole, setUserRole] = useState<UserRole>('viewer');
   const [ready, setReady] = useState<boolean>(() => isTauriRuntime());
 
   useEffect(() => {
     if (isTauriRuntime()) {
+      // Desktop is the single trusted owner — full access incl. Claude Code.
+      setUserRole('admin');
       setReady(true);
       return;
     }
@@ -212,6 +230,7 @@ function useAuthGate(): AuthGateState {
         if (cancelled) return;
         setAllowRegistration(me.allowRegistration);
         setIsAdmin(me.user?.isAdmin === true);
+        setUserRole(me.user?.role ?? 'viewer');
         if (me.user !== null && mode === 'none') setMode('cookie');
         setReady(true);
       })
@@ -227,12 +246,14 @@ function useAuthGate(): AuthGateState {
     mode,
     allowRegistration,
     isAdmin,
+    userRole,
     ready,
     markAuthenticated: (m) => setMode(m),
     markLoggedOut: () => {
       const t = getAuthTransport();
       if (t !== null) t.clearAuth();
       setIsAdmin(false);
+      setUserRole('viewer');
       setMode('none');
     },
   };
@@ -277,7 +298,12 @@ export function App() {
   }
 
   return (
-    <AuthenticatedApp authMode={gate.mode} onLogout={gate.markLoggedOut} isAdmin={gate.isAdmin} />
+    <AuthenticatedApp
+      authMode={gate.mode}
+      onLogout={gate.markLoggedOut}
+      isAdmin={gate.isAdmin}
+      userRole={gate.userRole}
+    />
   );
 }
 
@@ -285,9 +311,10 @@ interface AuthenticatedAppProps {
   readonly authMode: AuthMode;
   readonly onLogout: () => void;
   readonly isAdmin: boolean;
+  readonly userRole: UserRole;
 }
 
-function AuthenticatedApp({ authMode, onLogout, isAdmin }: AuthenticatedAppProps) {
+function AuthenticatedApp({ authMode, onLogout, isAdmin, userRole }: AuthenticatedAppProps) {
   const [showLoading, setShowLoading] = useState(true);
   const [failure, setFailure] = useState<SidecarFailedPayload | null>(null);
   const [lastInbox, setLastInbox] = useState<WatcherChangeEvent | null>(null);
@@ -469,11 +496,19 @@ function AuthenticatedApp({ authMode, onLogout, isAdmin }: AuthenticatedAppProps
           <Routes>
             <Route
               path="/"
-              element={<Layout authMode={authMode} onLogout={onLogout} isAdmin={isAdmin} />}
+              element={
+                <Layout
+                  authMode={authMode}
+                  onLogout={onLogout}
+                  isAdmin={isAdmin}
+                  userRole={userRole}
+                />
+              }
             >
               <Route index element={<Dashboard />} />
               <Route path="memory" element={<MemoryPage />} />
               <Route path="chat" element={<ChatPage />} />
+              {roleAtLeast(userRole, 'operator') && <Route path="code" element={<CodePage />} />}
               <Route path="catalog" element={<CatalogPage />} />
               <Route path="vault" element={<VaultPage />} />
               <Route path="agent-runs" element={<AgentRunsPage />} />

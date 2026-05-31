@@ -514,9 +514,17 @@ export interface PtyExitPayload {
   signal: string | null;
 }
 
+/**
+ * Spawn mode (MC-C). 'chat' forces `--tools ""` server-side (open to any
+ * authed user); 'code' runs the full agent and is gated to operator+ at the
+ * WS boundary. Default 'chat' (most-restrictive) when omitted.
+ */
+export type PtySpawnMode = 'chat' | 'code';
+
 export interface PtySpawnOpts {
   cols?: number;
   rows?: number;
+  mode?: PtySpawnMode;
 }
 
 export async function ptySpawn(
