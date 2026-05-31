@@ -1429,7 +1429,7 @@ Frontend-Nav/Route-Gating ist **kosmetisch** — ein Nutzer kann `pty.spawn` dir
 - [x] Server-Suite `npx vitest run` grün: 2072 passed / 8 skipped, 0 failures (inkl. neuer Gate-Tests).
 - [x] `gui/tests/chat-page.test.tsx` neu: ChatPage (chat) + CodePage (code) je isoliert grün (6/6). Tauri-Runtime-Flag im Test gesetzt + im `afterEach` aufgeräumt (kein Leak).
 - [ ] **Manueller Smoke (offen):** viewer-Login → nur "Claude Chat"; operator/admin → beide; Chat-Spawn ohne Tools (Datei-Edit → refused). Braucht laufenden Multi-User-Server.
-- [ ] **Kurz-ADR (offen):** Split + zentrales-Abo-Modell + Forward-Path Per-Seat dokumentieren.
+- [x] **Kurz-ADR:** `docs/architecture/adr/0045-claude-chat-code-split.md` (Split + zentrales-Abo-Modell + Forward-Path Per-Seat) + README-Index.
 - [ ] `gitnexus_impact` (CLAUDE.md §4) — in dieser Session nicht ausgeführt (gitnexus-MCP nicht angebunden); Impact manuell via Explore-Agenten geklärt.
 
 ### Review (2026-05-31)
